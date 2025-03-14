@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // bin/coder.js
 
-const { Config } = require('../lib/Config');
-const { UserInterface } = require('../lib/UserInterface');
-const { CodeProcessor } = require('../lib/CodeProcessor');
-const { AIClient } = require('../lib/AIClient'); // Import AIClient
+import { Config } from '../lib/Config.js';
+import { UserInterface } from '../lib/UserInterface.js';
+import { CodeProcessor } from '../lib/CodeProcessor.js';
+import { AIClient } from '../lib/AIClient.js'; // Import AIClient
 
 async function main() {
     try {
@@ -36,7 +36,7 @@ async function main() {
                     } else {
                         // applyDiffWithStaging already handles user interaction and file deletion on failure/discard
                         console.log("Changes not applied.  See above for details.");
-                        processResult = await ui.getUserInteraction();
+                        processResult = await ui.getUserInteraction(); // Get a new prompt
                     }
                 } else {
                     console.log("Changes not applied.");
@@ -52,7 +52,7 @@ async function main() {
         // Use a *new* AIClient instance for logging to avoid potential issues with the main instance
         try {
             const errorLogger = new AIClient(new Config());
-            errorLogger.logConversation({ type: 'error', error: error.message });
+            await errorLogger.logConversation({ type: 'error', error: error.message }); // Await the log
         } catch (logError) {
             console.error("Error logging the error:", logError);
         }
