@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// bin/coder.js
+// bin/kai.js
 
 import { Config } from '../lib/Config.js';
 import { UserInterface } from '../lib/UserInterface.js';
 import { CodeProcessor } from '../lib/CodeProcessor.js';
 import { AIClient } from '../lib/AIClient.js'; // Import AIClient
-
+import FullScreenUI from "../lib/iterativeDiff/FullScreenUI.js"
 async function main() {
     try {
         const config = new Config();
@@ -18,7 +18,8 @@ async function main() {
         const { userPrompt, mode } = interactionResult;
 
         if (mode === 'Request Code Changes') {
-            //for now
+            const fullScreenUI = new FullScreenUI();  // Only create ONE instance
+            fullScreenUI.show(); // Use .show() to activate and render
         } else if (mode === 'Ask a Question') {
             await codeProcessor.askQuestion(userPrompt);
         }
