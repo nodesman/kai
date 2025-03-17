@@ -25,10 +25,9 @@ async function main() {
         }
     } catch (error) {
         console.error("An error occurred:", error);
-        // Use a *new* AIClient instance for logging to avoid potential issues with the main instance
         try {
             const errorLogger = new AIClient(new Config());
-            await errorLogger.logConversation({ type: 'error', error: error.message }); // Await the log
+            await errorLogger.logConversation({ type: 'error', error: (error as Error).message });
         } catch (logError) {
             console.error("Error logging the error:", logError);
         }
