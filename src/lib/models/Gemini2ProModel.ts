@@ -1,12 +1,20 @@
 // lib/models/Gemini2ProModel.ts
-import BaseModel from "./BaseModel";  // Corrected import
-import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
-import { Config } from "../Config"; // Import Config
+import BaseModel from "./BaseModel";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Config } from "../Config";
+import { Conversation, Message } from "./Conversation"; // Import Conversation
 
-
-export interface GeminiConfig {
-    api_key: string;
+// Gemini-specific types (keep these for internal use)
+interface GeminiMessagePart {
+    text: string;
 }
+
+interface GeminiMessage {
+    role: "user" | "model";
+    parts: GeminiMessagePart[];
+}
+
+interface GeminiChatHistory extends Array<GeminiMessage> {}
 
 class Gemini2ProModel extends BaseModel {
     genAI: GoogleGenerativeAI;
@@ -20,58 +28,74 @@ class Gemini2ProModel extends BaseModel {
         this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     }
 
-    async getResponseFromAI(conversation: any): Promise<string> { // Added type for conversation
-        return this.queryGemini(conversation);
+    async getResponseFromAI(conversation: Conversation): Promise<string> { // Accepts Conversation ONLY
+        const geminiConversation = this.convertToGeminiConversation(conversation.getMessages());
+        return this.queryGemini(geminiConversation);
     }
 
-    async queryGemini(conversation: any): Promise<string> {  // Added type, return Promise<string>
-        console.log("Querying gemini")
-        return "";
-        // try {
-//             // const flattenedMessages = this.flattenMessages(conversation);
-//
-//             // Prepare chat history
-//             const chatHistory = conversation.map(msg => ({
-//                 type: msg.role === 'assistant' ? 'model' : 'user',
-//                 parts: [{ text: msg.content }],
-//             })).slice(0, -1); // all except the last one
-//
-//             if (chatHistory.length === 0 || chatHistory[0].role !== 'user') {
-//                 console.error("❌ Error: Gemini requires the first message to be from the user.");
-//                 return;
-//             }
-//
-//             const generationConfig = {
-//                 temperature: 1,
-//                 topP: 0.95,
-//                 topK: 64,
-//                 maxOutputTokens: 8192,
-//             };
-// x
-//             const chatSession = this.model.startChat({
-//                 history: chatHistory,
-//                 generationConfig,
-//             });
-//             // Use sendMessageStream here:
-//             const result = await chatSession.sendMessageStream(chatHistory);
-//             let assistantMessage = "";
-//             for await (const chunk of result.stream) {
-//                 assistantMessage += chunk.text();
-//             }
-//
-//             conversation.messages.push({ role: 'assistant', content: assistantMessage });
-//             return assistantMessage;
-//
-//         } catch (error) {
-//             this.handleError(error);
-//         }
+    async queryGemini(conversation: GeminiChatHistory): Promise<string> {
+
+        try {
+            const generationConfig = {
+                temperature: 1,
+                topP: 0.95,
+                topK: 64,
+                maxOutputTokens: 8192,
+            };
+
+            const chatSession = this.model.startChat({
+                history: conversation,
+                generationConfig,
+            });
+
+            // Get the last message (which *must* be from the user)
+            const lastMessage = conversation[conversation.length - 1];
+
+            if (!lastMessage || lastMessage.role !== "user") {
+                console.error("❌ Error: The last message in the conversation must be from the user.");
+                throw new Error("The last message in the conversation must be from the user.");
+            }
+
+            const lastMessageText = lastMessage.parts.map(part => part.text).join('');
+
+            // Use sendMessageStream with the *last message's text*
+            const result = await chatSession.sendMessageStream(lastMessageText);
+            let assistantMessage = "";
+            for await (const chunk of result.stream) {
+                assistantMessage += chunk.text();
+            }
+
+            return assistantMessage;
+
+        } catch (error) {
+            this.handleError(error); // handleError already throws, so this is sufficient.
+            // We don't need an explicit return here anymore, as handleError *always* throws.
+            return '';
+        }
     }
-    flattenMessages(conversation: any): any[] { // Added types
+
+
+    convertToGeminiConversation(messages: Message[]): GeminiChatHistory {
+        return messages.map(msg => {
+            if (!msg.role || !msg.content) {
+                console.warn("Skipping invalid message:", msg);
+                return null;
+            }
+
+            return {
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }],
+            };
+        }).filter(msg => msg !== null) as GeminiChatHistory;
+    }
+
+    flattenMessages(conversation: any): any[] { // No longer needed, but kept for potential future use
         return conversation.messages
             .flatMap((entry: any) => entry.messages ?? [entry])
-            .filter((msg: any) => msg.role && msg.content)
+            .filter((msg: any) => msg.role && msg.content);
     }
-    handleError(error: any): void { // Added type and return type
+
+    handleError(error: any): void {
         let errorMessage = "An error occurred while making the AI API request.";
 
         if (error.response) {
