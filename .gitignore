@@ -1,4 +1,5 @@
 .idea
 node_modules
 *.jsonl
-bin/
+bin
+cmake-build-debug

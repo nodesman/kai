@@ -1,0 +1,42 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(KaiDiff LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+# Use CMAKE_PREFIX_PATH instead of Qt6_DIR.  Prefer environment variable.
+#  Remove the explicit setting of Qt6_DIR. CMake will use CMAKE_PREFIX_PATH.
+# set(Qt6_DIR "/Users/rajsekharan/Qt/6.5.3/macos/lib/cmake/Qt6")  # REMOVE THIS LINE
+
+# Check if QT6_DIR is set as environment variable.  If so, use it.
+if(NOT DEFINED CMAKE_PREFIX_PATH)
+    if(DEFINED ENV{QT6_DIR})
+        set(CMAKE_PREFIX_PATH "$ENV{QT6_DIR}")
+        message(STATUS "Using Qt from QT6_DIR: $ENV{QT6_DIR}")
+    endif()
+endif()
+
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core) # Request all necessary modules
+
+add_executable(KaiDiff
+        main.cpp
+        mainwindow.cpp
+        mainwindow.h
+        diffview.h
+        diffview.cpp
+)
+
+# Link against all necessary Qt modules
+target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+
+# Optional: Set the output directory
+set_target_properties(KaiDiff PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# Optional: For installation (if you want to install the application)
+install(TARGETS KaiDiff DESTINATION bin)
