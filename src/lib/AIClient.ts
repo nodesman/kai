@@ -1,8 +1,9 @@
 // lib/AIClient.ts
 import path from 'path';
 import { FileSystem } from './FileSystem';
-import Gemini2ProModel, { GeminiConfig } from "./models/Gemini2ProModel";
-import {Config} from "./Config"; // Only import Gemini2ProModel
+import Gemini2ProModel from "./models/Gemini2ProModel";
+import {Config} from "./Config";
+import Conversation from "./models/Conversation"; // Only import Gemini2ProModel
 // import Models from "./models/modelsEnum"; // Not used, so commented out.  Good practice to remove unused imports.
 
 // In lib/AIClient.ts (or a separate types.ts file if you prefer)
@@ -56,18 +57,26 @@ class AIClient {
         }
     }
 
-    async getResponseFromAI(prompt: string) : Promise<string> { // Type annotation + Return type!
+    async getResponseFromAI(prompt: string): Promise<string> {
         try {
-            //Typo fix gisation to logConversation
+            // Create a new Conversation object for this single prompt
+            const conversation = new Conversation();
+            conversation.addMessage('user', prompt);
+
+            // Log the request (using the new conversation format)
             await this.logConversation({ type: 'request', prompt });
-            const response = await this.model.getResponseFromAI(prompt);
+
+            // Pass the Conversation object to the model's getResponseFromAI
+            const response = await this.model.getResponseFromAI(conversation);
+
+            // Log the response
             await this.logConversation({ type: 'response', response });
+
             return response;
         } catch (error) {
             console.error("Error in AIClient:", error);
-            // Correctly handle the 'unknown' type of error.
             await this.logConversation({ type: 'error', error: (error as Error).message });
-            return ""; //  Consider returning a more meaningful value or throwing an error
+            return ""; // Or throw the error, depending on your error handling strategy
         }
     }
 }

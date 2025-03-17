@@ -21,7 +21,8 @@ async function main() {
             const fullScreenUI = new FullScreenUI();  // Only create ONE instance
             fullScreenUI.show(); // Use .show() to activate and render
         } else if (mode === 'Ask a Question') {
-            await codeProcessor.askQuestion(userPrompt);
+            const response = await codeProcessor.askQuestion(userPrompt);
+            console.log(response);
         }
     } catch (error) {
         console.error("An error occurred:", error);
