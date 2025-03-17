@@ -1,8 +1,18 @@
-// lib/FullScreenUI.js
+// lib/iterativeDiff/FullScreenUI.ts
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
 
 class FullScreenUI {
+    screen: blessed.Widgets.Screen;  // Add property declarations with types
+    grid: any; // TODO: Replace 'any' with the correct contrib.grid type
+    leftPane: blessed.Widgets.BoxElement;
+    promptHistoryBox: blessed.Widgets.ScrollableBoxElement;
+    currentPromptBox: blessed.Widgets.BoxElement;
+    inputBox: blessed.Widgets.TextboxElement;
+    rightPane: blessed.Widgets.BoxElement;
+    fileList: blessed.Widgets.ListElement;
+    diffBox: blessed.Widgets.ScrollableBoxElement;
+
     constructor() {
         this.screen = blessed.screen({ smartCSR: true });
         this.screen.title = 'Kai - Code Review';

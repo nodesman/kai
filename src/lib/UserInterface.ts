@@ -1,21 +1,18 @@
-// lib/UserInterface.js
+// lib/UserInterface.ts
 import inquirer from 'inquirer';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises'; // Use fs.promises for async operations
-import { FileSystem } from './FileSystem.ts';
-import { fileURLToPath } from 'url'; // Import for __dirname
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { FileSystem } from './FileSystem';
 
 class UserInterface {
+    fs: FileSystem; // Declare the 'fs' property
+
     constructor() {
         this.fs = new FileSystem();
     }
 
-    async getPromptFromSublime() {
+    async getPromptFromSublime(): Promise<string> {
         const tempFilePath = path.join(__dirname, '../temp_prompt.txt'); // Correct relative path
         const sublProcess = spawn('subl', ['-w', tempFilePath], { stdio: 'inherit' });
 
@@ -41,7 +38,7 @@ class UserInterface {
     }
 
 
-    async getUserInteraction() {
+    async getUserInteraction(): Promise<{ userPrompt: string; mode: string } | null> {
         try {
             const { mode } = await inquirer.prompt([
                 {
@@ -52,7 +49,7 @@ class UserInterface {
                 },
             ]);
 
-            let userPrompt = ""; // Initialize userPrompt
+            let userPrompt: string = ""; // Initialize userPrompt
 
             if (mode === 'Ask a Question') {
                 userPrompt = await this.getPromptFromSublime();

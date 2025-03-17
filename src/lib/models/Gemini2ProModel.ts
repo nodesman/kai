@@ -1,21 +1,32 @@
-// lib/models/Gemini2ProModel.js
-import BaseModel from "./BaseModel.ts";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// lib/models/Gemini2ProModel.ts
+import BaseModel from "./BaseModel";  // Corrected import
+import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
+import { Config } from "../Config"; // Import Config
+
+
+export interface GeminiConfig {
+    api_key: string;
+}
 
 class Gemini2ProModel extends BaseModel {
-    constructor(config) {
+    genAI: GoogleGenerativeAI;
+    modelName: string;
+    model: any; // Ideally, this should be a more specific type from the Gemini API
+
+    constructor(config: Config) {
         super(config);
-        this.genAI = new GoogleGenerativeAI(this.config.get('gemini').api_key);
-        this.modelName = "gemini-2.0-pro-exp-02-05"; // CORRECT MODEL NAME
+        this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
+        this.modelName = "gemini-2.0-pro-exp-02-05";
         this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     }
 
-    async getResponseFromAI(conversation) {
+    async getResponseFromAI(conversation: any): Promise<string> { // Added type for conversation
         return this.queryGemini(conversation);
     }
 
-    async queryGemini(conversation) {
+    async queryGemini(conversation: any): Promise<string> {  // Added type, return Promise<string>
         console.log("Querying gemini")
+        return "";
         // try {
 //             // const flattenedMessages = this.flattenMessages(conversation);
 //
@@ -55,12 +66,12 @@ class Gemini2ProModel extends BaseModel {
 //             this.handleError(error);
 //         }
     }
-    flattenMessages(conversation) {
+    flattenMessages(conversation: any): any[] { // Added types
         return conversation.messages
-            .flatMap(entry => entry.messages ?? [entry]) // Flatten in case of nested arrays
-            .filter(msg => msg.role && msg.content) // Ensure valid messages
+            .flatMap((entry: any) => entry.messages ?? [entry])
+            .filter((msg: any) => msg.role && msg.content)
     }
-    handleError(error) {
+    handleError(error: any): void { // Added type and return type
         let errorMessage = "An error occurred while making the AI API request.";
 
         if (error.response) {

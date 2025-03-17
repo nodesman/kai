@@ -4,7 +4,7 @@
   "description": "An AI-powered coding assistant",
   "main": "src/lib/index.js",
   "bin": {
-    "kai": "src/kai.ts"
+    "kai": "bin/kai.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -28,5 +28,10 @@
     "js-yaml": "^4.1.0",
     "typescript": "^5.8.2"
   },
-  "type": "module"
+  "devDependencies": {
+    "@types/blessed": "^0.1.25",
+    "@types/inquirer": "^9.0.7",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.10"
+  }
 }

@@ -3,7 +3,7 @@ import path from 'path';
 import ignore from 'ignore';
 
 class FileSystem {
-    async getProjectFiles(projectRoot) {
+    async getProjectFiles(projectRoot: string): Promise<string[]> {
         const gitignorePath = path.join(projectRoot, '.gitignore');
         let gitignoreContent = '';
         try {
@@ -16,26 +16,25 @@ class FileSystem {
         const ig = ignore().add(gitignoreContent);
 
         const ignorePatterns = [
-            'node_modules', // No trailing slash, handles both file and directory
+            'node_modules',
             '.git',
             '.idea',
             '.vscode',
             'dist',
             'build',
             'coverage',
-            '.*.swp', // simplified form of your regex
+            '.*.swp',
             '~'
         ];
 
         ig.add(ignorePatterns);
 
 
-        const isRelevant = (filePath, isDirectory = false) => {
+        const isRelevant = (filePath: string, isDirectory = false): boolean => {
             const relativePath = path.relative(projectRoot, filePath);
-            //  Check if it's a directory and if it's ignored directly.
             if (isDirectory) {
                 for (const pattern of ignorePatterns) {
-                    if (relativePath === pattern || relativePath.startsWith(pattern + path.sep)) { //Crucial: path.sep for cross-platform
+                    if (relativePath === pattern || relativePath.startsWith(pattern + path.sep)) {
                         return false;
                     }
                 }
@@ -44,9 +43,9 @@ class FileSystem {
             return !ig.ignores(relativePath);
         };
 
-        const files = [];
+        const files: string[] = [];
 
-        const findFiles = async (dir) => {
+        const findFiles = async (dir: string): Promise<void> => {
             const items = await fs.readdir(dir, { withFileTypes: true });
 
             for (const item of items) {
@@ -54,12 +53,11 @@ class FileSystem {
                 const relativePath = path.relative(projectRoot, fullPath);
 
                 if (item.isDirectory()) {
-                    // Early check for directory exclusion
                     if (!isRelevant(fullPath, true)) {
                         console.log(`Skipping directory (gitignore - full exclusion): ${relativePath}`);
-                        continue; // Skip the entire directory
+                        continue;
                     }
-                    await findFiles(fullPath); // Proceed if not fully excluded
+                    await findFiles(fullPath);
 
                 } else if (item.isFile()) {
                     if (isRelevant(fullPath)) {
@@ -75,78 +73,97 @@ class FileSystem {
         return files;
     }
 
-    // ... (rest of FileSystem.js methods remain the same) ...
 
-    async readFileContents(filePaths) {
-        const fileContents = {};
+
+    async readFileContents(filePaths: string[]): Promise<{ [filePath: string]: string | null }> {
+        const fileContents: { [filePath: string]: string | null } = {};
         for (const filePath of filePaths) {
             try {
-                if (await this.isTextFile(filePath)) { // Check if it's a text file
-                    const content = await fs.readFile(filePath, 'utf-8');
-                    fileContents[filePath] = content;
+                if (await this.isTextFile(filePath)) {
+                    const content = await this.readFile(filePath);
+                    fileContents[filePath] = content; // No longer need to check if content exists.
                 } else {
-                    console.log(`Skipping binary file: ${filePath}`); // Log skipped files
+                    console.log(`Skipping binary file: ${filePath}`);
+                    fileContents[filePath] = null;
+
                 }
-            } catch (error) {
+            } catch (error: any) {
                 console.error(`Error reading file ${filePath}: ${error.message}`);
-                // Don't throw here; continue with other files
+                fileContents[filePath] = null; // Handle the case where reading fails
             }
         }
         return fileContents;
     }
 
-    async writeFile(filePath, content) {
+
+    async writeFile(filePath: string, content: string): Promise<void> {
         try {
-            await fs.writeFile(filePath, content);
-        } catch (error) {
+            const directory = path.dirname(filePath);
+            try {
+                await fs.access(directory);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                    await fs.mkdir(directory, { recursive: true });
+                } else {
+                    throw error;
+                }
+            }
+            await fs.writeFile(filePath, content, 'utf-8');
+
+        } catch (error: any) {
             console.error(`Error writing file ${filePath}: ${error}`);
-            throw error; // Re-throw to handle it higher up
+            throw error;
         }
     }
 
-    async deleteFile(filePath) {
+    async deleteFile(filePath: string): Promise<void> {
         if (filePath) {
             try {
-                const stats = await fs.stat(filePath).catch(() => null); // Check if file exists without throwing
-                if (stats && stats.isFile()) { // Check if it's a file
+                const stats = await fs.stat(filePath).catch(() => null);
+                if (stats && stats.isFile()) {
                     await fs.unlink(filePath);
                     console.log(`Deleted file: ${filePath}`);
                 } else {
                     console.log(`File does not exist: ${filePath}`);
                 }
-            } catch (error) {
+            } catch (error: any) {
                 console.error(`Error deleting file ${filePath}: ${error}`);
-                throw error; // Re-throw
+                throw error;
             }
         }
     }
 
-    async readFile(filePath) {
+    async readFile(filePath: string): Promise<string | null> {
         try {
             const content = await fs.readFile(filePath, 'utf-8');
             return content;
         }
-        catch(error) {
+        catch(error: any) {
             console.error(`Error reading file in readFile: ${filePath} : ${error}`);
-            return null; //Don't re-throw.
+            return null;
         }
     }
-    async isTextFile(filePath) {
+    async isTextFile(filePath: string): Promise<boolean> {
         try {
-            const buffer = await fs.readFile(filePath, { length: 1024 }); // Read first 1024 bytes
-            const textExtensions = ['.txt', '.js', '.ts', '.jsx', '.py', '.java', '.cpp', '.h', '.html', '.css', '.json', '.xml', '.md', '.yaml', '.yml', '.sh', '.config', '.log', '.csv', '.tsv']; // Add more as needed.
+            const buffer = await fs.readFile(filePath);
+            const textExtensions = ['.txt', '.js', '.ts', '.jsx', '.py', '.java', '.cpp', '.h', '.html', '.css', '.json', '.xml', '.md', '.yaml', '.yml', '.sh', '.config', '.log', '.csv', '.tsv'];
             const ext = path.extname(filePath).toLowerCase();
 
-            if (textExtensions.includes(ext)) { // Check extension first
+            if (textExtensions.includes(ext)) {
                 return true;
             }
 
-            // Check for null bytes in the buffer (heuristic for binary files)
-            return !buffer.includes(0);
+            for (let i = 0; i < buffer.length; i++) {
+                if (buffer[i] === 0) {
+                    return false;
+                }
+            }
+            return true;
 
-        } catch (error) {
+
+        } catch (error: any) {
             console.error(`Error checking if file is text: ${filePath}`, error);
-            return false; // Assume non-text if there's an error (e.g., file not found)
+            return false;
         }
     }
 }
