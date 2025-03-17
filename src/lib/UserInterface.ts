@@ -3,7 +3,7 @@ import inquirer from 'inquirer';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises'; // Use fs.promises for async operations
-import { FileSystem } from './FileSystem.js';
+import { FileSystem } from './FileSystem.ts';
 import { fileURLToPath } from 'url'; // Import for __dirname
 import { dirname } from 'path';
 

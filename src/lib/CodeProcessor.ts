@@ -1,16 +1,16 @@
 // lib/CodeProcessor.js
 import path from 'path';
-import { FileSystem } from './FileSystem.js';
-import { AIClient } from './AIClient.js';
+import { FileSystem } from './FileSystem.ts';
+import { AIClient } from './AIClient.ts';
 import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { execSync, spawn } from 'child_process';
 import inquirer from 'inquirer';
-
+import Models from "./models/modelsEnum.ts";
 class CodeProcessor {
     constructor(config) {
         this.config = config;
         this.fs = new FileSystem();
-        this.aiClient = new AIClient(this.config);
+        this.aiClient = new AIClient(config, Models.Gemini2Pro);
         this.projectRoot = process.cwd(); // Use the CURRENT WORKING DIRECTORY
         // No srcDir needed anymore!
     }

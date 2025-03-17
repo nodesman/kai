@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // bin/kai.js
 
-import { Config } from '../lib/Config.js';
-import { UserInterface } from '../lib/UserInterface.js';
-import { CodeProcessor } from '../lib/CodeProcessor.js';
-import { AIClient } from '../lib/AIClient.js'; // Import AIClient
-import FullScreenUI from "../lib/iterativeDiff/FullScreenUI.js"
+import { Config } from './lib/Config';
+import { UserInterface } from './lib/UserInterface';
+import { CodeProcessor } from './lib/CodeProcessor';
+import { AIClient } from './lib/AIClient'; // Import AIClient
+import FullScreenUI from "./lib/iterativeDiff/FullScreenUI"
 async function main() {
     try {
         const config = new Config();
