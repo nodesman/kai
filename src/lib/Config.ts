@@ -6,6 +6,7 @@ import chalk from 'chalk';
 
 // --- Interfaces (Ideally in a separate types.ts file) ---
 interface GeminiConfig {
+    max_prompt_tokens?: number;
     api_key: string;
     model_name?: string;
     rate_limit?: {
