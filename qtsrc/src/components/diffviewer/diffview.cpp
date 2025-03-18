@@ -29,7 +29,13 @@ DiffView::DiffView(QWidget *parent)
 
     // Add file list
     splitter->addWidget(m_fileListView);
-    splitter->addWidget(new QWidget());
+
+    // Scroll Area Setup
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    splitter->addWidget(m_scrollArea);
 
     // Set the layout!
     setLayout(mainLayout);
