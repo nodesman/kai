@@ -6,7 +6,7 @@
 #include <QTextEdit>
 #include <QLineEdit>
 #include <QSplitter>
-#include "diffview.h" // Include DiffView
+#include "diffviewer/diffview.h" // Include DiffView
 
 
 class MainWindow : public QMainWindow {

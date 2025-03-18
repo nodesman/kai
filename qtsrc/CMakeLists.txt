@@ -28,10 +28,12 @@ add_executable(KaiDiff
         src/main.cpp
         src/components/mainwindow.cpp
         src/components/mainwindow.h
-        src/components/diffview.h
-        src/components/diffview.cpp
+        src/components/diffviewer/diffview.h
+        src/components/diffviewer/diffview.cpp
         src/models/diffmodel.cpp
         src/models/diffmodel.h
+        src/components/diffviewer/DiffContentWidget.cpp
+        src/components/diffviewer/DiffContentWidget.h
 )
 
 # Link against all necessary Qt modules
