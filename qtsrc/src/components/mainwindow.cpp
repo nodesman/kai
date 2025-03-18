@@ -3,161 +3,62 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
-#include <QListView>       // For the file list
-#include "../models/diffmodel.h"    // For the DiffModel
-
+#include <QListView>
+#include "../models/diffmodel.h"
+#include "../models/chatmodel.h" // Include the ChatModel
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setupUI();
-    // createSampleDiff(); // REMOVED: We use the model now
 }
 
-MainWindow::~MainWindow()
-{
-}
+MainWindow::~MainWindow() {}
 
 void MainWindow::setupUI()
 {
     // --- Main Window Setup ---
     this->setWindowTitle("LLM Chat Interface");
-    this->resize(800, 600);
-
-    // --- Create Widgets ---
-    conversationHistory = new QTextEdit(this);
-    conversationHistory->setReadOnly(true);
-    promptInput = new QLineEdit(this);
-    // llmResponse = new QTextEdit(this); // REMOVED
-    // llmResponse->setReadOnly(true);
-
-    // --- Left Splitter (Conversation History and Prompt Input) ---
-    leftSplitter = new QSplitter(Qt::Vertical, this);
-    leftSplitter->addWidget(conversationHistory);
-
-    QHBoxLayout *inputLayout = new QHBoxLayout;
-    inputLayout->addWidget(promptInput);
-
-    QPushButton *sendButton = new QPushButton("Send", this);
-    inputLayout->addWidget(sendButton);
-
-    QWidget* inputWidget = new QWidget();
-    inputWidget->setLayout(inputLayout);
-    leftSplitter->addWidget(inputWidget);
-
-    leftSplitter->setStretchFactor(0, 1);
-    leftSplitter->setStretchFactor(1, 1);
+    this->resize(1024, 768);
 
     // --- Main Splitter (Left and Right Halves) ---
     mainSplitter = new QSplitter(Qt::Horizontal, this);
-    mainSplitter->addWidget(leftSplitter);
+
+    // --- Chat Interface ---
+    chatInterface = new ChatInterface(this);
+    ChatModel* chatModel = new ChatModel(this);  // Create the ChatModel
+
+    mainSplitter->addWidget(chatInterface);
 
     // --- Diff View and Model ---
     diffView = new DiffView(this);
     diffModel = new DiffModel(this); // Create the model
-    diffView->setModel(diffModel);     // Connect the view to the model
+    diffView->setModel(diffModel);      // Connect the view to the model
     mainSplitter->addWidget(diffView);
 
-
-    mainSplitter->setStretchFactor(0, 1);
-    mainSplitter->setStretchFactor(1, 1);
+    mainSplitter->setStretchFactor(0, 60);  // Chat interface takes 60%
+    mainSplitter->setStretchFactor(1, 40); // Diff view takes 40%
 
     // --- Set Central Widget ---
     this->setCentralWidget(mainSplitter);
 
-    // --- Connections ---
-    connect(promptInput, &QLineEdit::returnPressed, this, &MainWindow::sendPrompt);
-    connect(sendButton, &QPushButton::clicked, this, &MainWindow::sendPrompt);
-
-    // --- Placeholder Data (Example) ---  // MOVED to a separate function
-    populatePlaceholderData();
+    // --- Placeholder Chat Data ---  <--  ADD THIS SECTION
+    populatePlaceholderChatData(chatModel);
+    chatInterface->setModel(chatModel);     // Connect to the model
 }
 
-void MainWindow::sendPrompt() {
-    QString promptText = promptInput->text();
-    if (!promptText.isEmpty()) {
-        conversationHistory->append("You: " + promptText);
-        promptInput->clear();
+// --- Placeholder Chat Data Function ---  <--  ADD THIS FUNCTION
+void MainWindow::populatePlaceholderChatData(ChatModel* chatModel) {
+    if (!chatModel) return; // Safety check
 
-        // --- Simulate receiving data from Node.js (Replace with actual IPC) ---
-        // In a real application, this is where you'd send the prompt to Node.js
-        // and receive the response (including the file list and colorized content).
-        // For this example, we're just using placeholder data.
+    chatModel->addMessage(ChatModel::User, "What is the capital of France?");
+    chatModel->addMessage(ChatModel::LLM, "The capital of France is Paris.");
+    chatModel->addMessage(ChatModel::User, "Can you write a Python function to calculate the factorial of a number?");
+    chatModel->addMessage(ChatModel::LLM, "`python\ndef factorial(n):\n  if n == 0:\n    return 1\n  else:\n    return n * factorial(n-1)\n`");
+    chatModel->addMessage(ChatModel::User, "Explain how a binary search tree works.");
+    chatModel->addMessage(ChatModel::LLM, "A binary search tree (BST) is a tree data structure in which each node has at most two children, which are referred to as the left child and the right child.  In a BST, the value of all the nodes in the left subtree of a node are less than the node's value, and all the nodes in the right subtree have values greater than the node's value. This property allows for efficient searching, insertion, and deletion of nodes.  The average time complexity for search, insert, and delete operations is O(log n), where n is the number of nodes.  However, in the worst case (e.g., a skewed tree), these operations can take O(n) time.");
+    chatModel->addMessage(ChatModel::User, "Thank You");
+    chatModel->addMessage(ChatModel::LLM, "You are welcome!");
 
-        // --- Simulate receiving an "updateDiff" message ---
-        // (Replace this with your actual IPC mechanism)
-        // Assume this data comes from Node.js after processing the prompt.
-        QStringList filePaths = {
-            "src/components/Form.js",
-            "src/components/Button.js"
-        };
-
-        QList<QString> fileContents;
-        fileContents <<
-            "+import styles from './Form.module.css';\n"
-            "  import React from 'react';\n"
-            "\n"
-            "  const Form = () => {\n"
-            "-    return (\n"
-            "+    return ( // No style\n"
-            "+        <form className={styles.form}>\n"
-            "          <label htmlFor=\"name\">Name:</label>\n"
-            "          <input type=\"text\" id=\"name\" name=\"name\" />\n"
-            "-         <button>Submit</button>\n"
-            "+         <button className={styles.button}>Submit</button>\n"
-            "+        </form> // Added form\n"
-            "      );\n"
-            "  };\n"
-            "\n"
-            "  export default Form;\n";
-
-        fileContents <<
-            "  import React from 'react';\n"
-            "\n"
-            "  const Button = () => {\n"
-            "+    return <button>Click Me!</button>;\n"
-            "  };\n"
-            "\n"
-            "  export default Button;\n";
-        diffModel->setFiles(filePaths, fileContents);
-
-    }
-}
-
-void MainWindow::populatePlaceholderData() {
-    // This function is now used to populate initial placeholder data.
-    QStringList filePaths = {
-        "src/components/Form.js",
-        "src/components/Button.js"
-    };
-
-    QList<QString> fileContents; //create placeholder content.
-    fileContents <<
-        "+import styles from './Form.module.css';\n"
-        "  import React from 'react';\n"
-        "\n"
-        "  const Form = () => {\n"
-        "-    return (\n"
-        "+    return ( // No style\n"
-        "+        <form className={styles.form}>\n"
-        "          <label htmlFor=\"name\">Name:</label>\n"
-        "          <input type=\"text\" id=\"name\" name=\"name\" />\n"
-        "-         <button>Submit</button>\n"
-        "+         <button className={styles.button}>Submit</button>\n"
-        "+        </form> // Added form\n"
-        "      );\n"
-        "  };\n"
-        "\n"
-        "  export default Form;\n";
-
-    fileContents <<
-        "  import React from 'react';\n"
-        "\n"
-        "  const Button = () => {\n"
-        "+    return <button>Click Me!</button>;\n"
-        "  };\n"
-        "\n"
-        "  export default Button;\n";
-
-    diffModel->setFiles(filePaths, fileContents);
 }

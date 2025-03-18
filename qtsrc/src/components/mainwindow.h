@@ -3,11 +3,10 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QTextEdit>
-#include <QLineEdit>
 #include <QSplitter>
-#include "diffviewer/diffview.h" // Include DiffView
-
+#include "diffviewer/diffview.h"
+#include "chatinterface.h" // Include the new ChatInterface
+#include "../models/diffmodel.h" //For the DiffModel
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -16,22 +15,16 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    private slots: // Add the slots section
-        void sendPrompt();
-
 private:
     void setupUI();
-    // void createSampleDiff(); // Removed: We'll use the model now.
+
+    void populatePlaceholderChatData(ChatModel *chatModel);
 
     QSplitter *mainSplitter;
-    QSplitter *leftSplitter;
+    DiffView *diffView;
+    DiffModel *diffModel;
+    ChatInterface *chatInterface; // Use the new ChatInterface widget
 
-    QTextEdit *conversationHistory;
-    QLineEdit *promptInput;
-    // QTextEdit *llmResponse; // Removed:  We're using DiffView
-    DiffView *diffView;  // Pointer to DiffView
-    DiffModel *diffModel; // Pointer to DiffModel
-    void populatePlaceholderData();
 };
 
 #endif // MAINWINDOW_H
