@@ -23,6 +23,8 @@ public:
             Removed
         } changeType;
         QString text;
+        int originalLineNumber;
+        int modifiedLineNumber;
     };
 
     DiffView(QWidget *parent = nullptr);

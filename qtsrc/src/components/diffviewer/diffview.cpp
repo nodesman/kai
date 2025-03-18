@@ -57,20 +57,21 @@ void DiffView::onFileSelectionChanged(const QModelIndex &index) {
     if (!m_model || !index.isValid()) {
         return;
     }
+    QString fileName = m_model->data(index, Qt::DisplayRole).toString(); //get the name from the model
 
     QString fileContent = m_model->getFileContent(index.row());
     QList<DiffLine> diffData = parseDiffContent(fileContent);
 
     // Calculate line height *before* creating the content widget
     if (m_lineHeight == 0) {
-        QFontMetrics fontMetrics(QFont("Courier New", 10));
+        QFontMetrics fontMetrics(QFont("Courier New", 12));
         m_lineHeight = fontMetrics.height();
     }
 
     // Create or recreate the DiffContentWidget
     m_diffContent.reset(new DiffContentWidget(m_scrollArea)); // Pass scroll area as parent
     m_scrollArea->setWidget(m_diffContent.data()); // Set the new widget
-    m_diffContent->setDiffData(diffData, m_lineHeight); // Pass the data
+    m_diffContent->setDiffData(diffData, fileName);
 
 }
 

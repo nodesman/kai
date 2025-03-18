@@ -14,7 +14,7 @@ class DiffContentWidget : public QWidget {
 
 public:
     DiffContentWidget(QWidget *parent = nullptr);
-    void setDiffData(const QList<DiffView::DiffLine>& diffData, int lineHeight);
+    void setDiffData(const QList<DiffView::DiffLine> &diffData, const QString &fileName);
     QSize sizeHint() const override;  // Important for QScrollArea
 
 protected:
@@ -26,6 +26,7 @@ private:
     QList<int> m_changeLines;
     int m_firstChangeLine;
     int m_lineHeight;
+    QString m_fileName;
 };
 
 #endif // DIFFCONTENTWIDGET_H
