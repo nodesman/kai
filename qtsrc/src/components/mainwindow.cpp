@@ -7,6 +7,7 @@
 #include "../models/diffmodel.h"
 #include "../models/chatmodel.h" // Include the ChatModel
 #include <QDebug>
+#include <QTimer> // Include QTimer
 #include "chatinterface/chatinterface.h"
 
 MainWindow::MainWindow(QWidget *parent)
@@ -28,7 +29,7 @@ void MainWindow::setupUI()
 
     // --- Chat Interface ---
     chatInterface = new ChatInterface(this);
-    ChatModel* chatModel = new ChatModel(this);  // Create the ChatModel
+    chatModel = new ChatModel(this);  // Create the ChatModel (make it a member variable)
 
     mainSplitter->addWidget(chatInterface);
 
@@ -44,22 +45,65 @@ void MainWindow::setupUI()
     // --- Set Central Widget ---
     this->setCentralWidget(mainSplitter);
 
-    // --- Placeholder Chat Data ---  <--  ADD THIS SECTION
-    populatePlaceholderChatData(chatModel);
+    // --- Placeholder Chat Data and Simulation ---
+    populatePlaceholderChatData(); // Call without argument (we use the member variable)
     chatInterface->setModel(chatModel);     // Connect to the model
+
+     // Connect a slot to simulate user input and LLM responses
+    QTimer::singleShot(500, this, &MainWindow::simulateChatInteraction); // Start simulation after 500ms
 }
 
-// --- Placeholder Chat Data Function ---  <--  ADD THIS FUNCTION
-void MainWindow::populatePlaceholderChatData(ChatModel* chatModel) {
+// --- Placeholder Chat Data Function (Modified) ---
+void MainWindow::populatePlaceholderChatData() { // No argument now
     if (!chatModel) return; // Safety check
 
-    chatModel->addMessage(ChatModel::User, "What is the capital of France?");
-    chatModel->addMessage(ChatModel::LLM, "The capital of France is Paris.");
-    chatModel->addMessage(ChatModel::User, "Can you write a Python function to calculate the factorial of a number?");
-    chatModel->addMessage(ChatModel::LLM, "`python\ndef factorial(n):\n  if n == 0:\n    return 1\n  else:\n    return n * factorial(n-1)\n`");
-    chatModel->addMessage(ChatModel::User, "Explain how a binary search tree works.");
-    chatModel->addMessage(ChatModel::LLM, "A binary search tree (BST) is a tree data structure in which each node has at most two children, which are referred to as the left child and the right child.  In a BST, the value of all the nodes in the left subtree of a node are less than the node's value, and all the nodes in the right subtree have values greater than the node's value. This property allows for efficient searching, insertion, and deletion of nodes.  The average time complexity for search, insert, and delete operations is O(log n), where n is the number of nodes.  However, in the worst case (e.g., a skewed tree), these operations can take O(n) time.");
-    chatModel->addMessage(ChatModel::User, "Thank You");
-    chatModel->addMessage(ChatModel::LLM, "You are welcome!");
+    // We don't add initial messages here anymore.  They're added in the simulation.
+}
 
+
+void MainWindow::simulateChatInteraction()
+{
+    if (!chatModel) return; //Safety Check
+
+    // Simulate user typing "What is the capital of France?"
+    chatModel->addMessage(ChatModel::User, "What is the capital of France?");
+    //Simulate LLM Response
+    chatModel->setRequestPending(true);
+    QTimer::singleShot(2000, this, [this]() { // Simulate a 2-second delay
+        if(chatModel)
+        {
+            chatModel->addMessage(ChatModel::LLM, "The capital of France is Paris.");
+            chatModel->setRequestPending(false);
+
+             // Simulate the next user question after LLM responds.
+            QTimer::singleShot(1000, this, [this]() {  //Another delay before next message
+               if(chatModel){
+                   chatModel->addMessage(ChatModel::User, "Can you write a Python function to calculate the factorial of a number?");
+                   chatModel->setRequestPending(true);
+
+                    QTimer::singleShot(3000, this, [this](){ // Simulate LLM processing.
+                        if(chatModel) {
+                            chatModel->addMessage(ChatModel::LLM, "`python\ndef factorial(n):\n  if n == 0:\n    return 1\n  else:\n    return n * factorial(n-1)\n`");
+                            chatModel->setRequestPending(false);
+
+                            //Simulate user saying "Thank you"
+                            QTimer::singleShot(1000, this, [this]() {
+                               if(chatModel) {
+                                   chatModel->addMessage(ChatModel::User, "Thank you");
+                                   chatModel->setRequestPending(true);
+                                   // Simulate LLM response to thank you
+                                   QTimer::singleShot(1500, this, [this](){
+                                       if(chatModel) {
+                                           chatModel->addMessage(ChatModel::LLM, "You are welcome!");
+                                           chatModel->setRequestPending(false);
+                                       }
+                                   });
+                               }
+                            });
+                        }
+                    });
+               }
+            });
+        }
+    });
 }

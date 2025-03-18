@@ -141,7 +141,7 @@ void ConversationHistory::updateHistory() {
         QTextCharFormat textFormat;
         textFormat.setFont(QFont("Verdana", 12));
         frameCursor.setCharFormat(textFormat);
-        
+
 
 
         if (msgText.isEmpty()) {

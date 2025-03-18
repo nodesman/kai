@@ -2,7 +2,7 @@
 
 ChatModel::ChatModel(QObject *parent)
     : QAbstractListModel(parent),
-    m_requestPending(false)
+    m_requestPending(false)  // Initialize to false
 {
 }
 

@@ -18,13 +18,16 @@ public:
 private:
     void setupUI();
 
+    void populatePlaceholderChatData();
+
     void populatePlaceholderChatData(ChatModel *chatModel);
 
     QSplitter *mainSplitter;
     DiffView *diffView;
     DiffModel *diffModel;
     ChatInterface *chatInterface; // Use the new ChatInterface widget
-
+    void simulateChatInteraction();
+    ChatModel * chatModel;
 };
 
 #endif // MAINWINDOW_H

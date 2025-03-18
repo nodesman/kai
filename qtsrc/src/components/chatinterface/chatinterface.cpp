@@ -65,23 +65,19 @@ void ChatInterface::setupUI() {
 
 void ChatInterface::setModel(ChatModel *model) {
     if (chatModel) {
-        // Disconnect the requestPendingChanged signal from the old model.  We
-        // still need this, since *this* class handles the status bar updates.
+        // Disconnect the requestPendingChanged signal from the old model.
         disconnect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
     }
 
     chatModel = model;
 
     if (chatModel) {
-         // Connect to the new model.  We only need to connect to requestPendingChanged
-        // here, as rowsInserted is handled by ConversationHistory.
-        // connect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
+        // Connect to the new model.
+        connect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
         conversationHistory->setModel(chatModel); // Pass the model to the component
-        handleRequestPendingChanged(); // Update status
+        handleRequestPendingChanged(); // Update status, reflecting the initial state
     }
 }
-
-// Remove updateConversationHistory.  It's now handled by ConversationHistory.
 
 void ChatInterface::keyPressEvent(QKeyEvent *event) {
 #ifdef Q_OS_MAC
@@ -89,7 +85,10 @@ void ChatInterface::keyPressEvent(QKeyEvent *event) {
 #else
     if (event->key() == Qt::Key_Return && event->modifiers() & Qt::ControlModifier) {
 #endif
-        emit sendMessage();
+        // Only emit sendMessage if a request is NOT pending.
+        if (!chatModel->requestPending()) {
+            emit sendMessage();
+        }
     }  else {
         QWidget::keyPressEvent(event);
     }
@@ -97,27 +96,29 @@ void ChatInterface::keyPressEvent(QKeyEvent *event) {
 
 void ChatInterface::onSendPrompt() {
     QString promptText = promptInput->toPlainText();
-    if (!promptText.isEmpty() && chatModel) {
-        // chatModel->addMessage(ChatModel::User, promptText);
-        // promptInput->clear();
-        // chatModel->setRequestPending(true);
-        // QTimer::singleShot(2000, this, [this, promptText]() {
-        //     if(chatModel){
-        //         chatModel->addMessage(ChatModel::LLM, "Response to: " + promptText);
-        //         chatModel->setRequestPending(false);
-        //     }
-        // });
+    if (!promptText.isEmpty() && chatModel && !chatModel->requestPending()) { // Check requestPending
+        chatModel->addMessage(ChatModel::User, promptText);
+        promptInput->clear();
+        chatModel->setRequestPending(true); // Set requestPending to true
+        // Simulate a response (replace with your actual LLM interaction)
+        QTimer::singleShot(2000, this, [this, promptText]() {
+            if(chatModel){
+                chatModel->addMessage(ChatModel::LLM, "Response to: " + promptText);
+                chatModel->setRequestPending(false); // Set requestPending to false when done
+            }
+        });
     }
 }
+
 
 void ChatInterface::handleRequestPendingChanged()
 {
     if(chatModel)
     {
-        // if(chatModel->requestPending())
-        //     updateStatus("Waiting for response...");
-        // else
-        //     updateStatus("Ready");
+        if(chatModel->requestPending())
+            updateStatus("Waiting for response...");
+        else
+            updateStatus("Ready");
     }
 }
 
