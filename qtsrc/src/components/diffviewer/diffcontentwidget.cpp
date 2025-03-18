@@ -5,38 +5,28 @@
 #include <QScrollArea>
 #include <QPalette>
 #include <algorithm>
+#include <QDebug>
 
 DiffContentWidget::DiffContentWidget(QWidget *parent)
     : QWidget(parent)
-    , m_lineHeight(0)
-    , m_firstChangeLine(-1)
 {
     QPalette palette = this->palette();
     palette.setColor(QPalette::Base, Qt::white);
     setPalette(palette);
     setBackgroundRole(QPalette::Base);
     setAutoFillBackground(true);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed); // Important for layout
 }
 
 void DiffContentWidget::setDiffData(const QList<DiffView::DiffLine>& diffData, const QString& fileName) {
     m_diffData = diffData;
     m_fileName = fileName;
 
-    m_firstChangeLine = -1;
-    m_changeLines.clear();
-
     // Calculate line numbers *here*, within the content widget.
     int originalLine = 1;
     int modifiedLine = 1;
     for (int i = 0; i < m_diffData.size(); ++i) {
         DiffView::DiffLine& line = m_diffData[i]; // Modify directly
-
-        if (line.changeType != DiffView::DiffLine::Unchanged) {
-            if (m_firstChangeLine == -1) {
-                m_firstChangeLine = i;
-            }
-            m_changeLines.append(i);
-        }
 
         // Assign line numbers based on change type
         switch (line.changeType) {
@@ -55,43 +45,54 @@ void DiffContentWidget::setDiffData(const QList<DiffView::DiffLine>& diffData, c
         }
     }
 
-    updateGeometry();
-    update();
+    updateGeometry(); // VERY IMPORTANT: Trigger recalculation of sizeHint
+    update(); // Trigger a repaint
 }
 
-QSize DiffContentWidget::sizeHint() const {
+QSize DiffContentWidget::calculateContentSize() const {
     if (m_diffData.isEmpty()) {
         return QSize(0, 0);
     }
 
-    QFontMetrics fontMetrics(QFont("Courier New", 12));
+    QFont font("Courier New", 12); // Consistent font
+    QFontMetrics fontMetrics(font);
+    int lineHeight = fontMetrics.height(); // Calculate line height *here*
+    const int padding = 3;
+
     int maxLineNumber = 0;
     for (const auto& line : m_diffData) {
         maxLineNumber = std::max(maxLineNumber, line.originalLineNumber);
         maxLineNumber = std::max(maxLineNumber, line.modifiedLineNumber);
     }
 
-    int lineNumberWidth = fontMetrics.horizontalAdvance(QString::number(maxLineNumber) + "  ");
+    QString maxLineNumStr = QString::number(maxLineNumber);
+    int lineNumberWidth =  fontMetrics.horizontalAdvance(maxLineNumStr + "  ");
     int maxWidth = lineNumberWidth;
-    for (const auto& line : m_diffData) {
-        int lineWidth = fontMetrics.horizontalAdvance(line.text);
-        maxWidth = qMax(maxWidth, lineWidth + lineNumberWidth);
+
+     for (const DiffView::DiffLine& line : m_diffData) {
+        //Crucial, elide text longer than parent width.
+        QString elidedText = fontMetrics.elidedText(line.text, Qt::ElideRight, this->width() - lineNumberWidth - 10);
+        QRect boundingRect = fontMetrics.boundingRect(elidedText); // Use bounding rect for accurate width
+        maxWidth = qMax(maxWidth, boundingRect.width() + lineNumberWidth);
     }
 
-    int totalHeight = m_diffData.size() * (m_lineHeight + 3);
-     if (m_lineHeight == 0)
-        totalHeight = m_diffData.size() * (fontMetrics.height() + 3); //for set diff data before paint event
+    const int fileNameAreaHeight = 30;
+    int totalHeight = m_diffData.size() * (lineHeight + padding) + fileNameAreaHeight;
 
-    return QSize(maxWidth + 10, totalHeight);
+    return QSize(maxWidth + 10, totalHeight); // Add some extra width
+}
+
+QSize DiffContentWidget::sizeHint() const {
+    return calculateContentSize();
 }
 
 void DiffContentWidget::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
-    painter.setFont(QFont("Courier New", 12));
+    QFont font("Courier New", 12);
+    painter.setFont(font);
 
-    if (m_lineHeight == 0) {
-        m_lineHeight = painter.fontMetrics().height();
-    }
+    QFontMetrics fontMetrics(font);
+    int lineHeight = fontMetrics.height(); // Get line height from painter
     const int padding = 3;
     const int fileNameAreaHeight = 30; // Height for the file name area
     const int leftPadding = 5;
@@ -99,20 +100,13 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
     // --- Draw File Name Area ---
     QRect fileNameRect(0, 0, width(), fileNameAreaHeight);
     painter.fillRect(fileNameRect, QColor(230, 230, 230)); // Light grey background
-
-    // Add a simple shadow (optional)
     painter.setPen(QColor(180, 180, 180)); // Darker grey for shadow
     painter.drawLine(0, fileNameAreaHeight, width(), fileNameAreaHeight);
-
-
     painter.setPen(Qt::black); // Black text
-    painter.drawText(leftPadding, fileNameAreaHeight - (fileNameAreaHeight - m_lineHeight)/2 - painter.fontMetrics().descent() , m_fileName);  // Draw text with padding and vertical centering
+    painter.drawText(leftPadding, fileNameAreaHeight - (fileNameAreaHeight - lineHeight)/2 - fontMetrics.descent() , m_fileName);  // Draw text
 
+    int yPos = fileNameAreaHeight;
 
-    int yPos = fileNameAreaHeight + padding; // Start drawing diff content *below* the file name area
-
-
-    QFontMetrics fontMetrics(painter.font());
     int maxLineNumber = 0;
     for(const auto& line: m_diffData)
     {
@@ -126,10 +120,9 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
 
     for (int i = 0; i < m_diffData.size(); ++i) {
         const DiffView::DiffLine& line = m_diffData[i];
-        yPos = (i * (m_lineHeight + padding)) + fileNameAreaHeight + padding; // Correct yPos
+        yPos = (i * (lineHeight + padding)) + fileNameAreaHeight + padding;
 
-
-        if (!event->rect().intersects(QRect(0, yPos, width(), m_lineHeight + padding))) {
+        if (!event->rect().intersects(QRect(0, yPos, width(), lineHeight + padding))) {
             continue;
         }
 
@@ -139,11 +132,11 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
                 break;
             case DiffView::DiffLine::Added:
                 painter.setPen(Qt::darkGreen);
-                painter.fillRect(0, yPos, width(), m_lineHeight + padding, QColor(220, 255, 220));
+                painter.fillRect(0, yPos, width(), lineHeight + padding, QColor(220, 255, 220));
                 break;
             case DiffView::DiffLine::Removed:
                 painter.setPen(Qt::darkRed);
-                painter.fillRect(0, yPos, width(), m_lineHeight + padding, QColor(255, 220, 220));
+                painter.fillRect(0, yPos, width(), lineHeight + padding, QColor(255, 220, 220));
                 break;
         }
 
@@ -153,19 +146,26 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
         } else {
             lineNumberStr = QString::number(line.originalLineNumber);
         }
-         // Handle zero line numbers (display as empty)
         if (lineNumberStr == "0") {
             lineNumberStr = "";
         }
-        painter.drawText(leftPadding, yPos + m_lineHeight - painter.fontMetrics().descent(), lineNumberStr); // Use leftPadding
-        painter.drawText(5 + lineNumberWidth, yPos + m_lineHeight - painter.fontMetrics().descent(), line.text);
+
+         //Crucial, elide text longer than parent width.
+        QString elidedText = fontMetrics.elidedText(line.text, Qt::ElideRight, this->width() - lineNumberWidth - 10);
+        painter.drawText(leftPadding, yPos + lineHeight - fontMetrics.descent(), lineNumberStr);
+        painter.drawText(5 + lineNumberWidth, yPos + lineHeight - fontMetrics.descent(), elidedText);
     }
-    drawScrollbarMarkers(&painter);
+     drawScrollbarMarkers(&painter);
+}
+void DiffContentWidget::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    updateGeometry(); // Recalculate sizeHint on resize
+    update(); // and repaint.
 }
 
 void DiffContentWidget::drawScrollbarMarkers(QPainter *painter)
 {
-    if (m_changeLines.isEmpty() || m_diffData.isEmpty() || !parentWidget()) {
+    if (m_diffData.isEmpty() || !parentWidget()) {
         return;
     }
 
@@ -173,16 +173,23 @@ void DiffContentWidget::drawScrollbarMarkers(QPainter *painter)
     if (!scrollArea) {
         return;
     }
+    QScrollBar *verticalScrollBar = scrollArea->verticalScrollBar();
+     if (!verticalScrollBar) {
+        return; // No vertical scrollbar, nothing to do
+    }
 
     painter->setPen(Qt::NoPen);
     painter->setBrush(QColor(100, 100, 100, 128));
 
-    const int scrollBarWidth = scrollArea->verticalScrollBar()->width();
+    const int scrollBarWidth = verticalScrollBar->width();
     const int viewHeight = scrollArea->viewport()->height();
     const int totalLines = m_diffData.size();
 
-    for (int changedLine : m_changeLines) {
-        int markerY = (changedLine * viewHeight) / totalLines;
-        painter->drawRect(width() - scrollBarWidth, markerY, scrollBarWidth, 3);
+    //Iterate and check directly
+    for (int i = 0; i < totalLines; ++i) {
+        if(m_diffData[i].changeType != DiffView::DiffLine::Unchanged){
+            int markerY = (i * viewHeight) / totalLines;
+            painter->drawRect(width() - scrollBarWidth, markerY, scrollBarWidth, 3);
+        }
     }
 }
