@@ -62,7 +62,6 @@ void ChatInterface::setupUI() {
         qreal maxHeight = metrics.lineSpacing() * 10;
     });
 
-    connect(this, &ChatInterface::sendMessage, this, &ChatInterface::onSendPrompt);
 }
 
 void ChatInterface::setModel(ChatModel *model) {
@@ -92,13 +91,6 @@ void ChatInterface::keyPressEvent(QKeyEvent *event) {
     }
 }
 
-void ChatInterface::onSendPrompt(const QString &message) {
-     // Do nothing else here.  We've already sent the message.
-    if (chatModel) {
-        chatModel->addMessage(ChatModel::User, message); // Add to chat history
-        // Don't touch requestPending here!
-    }
-}
 
 void ChatInterface::handleRequestPendingChanged()
 {

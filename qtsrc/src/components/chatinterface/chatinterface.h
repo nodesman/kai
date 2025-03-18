@@ -30,7 +30,6 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
-    void onSendPrompt(const QString &message);
     void handleRequestPendingChanged(); //Slot to handle state changes
     void updateStatus(const QString &statusMessage);
 private:

@@ -32,7 +32,6 @@ private:
     void setupUI();
     void populatePlaceholderChatData();
 
-    void handleEnterKeyPressed();
 
 
     QSplitter *mainSplitter;

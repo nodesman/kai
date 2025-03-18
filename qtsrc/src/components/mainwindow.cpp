@@ -55,7 +55,7 @@ void MainWindow::setupUI()
     populatePlaceholderChatData(); // Call without argument (we use the member variable)
     chatInterface->setModel(chatModel);     // Connect to the model
     connect(chatInterface, &ChatInterface::sendMessage, this, &MainWindow::sendPromptToNodeJs);
-    connect(chatInterface, &ChatInterface::enterKeyPressed, this, &MainWindow::handleEnterKeyPressed);
+
 
 }
 
@@ -64,11 +64,6 @@ void MainWindow::populatePlaceholderChatData() { // No argument now
     if (!chatModel) return; // Safety check
 }
 
-void MainWindow::handleEnterKeyPressed()
-{
-    qDebug() << "Enter key pressed in ChatInterface!";
-    // Add your custom logic here
-}
 
 void MainWindow::sendPromptToNodeJs(const QString &prompt)
 {
@@ -81,7 +76,7 @@ void MainWindow::sendPromptToNodeJs(const QString &prompt)
     QByteArray jsonData = doc.toJson(QJsonDocument::Compact); // Compact format is good for communication
 
     // Write to standard output
-    // std::cout << jsonData.toStdString() << std::endl;
+    qDebug() << jsonData.toStdString();
 }
 
 void MainWindow::processReadyReadStandardOutput()
