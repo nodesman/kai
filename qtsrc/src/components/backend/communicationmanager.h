@@ -1,11 +1,10 @@
-// communicationmanager.h
 #ifndef COMMUNICATIONMANAGER_H
 #define COMMUNICATIONMANAGER_H
 
 #include <QObject>
 #include <QString>
-#include <QProcess> //If you use a child process
-#include <QJsonDocument>
+#include <QJsonObject> // Include QJsonObject here
+#include <QFile>       // For standard input
 
 class CommunicationManager : public QObject {
     Q_OBJECT
@@ -15,24 +14,19 @@ signals:
     void changesApplied(bool success);
     void requestPendingChanged(bool pending);
     void errorReceived(const QString &errorMessage);
-    // ... other signals ...
 
 public:
-    CommunicationManager(QObject *parent = nullptr);
-
-    void applyChanges(const QJsonObject &changes);
-
+    explicit CommunicationManager(QObject *parent = nullptr); // Use explicit
     private slots:
-        void processReadyReadStandardOutput();
-    // ... other slots ...
+        void readFromStdin();
+
+    public slots:
+        void sendChatMessage(const QString &message);
+    void applyChanges(const QJsonObject &changes);
+    void sendJson(const QJsonObject &obj);
 
 private:
-    QProcess *nodeProcess; //If you use a child process
-public slots:
-    void sendChatMessage(const QString &message);
-
-
-    void sendJson(const QJsonObject &obj);
+    QFile stdinReader;  // QFile, not a pointer.  Much simpler.
 };
 
-#endif
+#endif // COMMUNICATIONMANAGER_H
