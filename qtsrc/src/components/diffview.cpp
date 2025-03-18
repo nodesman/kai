@@ -33,61 +33,14 @@ DiffView::DiffView(QWidget *parent)
 
     splitter->addWidget(scrollArea); // Add scroll area to splitter
 
-	//Make sure you can't resize the file list
+    //Make sure you can't resize the file list
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1); //diff view should be able to stretch.
 
-    // --- Connect File List Selection ---
-    connect(fileListView->selectionModel(), &QItemSelectionModel::currentRowChanged,
-        this, [this, scrollLayout, scrollArea](const QModelIndex &current, const QModelIndex &previous) {
-            Q_UNUSED(previous);
-            if (m_model) {
-                // Clear existing widgets from the scrollLayout
-                QLayoutItem *child;
-                while ((child = scrollLayout->takeAt(0)) != nullptr) {
-                    delete child->widget(); // Delete the widget
-                    delete child; // Delete the layout item
-                }
-
-
-                // Get the diff content for the selected file
-                QString fileContent = m_model->getFileContent(current.row());
-                QList<DiffLine> diffData = this->parseDiffContent(fileContent);
-
-                // Create a QLabel to display the content
-                QLabel *contentLabel = new QLabel(scrollArea);
-                contentLabel->setTextFormat(Qt::PlainText); // Treat content as plain text
-                contentLabel->setTextInteractionFlags(Qt::TextSelectableByMouse); // Make it selectable
-                contentLabel->setWordWrap(false);       // Important: Don't wrap lines
-                contentLabel->setFont(QFont("Courier New", 10)); // Use a monospaced font
-                 // Set the  content on the label
-
-                QPalette pal = contentLabel->palette();
-
-                QString displayText;
-
-                for(const DiffLine &line : diffData){
-                    QString color = "";
-                    if(line.changeType == Added){
-                        color = "green";
-                    } else if(line.changeType == Removed){
-                        color = "red";
-                    }
-                    if(color.length() > 0){
-                        displayText += QString("<font color = \"%1\">%2</font>").arg(color, line.text);
-                    } else {
-                        displayText += line.text;
-                    }
-                    displayText += "\n";
-                }
-
-                contentLabel->setText(displayText);
-                scrollLayout->addWidget(contentLabel);
-                scrollArea->verticalScrollBar()->setValue(0); //scroll to top
-
-            }
-        });
     setLayout(mainLayout);
+    // --- Connect File List Selection ---
+
+
 }
 
 DiffView::~DiffView() {} //destructor needed.
@@ -103,7 +56,67 @@ void DiffView::setModel(DiffModel *model) {
     QListView *fileListView = findChild<QListView *>(); // Find the QListView
     if (fileListView) {
         fileListView->setModel(m_model); // Set the model on the QListView
+        // NOW connect the selection model signal, AFTER setting the model
+        connect(fileListView->selectionModel(), &QItemSelectionModel::currentRowChanged,
+            this, [this, fileListView](const QModelIndex &current, const QModelIndex &previous) {  //Removed scroll area, added file list view
+                Q_UNUSED(previous);
+                if (m_model) {
+                    //Find the scroll layout
+                    QScrollArea *scrollArea = fileListView->parentWidget()->findChild<QScrollArea *>();
+                    if(!scrollArea) return;
+
+                    QVBoxLayout *scrollLayout = qobject_cast<QVBoxLayout*>(scrollArea->widget()->layout());
+                       if (!scrollLayout) {
+                           return; // Or handle the error appropriately
+                       }
+                    // Clear existing widgets from the scrollLayout
+                    QLayoutItem *child;
+                    while ((child = scrollLayout->takeAt(0)) != nullptr) {
+                        delete child->widget(); // Delete the widget
+                        delete child; // Delete the layout item
+                    }
+
+
+                    // Get the diff content for the selected file
+                    QString fileContent = m_model->getFileContent(current.row());
+                    QList<DiffLine> diffData = this->parseDiffContent(fileContent);
+
+                    // Create a QLabel to display the content
+                    QLabel *contentLabel = new QLabel(scrollArea);
+                    contentLabel->setTextFormat(Qt::PlainText); // Treat content as plain text
+                    contentLabel->setTextInteractionFlags(Qt::TextSelectableByMouse); // Make it selectable
+                    contentLabel->setWordWrap(false);       // Important: Don't wrap lines
+                    contentLabel->setFont(QFont("Courier New", 10)); // Use a monospaced font
+                     // Set the  content on the label
+
+                    QPalette pal = contentLabel->palette();
+
+                    QString displayText;
+
+                    for(const DiffLine &line : diffData){
+                        QString color = "";
+                        if(line.changeType == Added){
+                            color = "green";
+                        } else if(line.changeType == Removed){
+                            color = "red";
+                        }
+                        if(color.length() > 0){
+                            displayText += QString("<font color = \"%1\">%2</font>").arg(color, line.text);
+                        } else {
+                            displayText += line.text;
+                        }
+                        displayText += "\n";
+                    }
+
+                    contentLabel->setText(displayText);
+                    scrollLayout->addWidget(contentLabel);
+                    scrollArea->verticalScrollBar()->setValue(0); //scroll to top
+
+                }
+            });
     }
+
+
 }
 
 
@@ -115,13 +128,13 @@ QList<DiffView::DiffLine> DiffView::parseDiffContent(const QString& content) {
     for (const QString& line : lines) {
         DiffLine diffLine;
         if (line.startsWith('+')) {
-            diffLine.changeType = Added;
+            diffLine.changeType = DiffView::Added;
             diffLine.text = line.mid(1); // Remove the '+'
         } else if (line.startsWith('-')) {
-            diffLine.changeType = Removed;
+            diffLine.changeType = DiffView::Removed;
             diffLine.text = line.mid(1);  // Remove the '-'
         } else {
-            diffLine.changeType = Unchanged;
+            diffLine.changeType = DiffView::Unchanged;
             diffLine.text = line;
         }
         diffData.append(diffLine);
