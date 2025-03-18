@@ -7,6 +7,7 @@
 #include "chatinterface/chatinterface.h"
 #include "../models/diffmodel.h"
 #include "../models/chatmodel.h"
+#include "backend/communicationmanager.h"
 
 class DiffView; // Forward declaration
 class ChatInterface;
@@ -21,18 +22,13 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    private slots:
-        // void simulateChatInteraction(); // Keep for initial demonstration
-    void processReadyReadStandardOutput(); // Handle messages FROM Node.js
-    // void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
-    // void processErrorOccurred(QProcess::ProcessError error);
-    void sendPromptToNodeJs(const QString &prompt);
-
+private slots:
+    void handleRequestPendingChanged(bool pending);
+    void handleChatMessageReceived(const QString &message);
+    void handleErrorReceived(const QString &errorMessage);
 private:
     void setupUI();
     void populatePlaceholderChatData();
-
-
 
     QSplitter *mainSplitter;
     ChatInterface *chatInterface;
@@ -40,6 +36,8 @@ private:
     DiffModel *diffModel;
     ChatModel *chatModel;
     QProcess *nodeProcess;  // The Node.js process
+    CommunicationManager * communicationManager;
+
 };
 
 #endif // MAINWINDOW_H

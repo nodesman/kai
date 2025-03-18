@@ -40,6 +40,8 @@ add_executable(KaiDiff
         src/models/ChatModel.h
         src/components/chatinterface/ConversationHistory.cpp
         src/components/chatinterface/ConversationHistory.h
+        src/components/backend/CommunicationManager.cpp
+        src/components/backend/CommunicationManager.h
 )
 
 # Link against all necessary Qt modules
