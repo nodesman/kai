@@ -1,33 +1,46 @@
-// mainwindow.h
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QMainWindow>
 #include <QSplitter>
-#include "diffviewer/diffview.h"
-#include "chatinterface/chatinterface.h" // Include the new ChatInterface
-#include "../models/diffmodel.h" //For the DiffModel
+#include <QProcess>  // Include QProcess
+#include "chatinterface/chatinterface.h"
+#include "../models/diffmodel.h"
+#include "../models/chatmodel.h"
 
-class MainWindow : public QMainWindow {
+class DiffView; // Forward declaration
+class ChatInterface;
+
+class MainWindow : public QMainWindow
+{
     Q_OBJECT
 
 public:
+    void startNodeProcess();
+
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    private slots:
+        // void simulateChatInteraction(); // Keep for initial demonstration
+    void processReadyReadStandardOutput(); // Handle messages FROM Node.js
+    // void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    // void processErrorOccurred(QProcess::ProcessError error);
+    void sendPromptToNodeJs(const QString &prompt);
+
 private:
     void setupUI();
-
     void populatePlaceholderChatData();
 
-    void populatePlaceholderChatData(ChatModel *chatModel);
+    void handleEnterKeyPressed();
+
 
     QSplitter *mainSplitter;
+    ChatInterface *chatInterface;
     DiffView *diffView;
     DiffModel *diffModel;
-    ChatInterface *chatInterface; // Use the new ChatInterface widget
-    void simulateChatInteraction();
-    ChatModel * chatModel;
+    ChatModel *chatModel;
+    QProcess *nodeProcess;  // The Node.js process
 };
 
 #endif // MAINWINDOW_H

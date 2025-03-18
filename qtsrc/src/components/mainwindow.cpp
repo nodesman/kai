@@ -9,6 +9,11 @@
 #include <QDebug>
 #include <QTimer> // Include QTimer
 #include "chatinterface/chatinterface.h"
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
+
+#include "diffviewer/diffview.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -16,7 +21,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow() {
+}
 
 void MainWindow::setupUI()
 {
@@ -48,62 +54,80 @@ void MainWindow::setupUI()
     // --- Placeholder Chat Data and Simulation ---
     populatePlaceholderChatData(); // Call without argument (we use the member variable)
     chatInterface->setModel(chatModel);     // Connect to the model
+    connect(chatInterface, &ChatInterface::sendMessage, this, &MainWindow::sendPromptToNodeJs);
+    connect(chatInterface, &ChatInterface::enterKeyPressed, this, &MainWindow::handleEnterKeyPressed);
 
-     // Connect a slot to simulate user input and LLM responses
-    QTimer::singleShot(500, this, &MainWindow::simulateChatInteraction); // Start simulation after 500ms
 }
 
 // --- Placeholder Chat Data Function (Modified) ---
 void MainWindow::populatePlaceholderChatData() { // No argument now
     if (!chatModel) return; // Safety check
-
-    // We don't add initial messages here anymore.  They're added in the simulation.
 }
 
-
-void MainWindow::simulateChatInteraction()
+void MainWindow::handleEnterKeyPressed()
 {
-    if (!chatModel) return; //Safety Check
+    qDebug() << "Enter key pressed in ChatInterface!";
+    // Add your custom logic here
+}
 
-    // Simulate user typing "What is the capital of France?"
-    chatModel->addMessage(ChatModel::User, "What is the capital of France?");
-    //Simulate LLM Response
-    chatModel->setRequestPending(true);
-    QTimer::singleShot(2000, this, [this]() { // Simulate a 2-second delay
-        if(chatModel)
-        {
-            chatModel->addMessage(ChatModel::LLM, "The capital of France is Paris.");
-            chatModel->setRequestPending(false);
+void MainWindow::sendPromptToNodeJs(const QString &prompt)
+{
+    // Construct a JSON object to send to Node.js
+    QJsonObject obj;
+    obj["type"] = "prompt";
+    obj["text"] = prompt;
 
-             // Simulate the next user question after LLM responds.
-            QTimer::singleShot(1000, this, [this]() {  //Another delay before next message
-               if(chatModel){
-                   chatModel->addMessage(ChatModel::User, "Can you write a Python function to calculate the factorial of a number?");
-                   chatModel->setRequestPending(true);
+    QJsonDocument doc(obj);
+    QByteArray jsonData = doc.toJson(QJsonDocument::Compact); // Compact format is good for communication
 
-                    QTimer::singleShot(3000, this, [this](){ // Simulate LLM processing.
-                        if(chatModel) {
-                            chatModel->addMessage(ChatModel::LLM, "`python\ndef factorial(n):\n  if n == 0:\n    return 1\n  else:\n    return n * factorial(n-1)\n`");
-                            chatModel->setRequestPending(false);
+    // Write to standard output
+    // std::cout << jsonData.toStdString() << std::endl;
+}
 
-                            //Simulate user saying "Thank you"
-                            QTimer::singleShot(1000, this, [this]() {
-                               if(chatModel) {
-                                   chatModel->addMessage(ChatModel::User, "Thank you");
-                                   chatModel->setRequestPending(true);
-                                   // Simulate LLM response to thank you
-                                   QTimer::singleShot(1500, this, [this](){
-                                       if(chatModel) {
-                                           chatModel->addMessage(ChatModel::LLM, "You are welcome!");
-                                           chatModel->setRequestPending(false);
-                                       }
-                                   });
-                               }
-                            });
-                        }
-                    });
-               }
-            });
+void MainWindow::processReadyReadStandardOutput()
+{
+    // Read all available data from Node.js
+    QByteArray data = qobject_cast<QProcess*>(sender())->readAllStandardOutput();
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "Failed to parse JSON from Node.js:" << parseError.errorString();
+        return;
+    }
+
+    if (!doc.isObject()) {
+        qWarning() << "Expected JSON object from Node.js, got:" << doc.toJson();
+        return;
+    }
+
+    QJsonObject obj = doc.object();
+
+    // Handle different types of messages from Node.js
+    if (obj.contains("type")) {
+        QString messageType = obj.value("type").toString();
+
+        if (messageType == "response") {
+            QString responseText = obj.value("text").toString();
+             if(chatModel) {
+                 chatModel->addMessage(ChatModel::LLM, responseText);
+             }
+
+        } else if (messageType == "requestPending") {
+            bool pending = obj.value("pending").toBool();
+            if(chatModel){
+                chatModel->setRequestPending(pending);
+            }
+        } else if(messageType == "error") {
+            //Handle Error messages
+            QString errorMessage = obj["message"].toString();
+            qWarning() << "Error from Node:" << errorMessage;
+            // You might want to add this to the ChatModel as a special error message:
+            // chatModel->addMessage(ChatModel::LLM, "Error: " + errorMessage);
+        } else {
+            qWarning() << "Unknown message type from Node.js:" << messageType;
         }
-    });
+    } else {
+        qWarning() << "Received JSON object without 'type' field from Node.js";
+    }
 }

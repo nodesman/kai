@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QSplitter>
 
+#include "conversationhistory.h"
+
 ChatInterface::ChatInterface(QWidget *parent)
     : QWidget(parent)
     , chatModel(nullptr)
@@ -80,36 +82,23 @@ void ChatInterface::setModel(ChatModel *model) {
 }
 
 void ChatInterface::keyPressEvent(QKeyEvent *event) {
-#ifdef Q_OS_MAC
-    if (event->key() == Qt::Key_Return && event->modifiers() & Qt::MetaModifier) {
-#else
+
     if (event->key() == Qt::Key_Return && event->modifiers() & Qt::ControlModifier) {
-#endif
-        // Only emit sendMessage if a request is NOT pending.
-        if (!chatModel->requestPending()) {
-            emit sendMessage();
-        }
+        //  Emit sendMessage regardless of pending state. Node.js decides.
+        emit sendMessage(promptInput->toPlainText());
+        promptInput->clear(); // Clear the input *after* emitting the signal
     }  else {
         QWidget::keyPressEvent(event);
     }
 }
 
-void ChatInterface::onSendPrompt() {
-    QString promptText = promptInput->toPlainText();
-    if (!promptText.isEmpty() && chatModel && !chatModel->requestPending()) { // Check requestPending
-        chatModel->addMessage(ChatModel::User, promptText);
-        promptInput->clear();
-        chatModel->setRequestPending(true); // Set requestPending to true
-        // Simulate a response (replace with your actual LLM interaction)
-        QTimer::singleShot(2000, this, [this, promptText]() {
-            if(chatModel){
-                chatModel->addMessage(ChatModel::LLM, "Response to: " + promptText);
-                chatModel->setRequestPending(false); // Set requestPending to false when done
-            }
-        });
+void ChatInterface::onSendPrompt(const QString &message) {
+     // Do nothing else here.  We've already sent the message.
+    if (chatModel) {
+        chatModel->addMessage(ChatModel::User, message); // Add to chat history
+        // Don't touch requestPending here!
     }
 }
-
 
 void ChatInterface::handleRequestPendingChanged()
 {

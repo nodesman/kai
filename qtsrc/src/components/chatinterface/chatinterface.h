@@ -2,45 +2,44 @@
 #define CHATINTERFACE_H
 
 #include <QWidget>
-//Remove conversation history includes
-// class QVBoxLayout;  <- No longer needed here
-// class QTextEdit;  <- No longer needed here
-class QLineEdit;
-class QLabel;
-class ChatModel;
-class QKeyEvent;
-class QVBoxLayout; // Add this
-class QTextEdit;   // Add this
-#include "conversationhistory.h" // Include the new component
+#include <QTextEdit> // Required for forward declaration
+#include <QLabel>
+#include "../../models/chatmodel.h"
 
+class QVBoxLayout;  // Forward declaration
+class QTextEdit;    // Forward declaration
+class QLabel;       // Forward declaration
+class QSplitter;
+class ConversationHistory; // Forward Declaration
 
-class ChatInterface : public QWidget {
+class ChatInterface : public QWidget
+{
     Q_OBJECT
 
 public:
-    ChatInterface(QWidget *parent = nullptr);
+    void setupUI();
+
+    explicit ChatInterface(QWidget *parent = nullptr);
     void setModel(ChatModel *model);
+
+signals:
+    void sendMessage(const QString &message);
+    void enterKeyPressed(); // New signal
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
 
-    private slots:
-        void onSendPrompt();
-    void updateStatus(const QString& statusMessage);
-
-    signals:
-        void sendMessage();
-
+private slots:
+    void onSendPrompt(const QString &message);
+    void handleRequestPendingChanged(); //Slot to handle state changes
+    void updateStatus(const QString &statusMessage);
 private:
     QVBoxLayout *mainLayout;
-    QTextEdit *promptInput; // Keep the prompt input
+    QTextEdit *promptInput;
     QLabel *statusBar;
     ChatModel *chatModel;
-    ConversationHistory *conversationHistory; // Use the new component
-
-    void setupUI();
-    //void updateConversationHistory(); // Removed
-    void handleRequestPendingChanged();
+    QSplitter *mainLayoutSplitter;
+    ConversationHistory *conversationHistory;
 };
 
 #endif // CHATINTERFACE_H
