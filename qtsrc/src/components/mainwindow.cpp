@@ -7,6 +7,7 @@
 #include "../models/diffmodel.h"
 #include "../models/chatmodel.h" // Include the ChatModel
 #include <QDebug>
+#include "chatinterface/chatinterface.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)

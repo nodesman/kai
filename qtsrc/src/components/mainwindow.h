@@ -5,7 +5,7 @@
 #include <QMainWindow>
 #include <QSplitter>
 #include "diffviewer/diffview.h"
-#include "chatinterface.h" // Include the new ChatInterface
+#include "chatinterface/chatinterface.h" // Include the new ChatInterface
 #include "../models/diffmodel.h" //For the DiffModel
 
 class MainWindow : public QMainWindow {
