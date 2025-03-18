@@ -93,10 +93,24 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
         m_lineHeight = painter.fontMetrics().height();
     }
     const int padding = 3;
+    const int fileNameAreaHeight = 30; // Height for the file name area
+    const int leftPadding = 5;
 
-    painter.setPen(Qt::black);
-    painter.drawText(5, m_lineHeight, m_fileName);
-    int yPos = m_lineHeight + padding + 3;
+    // --- Draw File Name Area ---
+    QRect fileNameRect(0, 0, width(), fileNameAreaHeight);
+    painter.fillRect(fileNameRect, QColor(230, 230, 230)); // Light grey background
+
+    // Add a simple shadow (optional)
+    painter.setPen(QColor(180, 180, 180)); // Darker grey for shadow
+    painter.drawLine(0, fileNameAreaHeight, width(), fileNameAreaHeight);
+
+
+    painter.setPen(Qt::black); // Black text
+    painter.drawText(leftPadding, fileNameAreaHeight - (fileNameAreaHeight - m_lineHeight)/2 - painter.fontMetrics().descent() , m_fileName);  // Draw text with padding and vertical centering
+
+
+    int yPos = fileNameAreaHeight + padding; // Start drawing diff content *below* the file name area
+
 
     QFontMetrics fontMetrics(painter.font());
     int maxLineNumber = 0;
@@ -112,7 +126,8 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
 
     for (int i = 0; i < m_diffData.size(); ++i) {
         const DiffView::DiffLine& line = m_diffData[i];
-        yPos = (i * (m_lineHeight + padding)) + m_lineHeight + padding ;
+        yPos = (i * (m_lineHeight + padding)) + fileNameAreaHeight + padding; // Correct yPos
+
 
         if (!event->rect().intersects(QRect(0, yPos, width(), m_lineHeight + padding))) {
             continue;
@@ -142,7 +157,7 @@ void DiffContentWidget::paintEvent(QPaintEvent *event) {
         if (lineNumberStr == "0") {
             lineNumberStr = "";
         }
-        painter.drawText(5, yPos + m_lineHeight - painter.fontMetrics().descent(), lineNumberStr);
+        painter.drawText(leftPadding, yPos + m_lineHeight - painter.fontMetrics().descent(), lineNumberStr); // Use leftPadding
         painter.drawText(5 + lineNumberWidth, yPos + m_lineHeight - painter.fontMetrics().descent(), line.text);
     }
     drawScrollbarMarkers(&painter);
