@@ -67,7 +67,7 @@ void ChatInterface::setModel(ChatModel *model) {
     if (chatModel) {
         // Disconnect the requestPendingChanged signal from the old model.  We
         // still need this, since *this* class handles the status bar updates.
-        // disconnect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
+        disconnect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
     }
 
     chatModel = model;
