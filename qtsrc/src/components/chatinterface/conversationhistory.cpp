@@ -1,92 +1,122 @@
 #include "conversationhistory.h"
+
+#include <iostream>
 #include <QVBoxLayout>
 #include <QTextCursor>
 #include <QTextBlockFormat>
 #include <QBrush>
 #include <QFont>
+#include <QTextFrame>
+#include <QScrollBar>
 
 ConversationHistory::ConversationHistory(QWidget *parent)
     : QWidget(parent)
-    , chatModel(nullptr) // Initialize chatModel
+    , chatModel(nullptr)
 {
     setupUI();
 }
 
 void ConversationHistory::setupUI() {
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0); // Remove margins
+    layout->setContentsMargins(0, 0, 0, 0);
 
     textEdit = new QTextEdit(this);
     textEdit->setReadOnly(true);
-    textEdit->setStyleSheet("background-color: lightgrey; color: white;"); // Consistent styling
-    textEdit->document()->setDocumentMargin(0);
+    textEdit->setStyleSheet("background-color: lightgrey; color: black; border: none;");
+    textEdit->document()->setDocumentMargin(10); // Add some padding around the entire document
     layout->addWidget(textEdit);
     setLayout(layout);
 }
 
 void ConversationHistory::setModel(ChatModel *model) {
     if (chatModel) {
-        // Disconnect from the old model
         disconnect(chatModel, &QAbstractItemModel::rowsInserted, this, &ConversationHistory::onRowsInserted);
     }
 
     chatModel = model;
 
     if (chatModel) {
-        // Connect to the new model
-        // connect(chatModel, static_cast<void(QAbstractItemModel::*)(const QModelIndex &, int, int, const QList<int> &)>(&QAbstractItemModel::rowsInserted), this, &ConversationHistory::onRowsInserted);
-        updateHistory(); // Initial update
+        connect(chatModel, &QAbstractItemModel::rowsInserted, this, &ConversationHistory::onRowsInserted);
+        updateHistory();
     }
 }
 
 void ConversationHistory::onRowsInserted(const QModelIndex & /*parent*/, int /*first*/, int /*last*/) {
-    updateHistory(); // Re-render on any row insertion
+    updateHistory();
 }
-void ConversationHistory::updateHistory()
-{
+
+void ConversationHistory::updateHistory() {
     if (!chatModel) return;
 
-     textEdit->clear();
+    textEdit->clear();
     QTextCursor cursor(textEdit->document());
     cursor.movePosition(QTextCursor::End);
 
+    // Set document-wide properties
+    QTextDocument *doc = textEdit->document();
+    doc->setDocumentMargin(10);
+
     for (int i = 0; i < chatModel->rowCount(); ++i) {
         QModelIndex typeIndex = chatModel->index(i, 0);
-        QModelIndex textIndex = chatModel->index(i, 0);
+        QModelIndex textIndex = chatModel->index(i, 1);
 
         ChatModel::MessageType msgType = static_cast<ChatModel::MessageType>(chatModel->data(typeIndex, ChatModel::MessageTypeRole).toInt());
         QString msgText = chatModel->data(textIndex, ChatModel::MessageTextRole).toString();
 
-        // --- Styling the message box ---
+        // Insert block with proper spacing
         QTextBlockFormat blockFormat;
-        blockFormat.setTopMargin(10);
-        blockFormat.setBottomMargin(10); // Spacing *between* message boxes
-        blockFormat.setLeftMargin(20);
-        blockFormat.setRightMargin(20);
+        blockFormat.setBottomMargin(10); // Space between messages
 
-        if (msgType == ChatModel::User) {
-            blockFormat.setBackground(QBrush(Qt::white));
-            // Optional: Add a subtle right-side border for user messages
-            blockFormat.setRightMargin(25);  // Make the user's box slightly smaller
-        } else {
-             blockFormat.setBackground(QBrush(QColor(230, 230, 230))); // Slightly grey for LLM
-             blockFormat.setLeftMargin(25);
+        if (i > 0) {
+            cursor.insertBlock(blockFormat);
         }
 
-        cursor.insertBlock(blockFormat);
+        // Message alignment
+        blockFormat = QTextBlockFormat();
+        if (msgType == ChatModel::User) {
+            blockFormat.setAlignment(Qt::AlignRight);
+        } else {
+            blockFormat.setAlignment(Qt::AlignLeft);
+        }
+        cursor.setBlockFormat(blockFormat);
 
-        // --- Add text with styling ---
-        QTextCharFormat charFormat;
-        charFormat.setFont(QFont("Arial", 12)); // Choose a good font
-        charFormat.setForeground(QBrush(Qt::white)); // Set text color to white
-        cursor.setCharFormat(charFormat);
+        // Message frame format
+        QTextFrameFormat frameFormat;
+        frameFormat.setBorder(1);
+        frameFormat.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+        frameFormat.setBorderBrush(QBrush(QColor("#cccccc")));
+        frameFormat.setPadding(20);
 
-        // Add user/LLM label
+        // Set max width using appropriate margins
+        if (msgType == ChatModel::User) {
+            frameFormat.setRightMargin(20);
+            frameFormat.setLeftMargin(40);
+            frameFormat.setBackground(QBrush(Qt::white));
+        } else {
+            frameFormat.setLeftMargin(20);
+            frameFormat.setRightMargin(40);
+            frameFormat.setBackground(QBrush(QColor("#f0f0e0")));  // Light beige for LLM messages
+        }
+
+        // Insert frame
+        QTextFrame *frame = cursor.insertFrame(frameFormat);
+        QTextCursor frameCursor = frame->firstCursorPosition();
+
+        // Set text format
+        QTextCharFormat textFormat;
+        textFormat.setFont(QFont("Verdana", 12));
+        frameCursor.setCharFormat(textFormat);
+
+        // Insert label and message
         QString label = (msgType == ChatModel::User) ? "You: " : "LLM: ";
-        cursor.insertText(label, charFormat);
-        // Add the actual message.  Use insertHtml to handle preformatted text (like code)
-        cursor.insertHtml(msgText.replace("\n", "<br>")); // Replace newlines with <br> for HTML
+        frameCursor.insertText(label);
+        frameCursor.insertText(msgText.replace("\n", " "));
+
+        // Move cursor after frame
+        cursor = frame->lastCursorPosition();
+        cursor.movePosition(QTextCursor::NextBlock);
     }
-     cursor.movePosition(QTextCursor::End);
-     textEdit->setTextCursor(cursor); // Scroll to the bottom
+
+    // Scroll to end
+    textEdit->verticalScrollBar()->setValue(textEdit->verticalScrollBar()->maximum());
 }
