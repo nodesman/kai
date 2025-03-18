@@ -25,11 +25,13 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core) # Request all necessary modules
 
 add_executable(KaiDiff
-        main.cpp
-        mainwindow.cpp
-        mainwindow.h
-        diffview.h
-        diffview.cpp
+        src/main.cpp
+        src/components/mainwindow.cpp
+        src/components/mainwindow.h
+        src/components/diffview.h
+        src/components/diffview.cpp
+        src/models/diffmodel.cpp
+        src/models/diffmodel.h
 )
 
 # Link against all necessary Qt modules
