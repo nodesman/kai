@@ -23,17 +23,17 @@ CommunicationManager::CommunicationManager(QObject *parent) : QObject(parent), s
 }
 
 void CommunicationManager::sendChatMessage(const QString &message) {
-    QJsonObject obj;
-    obj["type"] = "chatMessage";
-    obj["text"] = message;
-    sendJson(obj);
+    sendJson({
+        {"type", "chatMessage"},
+        {"text", message}
+    });
 }
 
 void CommunicationManager::applyChanges(const QJsonObject &changes) {
-    QJsonObject obj;
-    obj["type"] = "applyChanges";
-    obj["changes"] = changes;
-    sendJson(obj);
+    sendJson({
+      {"type", "applyChanges"},
+      {"changes", changes}
+    });
 }
 
 void CommunicationManager::sendJson(const QJsonObject &obj) {
