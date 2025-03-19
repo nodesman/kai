@@ -9,7 +9,8 @@
 #include <QStringList>
 #include "../models/chatmodel.h"
 #include "../models/diffmodel.h"
-
+#include <QSocketNotifier>
+#include <QTextStream>
 
 class CommunicationManager : public QObject {
     Q_OBJECT
@@ -24,23 +25,26 @@ signals:
 public:
     explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
 
+    void readStdin();
+
     ~CommunicationManager();
 
     ChatModel* getChatModel() const { return m_chatModel; }
     DiffModel* getDiffModel() const { return m_diffModel; }
 
-    private slots:
-        void readFile();
-    void onFileChanged(const QString &path);
 
 public slots:
     void sendChatMessage(const QString &message);
     void applyDiff();
     void sendJson(const QJsonObject &obj);
 
+    void processReceivedJson(const QJsonObject &obj);
+
 private:
     QFile m_dataFile; // Regular QFile
     QFileSystemWatcher m_fileWatcher;
+    QSocketNotifier *m_stdinNotifier; // Add this
+    QTextStream *m_stdinStream; // Add this
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;
     const QString m_communicationFilePath; // Store the file path
