@@ -10,10 +10,6 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Use CMAKE_PREFIX_PATH instead of Qt6_DIR.  Prefer environment variable.
-#  Remove the explicit setting of Qt6_DIR. CMake will use CMAKE_PREFIX_PATH.
-# set(Qt6_DIR "/Users/rajsekharan/Qt/6.5.3/macos/lib/cmake/Qt6")  # REMOVE THIS LINE
-
-# Check if QT6_DIR is set as environment variable.  If so, use it.
 if(NOT DEFINED CMAKE_PREFIX_PATH)
     if(DEFINED ENV{QT6_DIR})
         set(CMAKE_PREFIX_PATH "$ENV{QT6_DIR}")
@@ -21,8 +17,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core) # Request all necessary modules
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
 
 add_executable(KaiDiff
         src/main.cpp
@@ -44,11 +39,25 @@ add_executable(KaiDiff
         src/backend/CommunicationManager.h
 )
 
-# Link against all necessary Qt modules
+# --- Console Subsystem Handling (Cross-Platform) ---
+
+# For Windows, use WIN32_EXECUTABLE with set_target_properties
+if(WIN32)
+    set_target_properties(KaiDiff PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+# For macOS, we need to avoid creating an app bundle *and* set a specific
+# linker flag to keep the console.
+if(APPLE)
+    set_target_properties(KaiDiff PROPERTIES MACOSX_BUNDLE FALSE) # Don't create a .app bundle
+    set_target_properties(KaiDiff PROPERTIES
+            LINK_FLAGS "-Wl,-macosx_version_min,10.15 -Wl,-no_pie" # Keep console
+    )
+endif()
+
+# --- End Console Subsystem Handling ---
+
 target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
 
-# Optional: Set the output directory
 set_target_properties(KaiDiff PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-# Optional: For installation (if you want to install the application)
 install(TARGETS KaiDiff DESTINATION bin)

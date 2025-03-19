@@ -21,7 +21,6 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setupUI();
     connect(communicationManager, &CommunicationManager::requestStatusChanged, this, &MainWindow::handleRequestPendingChanged);
-    connect(communicationManager, &CommunicationManager::errorReceived, this, &MainWindow::handleErrorReceived);
 }
 
 MainWindow::~MainWindow() {
@@ -71,9 +70,3 @@ void MainWindow::handleRequestPendingChanged(bool pending) {
     }
 }
 
-void MainWindow::handleErrorReceived(const QString &errorMessage) {
-    qWarning() << "Error from Node:" << errorMessage;
-    if (chatModel) {
-        chatModel->addMessage(ChatModel::LLM, "Error: " + errorMessage);
-    }
-}

@@ -6,7 +6,7 @@ ChatModel::ChatModel(QObject *parent)
 {
 }
 
-void ChatModel::addMessage(MessageType type, const QString& text) {
+void ChatModel::addMessage(const QString& text, MessageType type) {
     beginInsertRows(QModelIndex(), rowCount(), rowCount());
     m_messages.append({type, text});
     endInsertRows();

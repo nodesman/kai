@@ -5,29 +5,45 @@
 #include <QFile>
 #include <QTextStream>
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QJsonArray>
+#include <QStandardPaths> //For standard paths
 
 CommunicationManager::CommunicationManager(QObject *parent)
-    : QObject(parent), m_stdinReader(":/stdin")
+    : QObject(parent),
+      // Use a consistent, known location for the file.
+      m_communicationFilePath(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/communication_file.txt"),
+      m_dataFile(m_communicationFilePath) // Initialize QFile with the path
 {
-    connect(&m_stdinReader, &QFile::readyRead, this, &CommunicationManager::readFromStdin);
+    qDebug() << "Communication file path:" << m_communicationFilePath;
 
     m_chatModel = new ChatModel(this);
     m_diffModel = new DiffModel(this);
 
-    // Connect signals *within* CommunicationManager (very important!)
     connect(this, &CommunicationManager::chatMessageReceived,
             [this](const QString &message, int messageType) {
-                m_chatModel->addMessage(static_cast<ChatModel::MessageType>(messageType), message);
+                m_chatModel->addMessage(message, static_cast<ChatModel::MessageType>(messageType));
             });
     connect(this, &CommunicationManager::requestStatusChanged, m_chatModel, &ChatModel::setRequestPending);
     connect(this, &CommunicationManager::diffResultReceived, m_diffModel, &DiffModel::setFiles);
-    connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel); // Clear diff on apply
+    connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel);
 
-    if (!m_stdinReader.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qDebug() << "Error: Could not open stdin for reading.";
-        emit errorReceived("Could not open stdin");
-        return;
+    // Set up file watching (before potentially opening/creating)
+    if (!m_fileWatcher.addPath(m_communicationFilePath)) {
+        qDebug() << "Error: Could not watch file:" << m_communicationFilePath;
+        emit errorReceived("Could not watch communication file");
+        // Don't return; try to proceed anyway. The file might be created later.
+    }
+    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this, &CommunicationManager::onFileChanged);
+
+    // Initial read, in case the file exists with prior content.
+    readFile();
+}
+
+CommunicationManager::~CommunicationManager()
+{
+    if (m_fileWatcher.files().contains(m_communicationFilePath)){
+        m_fileWatcher.removePath(m_communicationFilePath);
     }
 }
 
@@ -38,7 +54,6 @@ void CommunicationManager::sendChatMessage(const QString &message) {
     });
 }
 
-// Simplified: We just send a signal to apply the diff.
 void CommunicationManager::applyDiff() {
     sendJson({{"type", "applyDiff"}});
 }
@@ -46,21 +61,39 @@ void CommunicationManager::applyDiff() {
 void CommunicationManager::sendJson(const QJsonObject &obj) {
     QJsonDocument doc(obj);
     QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
-    QTextStream stream(stdout);
-    stream << jsonData << Qt::endl;
-    stream.flush();
+
+    // Open and *truncate* the file for writing.  *Explicitly* specify the path.
+    if (m_dataFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        QTextStream out(&m_dataFile);
+        out << jsonData << Qt::endl;
+        m_dataFile.close(); // Close immediately after writing.
+    } else {
+        qDebug() << "Error opening file for writing:" << m_dataFile.errorString();
+        emit errorReceived("Could not write to communication file: " + m_dataFile.errorString());
+    }
 }
 
-void CommunicationManager::readFromStdin() {
-    while (m_stdinReader.canReadLine()) {
-        QByteArray data = m_stdinReader.readLine();
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(data, &error);
+void CommunicationManager::readFile() {
+    // Open the file for reading. *Explicitly* specify the path.
+    QFile file(m_communicationFilePath); // Create a *new* QFile object
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qDebug() << "File does not exist or cannot be opened for reading:" << m_communicationFilePath;
+        // Don't emit an error or return here. The file might not exist yet.
+        return; // Return if the file can't be opened
+    }
 
+    QTextStream in(&file);
+    //Read all content even if it is multiple lines
+    while(!in.atEnd()){
+        QString line = in.readLine();
+        if (line.isEmpty()) continue; // Skip empty lines
+
+        QJsonParseError error;
+        QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
         if (error.error != QJsonParseError::NoError) {
             qDebug() << "JSON parse error:" << error.errorString();
             emit errorReceived("JSON Parse Error: " + error.errorString());
-            return;
+            continue; // Go to next line
         }
 
         if (doc.isObject()) {
@@ -80,23 +113,21 @@ void CommunicationManager::readFromStdin() {
                         messageType = ChatModel::LLM;
                     } else {
                         emit errorReceived("Invalid messageType in chatMessage");
-                        return;
+                        continue; // Go to next line
                     }
                     emit chatMessageReceived(obj["text"].toString(), messageType);
                 } else {
                     emit errorReceived("Invalid chatMessage format.");
                 }
-            } else if (obj["type"] == "requestStatus") { // Renamed type
-                if (obj.contains("status") && obj["status"].isBool()) { // Renamed field
-                    emit requestStatusChanged(obj["status"].toBool()); // Renamed signal
+            } else if (obj["type"] == "requestStatus") {
+                if (obj.contains("status") && obj["status"].isBool()) {
+                    emit requestStatusChanged(obj["status"].toBool());
                 } else {
                     emit errorReceived("Invalid requestStatus format");
                 }
             } else if (obj["type"] == "diffApplied") {
-                // No data needed, just the signal
                 emit diffApplied();
-            }
-             else if (obj["type"] == "diffResult") {
+            } else if (obj["type"] == "diffResult") {
                 if (obj.contains("files") && obj["files"].isArray()) {
                     QJsonArray filesArray = obj["files"].toArray();
                     QStringList filePaths;
@@ -111,11 +142,11 @@ void CommunicationManager::readFromStdin() {
                                 fileContents << fileObj["content"].toString();
                             } else {
                                 emit errorReceived("Invalid file object in diffResult");
-                                return;
+                                continue;
                             }
                         } else {
                             emit errorReceived("Invalid element in files array (not an object)");
-                            return;
+                            continue;
                         }
                     }
                     emit diffResultReceived(filePaths, fileContents);
@@ -132,4 +163,11 @@ void CommunicationManager::readFromStdin() {
             emit errorReceived("Received data is not a JSON object.");
         }
     }
+    file.close(); // Close the *local* QFile object.
+}
+
+void CommunicationManager::onFileChanged(const QString &path)
+{
+    Q_UNUSED(path);
+    readFile();
 }

@@ -24,7 +24,6 @@ public:
 
 private slots:
     void handleRequestPendingChanged(bool pending);
-    void handleErrorReceived(const QString &errorMessage);
 private:
     void setupUI();
     void populatePlaceholderChatData();

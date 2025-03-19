@@ -4,10 +4,7 @@
 #include <QTextEdit>
 #include <QLabel>
 #include <QKeyEvent>
-#include <QTextCursor>
-#include <QTextBlockFormat> //Keep this for consistency
 #include <QBrush> //Keep this for consistency
-#include <QFont> //Keep this for consistency
 #include <QDebug>
 #include <QTimer>
 #include <QSplitter>
