@@ -63,13 +63,7 @@ void CommunicationManager::readFromStdin() {
             QJsonObject obj = doc.object();
             qDebug() << "Received JSON:" << obj;
 
-            if (obj["type"] == "chatMessage") {
-               if (obj.contains("text") && obj["text"].isString()){
-                    emit chatMessageReceived(obj["text"].toString());
-               } else {
-                    emit errorReceived("Invalid chatMessage format.");
-               }
-            } else if (obj["type"] == "applyChanges") {
+            if (obj["type"] == "applyChanges") {
                 if(obj.contains("changes") && obj["changes"].isObject()){
                     // In a real application, you'd likely do more with the changes.
                     // You might pass them to another part of your application.

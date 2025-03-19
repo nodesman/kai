@@ -32,16 +32,16 @@ add_executable(KaiDiff
         src/components/diffviewer/diffview.cpp
         src/models/diffmodel.cpp
         src/models/diffmodel.h
-        src/components/diffviewer/DiffContentWidget.cpp
-        src/components/diffviewer/DiffContentWidget.h
+        src/components/diffviewer/diffcontentwidget.cpp
+        src/components/diffviewer/diffcontentwidget.h
         src/components/chatinterface/chatinterface.cpp
         src/components/chatinterface/chatinterface.h
         src/models/ChatModel.cpp
         src/models/ChatModel.h
-        src/components/chatinterface/ConversationHistory.cpp
-        src/components/chatinterface/ConversationHistory.h
-        src/components/backend/CommunicationManager.cpp
-        src/components/backend/CommunicationManager.h
+        src/components/chatinterface/conversationhistory.cpp
+        src/components/chatinterface/conversationhistory.h
+        src/backend/CommunicationManager.cpp
+        src/backend/CommunicationManager.h
 )
 
 # Link against all necessary Qt modules

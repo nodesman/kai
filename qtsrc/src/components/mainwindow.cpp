@@ -13,14 +13,13 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include "diffviewer/diffview.h"
-#include "./backend/communicationmanager.h" // Include the CommunicationManager header
+#include "../backend/communicationmanager.h" // Include the CommunicationManager header
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , communicationManager(new CommunicationManager(this)) // Initialize CommunicationManager
 {
     setupUI();
-    connect(communicationManager, &CommunicationManager::chatMessageReceived, this, &MainWindow::handleChatMessageReceived);
     connect(communicationManager, &CommunicationManager::requestPendingChanged, this, &MainWindow::handleRequestPendingChanged);
     connect(communicationManager, &CommunicationManager::errorReceived, this, &MainWindow::handleErrorReceived);
 }
@@ -65,12 +64,6 @@ void MainWindow::populatePlaceholderChatData() {
     if (!chatModel) return;
 }
 
-
-void MainWindow::handleChatMessageReceived(const QString &message) {
-    if (chatModel) {
-        chatModel->addMessage(ChatModel::LLM, message);
-    }
-}
 
 void MainWindow::handleRequestPendingChanged(bool pending) {
     if (chatModel) {

@@ -7,7 +7,7 @@
 #include "chatinterface/chatinterface.h"
 #include "../models/diffmodel.h"
 #include "../models/chatmodel.h"
-#include "backend/communicationmanager.h"
+#include "../backend/communicationmanager.h"
 
 class DiffView; // Forward declaration
 class ChatInterface;
@@ -24,7 +24,6 @@ public:
 
 private slots:
     void handleRequestPendingChanged(bool pending);
-    void handleChatMessageReceived(const QString &message);
     void handleErrorReceived(const QString &errorMessage);
 private:
     void setupUI();
