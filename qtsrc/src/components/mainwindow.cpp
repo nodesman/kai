@@ -20,7 +20,7 @@ MainWindow::MainWindow(QWidget *parent)
     , communicationManager(new CommunicationManager(this)) // Initialize CommunicationManager
 {
     setupUI();
-    connect(communicationManager, &CommunicationManager::requestPendingChanged, this, &MainWindow::handleRequestPendingChanged);
+    connect(communicationManager, &CommunicationManager::requestStatusChanged, this, &MainWindow::handleRequestPendingChanged);
     connect(communicationManager, &CommunicationManager::errorReceived, this, &MainWindow::handleErrorReceived);
 }
 

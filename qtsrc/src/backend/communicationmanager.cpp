@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QCoreApplication>
+#include <QJsonArray>
 
 CommunicationManager::CommunicationManager(QObject *parent)
     : QObject(parent), m_stdinReader(":/stdin")

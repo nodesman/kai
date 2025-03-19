@@ -1,5 +1,5 @@
-// diffmodel.cpp
 #include "diffmodel.h"
+#include <QDebug>
 
 DiffModel::DiffModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -19,19 +19,40 @@ QVariant DiffModel::data(const QModelIndex &index, int role) const
     if (!index.isValid() || index.row() >= m_filePaths.count())
         return QVariant();
 
-    if (role == Qt::DisplayRole) {
-        return m_filePaths.at(index.row()); // Display the file path
+    switch (role) {
+        case FilePathRole:
+            return m_filePaths.at(index.row());
+        case FileContentRole:
+            return m_fileContents.at(index.row());
+        default:
+            return QVariant();
     }
+}
 
-    return QVariant(); // Return an invalid QVariant for other roles
+QHash<int, QByteArray> DiffModel::roleNames() const
+{
+    QHash<int, QByteArray> roles;
+    roles[FilePathRole] = "filePath";
+    roles[FileContentRole] = "fileContent";
+    return roles;
 }
 
 void DiffModel::setFiles(const QStringList& filePaths, const QList<QString>& fileContents)
 {
-    beginResetModel(); // Important: Notify views about the change
+    beginResetModel();
     m_filePaths = filePaths;
-    m_fileContents = fileContents; // Store the content
-    endResetModel(); // Important: Notify views about the change
+    m_fileContents = fileContents;
+    endResetModel();
+    qDebug() << "DiffModel updated with" << m_filePaths.size() << "files.";
+}
+
+void DiffModel::clearDiffModel()
+{
+    beginResetModel();
+    m_filePaths.clear();
+    m_fileContents.clear();
+    endResetModel();
+    qDebug() << "DiffModel cleared.";
 }
 
 QString DiffModel::getFileContent(int index) const
@@ -40,4 +61,11 @@ QString DiffModel::getFileContent(int index) const
         return m_fileContents.at(index);
     }
     return QString(); // Return empty string if index is invalid
+}
+
+QString DiffModel::getFilePath(int index) const {
+    if (index >= 0 && index < m_filePaths.count()) {
+        return m_filePaths.at(index);
+    }
+    return QString(); // Return empty string for invalid index
 }
