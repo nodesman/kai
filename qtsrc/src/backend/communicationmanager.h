@@ -6,37 +6,35 @@
 #include <QJsonObject>
 #include <QFile>
 #include <QStringList>
-#include "../models/chatmodel.h" // Include ChatModel here
+#include "../models/chatmodel.h"
 #include "../models/diffmodel.h"
 
 class CommunicationManager : public QObject {
     Q_OBJECT
 
 signals:
-    // Keep these signals; they're how the models get updated.
     void chatMessageReceived(const QString &message, int messageType);
-    void requestPendingChanged(bool pending);
+    void requestStatusChanged(bool status); // Renamed signal
     void errorReceived(const QString &errorMessage);
     void diffResultReceived(const QStringList& filePaths, const QList<QString>& fileContents);
-    void changesApplied(bool applied);
+    void diffApplied(); // Signal for when diff is successfully applied
 public:
     explicit CommunicationManager(QObject *parent = nullptr);
-    ChatModel* getChatModel() const { return chatModel; } // Add a getter
-    DiffModel* getDiffModel() const { return diffModel; }
-
+    ChatModel* getChatModel() const { return m_chatModel; }
+    DiffModel* getDiffModel() const { return m_diffModel; }
 
     private slots:
         void readFromStdin();
 
-public slots:
-    void sendChatMessage(const QString &message); // Keep this
-    void applyChanges(const QJsonObject &changes);  // Keep this
-    void sendJson(const QJsonObject &obj);         // Keep this
+    public slots:
+        void sendChatMessage(const QString &message);
+    void applyDiff();  // Renamed and simplified
+    void sendJson(const QJsonObject &obj);
 
 private:
-    QFile stdinReader;
-    ChatModel *chatModel; // Keep the models *separate* from CommunicationManager
-    DiffModel *diffModel;
+    QFile m_stdinReader;
+    ChatModel *m_chatModel;  // Use m_ prefix for member variables
+    DiffModel *m_diffModel;
 };
 
 #endif // COMMUNICATIONMANAGER_H
