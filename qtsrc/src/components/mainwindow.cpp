@@ -1,72 +1,59 @@
-// mainwindow.cpp
 #include "mainwindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QListView>
 #include "../models/diffmodel.h"
-#include "../models/chatmodel.h"
+#include "diffviewer/diffview.h"
 #include <QDebug>
 #include <QTimer>
 #include "chatinterface/chatinterface.h"
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include "diffviewer/diffview.h"
-#include "../backend/communicationmanager.h" // Include the CommunicationManager header
+#include "../backend/communicationmanager.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , communicationManager(new CommunicationManager(this)) // Initialize CommunicationManager
 {
     setupUI();
-    connect(communicationManager, &CommunicationManager::requestStatusChanged, this, &MainWindow::handleRequestPendingChanged);
+   // connect(communicationManager, &CommunicationManager::requestStatusChanged, this, &MainWindow::handleRequestPendingChanged);  No need to emit another signal. Chatmodel handles it.
+
 }
 
-MainWindow::~MainWindow() {
-}
-
-void MainWindow::setupUI()
+MainWindow::~MainWindow()
 {
+}
+
+void MainWindow::setupUI() {
     // --- Main Window Setup ---
     this->setWindowTitle("LLM Chat Interface");
-    this->resize(1024, 768);
+    this->resize(1024, 768);  // A reasonable default size.
 
     // --- Main Splitter (Left and Right Halves) ---
-    mainSplitter = new QSplitter(Qt::Horizontal, this);
+     mainSplitter = new QSplitter(Qt::Horizontal, this);
 
     // --- Chat Interface ---
     chatInterface = new ChatInterface(this);
-    chatModel = new ChatModel(this);
-
-    mainSplitter->addWidget(chatInterface);
+     chatModel = new ChatModel(this); // Create the chat model.  *IMPORTANT*
+    chatInterface->setModel(chatModel);
+    mainSplitter->addWidget(chatInterface); // Add chat interface FIRST.
 
     // --- Diff View and Model ---
-    diffView = new DiffView(this);
-    diffModel = new DiffModel(this);
-    diffView->setModel(diffModel);
+    diffModel = new DiffModel(this);   // Create the diff model. *IMPORTANT*
+    diffView = new DiffView(this, diffModel);  // Create the diff view
     mainSplitter->addWidget(diffView);
 
-    mainSplitter->setStretchFactor(0, 60);
-    mainSplitter->setStretchFactor(1, 40);
+    mainSplitter->setStretchFactor(0, 60);  // 60% for chat
+    mainSplitter->setStretchFactor(1, 40); // 40% for diff
+
+    communicationManager = new CommunicationManager(this, diffModel, chatModel);
 
     // --- Set Central Widget ---
     this->setCentralWidget(mainSplitter);
 
-    // --- Placeholder Chat Data ---
-    populatePlaceholderChatData();
-    chatInterface->setModel(chatModel);
-    connect(chatInterface, &ChatInterface::sendMessage, communicationManager, &CommunicationManager::sendChatMessage); // Connect to CommunicationManager
+     connect(chatInterface, &ChatInterface::sendMessage, communicationManager, &CommunicationManager::sendChatMessage);
+     connect(communicationManager, &CommunicationManager::chatMessageReceived, chatInterface, &ChatInterface::updateChatHistory);
+     connect(communicationManager, &CommunicationManager::requestStatusChanged, chatInterface, &ChatInterface::handleRequestPendingChanged); //Direct connection.
+
 }
-
-void MainWindow::populatePlaceholderChatData() {
-    if (!chatModel) return;
-}
-
-
-void MainWindow::handleRequestPendingChanged(bool pending) {
-    if (chatModel) {
-        chatModel->setRequestPending(pending);
-    }
-}
-

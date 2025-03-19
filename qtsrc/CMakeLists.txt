@@ -37,6 +37,8 @@ add_executable(KaiDiff
         src/components/chatinterface/conversationhistory.h
         src/backend/CommunicationManager.cpp
         src/backend/CommunicationManager.h
+        src/components/chatinterface/PromptEntry.cpp
+        src/components/chatinterface/promptentry.h
 )
 
 # --- Console Subsystem Handling (Cross-Platform) ---

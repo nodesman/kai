@@ -11,15 +11,15 @@ class ConversationHistory : public QWidget {
 public:
     explicit ConversationHistory(QWidget *parent = nullptr);
     void setModel(ChatModel *model);
-
+    void updateHistory();
 private:
     QTextEdit *textEdit;
     ChatModel *chatModel;
 
     void setupUI();
-    void updateHistory();
 
-    private slots:
+
+    public slots:
         void onRowsInserted(const QModelIndex &parent, int first, int last);
 };
 

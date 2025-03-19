@@ -1,3 +1,4 @@
+// diffmodel.cpp
 #include "diffmodel.h"
 #include <QDebug>
 
@@ -24,6 +25,8 @@ QVariant DiffModel::data(const QModelIndex &index, int role) const
             return m_filePaths.at(index.row());
         case FileContentRole:
             return m_fileContents.at(index.row());
+        case Qt::DisplayRole: // Add this case!
+            return m_filePaths.at(index.row());
         default:
             return QVariant();
     }
@@ -68,4 +71,29 @@ QString DiffModel::getFilePath(int index) const {
         return m_filePaths.at(index);
     }
     return QString(); // Return empty string for invalid index
+}
+
+void DiffModel::addFile(const QString &filePath, const QString &fileContent) {
+    beginInsertRows(QModelIndex(), rowCount(), rowCount()); // Before addition
+    m_filePaths.append(filePath);
+    m_fileContents.append(fileContent);
+    endInsertRows(); // After addition
+}
+
+void DiffModel::removeFile(int index) {
+    if (index >= 0 && index < rowCount()) {
+        beginRemoveRows(QModelIndex(), index, index); // Before removal
+        m_filePaths.removeAt(index);
+        m_fileContents.removeAt(index);
+        endRemoveRows(); // After removal
+    }
+}
+
+void DiffModel::changeFileContent(int index, const QString &newContent) {
+    if (index >= 0 && index < m_fileContents.count()) {
+        m_fileContents[index] = newContent;
+        // Emit dataChanged for the specific index and role
+        QModelIndex modelIndex = this->index(index, 0);
+        emit dataChanged(modelIndex, modelIndex, {FileContentRole});
+    }
 }

@@ -1,3 +1,4 @@
+// diffmodel.h
 #ifndef DIFFMODEL_H
 #define DIFFMODEL_H
 
@@ -6,9 +7,9 @@
 #include <QList>
 #include <QVariant>
 
-class DiffModel : public QAbstractListModel
-{
+class DiffModel : public QAbstractListModel {
     Q_OBJECT
+
 public:
     explicit DiffModel(QObject *parent = nullptr);
 
@@ -20,12 +21,15 @@ public:
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void setFiles(const QStringList& filePaths, const QList<QString>& fileContents);
-    QString getFileContent(int index) const; // Already existing function
+    QString getFileContent(int index) const;
     QString getFilePath(int index) const; // New function
 
     public slots:
         void clearDiffModel();
+    void setFiles(const QStringList& filePaths, const QList<QString>& fileContents);
+    void addFile(const QString& filePath, const QString& fileContent); // Add this
+    void removeFile(int index);  // Add this for completeness (optional, but good practice)
+    void changeFileContent(int index, const QString &newContent); // Add for changing existing content
 
 private:
     QStringList m_filePaths;

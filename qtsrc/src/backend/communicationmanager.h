@@ -10,6 +10,7 @@
 #include "../models/chatmodel.h"
 #include "../models/diffmodel.h"
 
+
 class CommunicationManager : public QObject {
     Q_OBJECT
 
@@ -21,7 +22,8 @@ signals:
     void diffApplied();
 
 public:
-    explicit CommunicationManager(QObject *parent = nullptr);
+    explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
+
     ~CommunicationManager();
 
     ChatModel* getChatModel() const { return m_chatModel; }
@@ -31,8 +33,8 @@ public:
         void readFile();
     void onFileChanged(const QString &path);
 
-    public slots:
-        void sendChatMessage(const QString &message);
+public slots:
+    void sendChatMessage(const QString &message);
     void applyDiff();
     void sendJson(const QJsonObject &obj);
 

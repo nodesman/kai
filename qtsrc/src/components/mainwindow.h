@@ -4,38 +4,41 @@
 #include <QMainWindow>
 #include <QSplitter>
 #include <QProcess>  // Include QProcess
-#include "chatinterface/chatinterface.h"
-#include "../models/diffmodel.h"
-#include "../models/chatmodel.h"
-#include "../backend/communicationmanager.h"
 
-class DiffView; // Forward declaration
+#include "../backend/communicationmanager.h"
+#include "chatinterface/chatinterface.h" // Assuming the header is here
+#include "../models/diffmodel.h"      // Assuming the header is here
+#include "../models/chatmodel.h"      // Assuming the header is here.
+
+
+
+class DiffView;  // Forward declaration.
 class ChatInterface;
+
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    void startNodeProcess();
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
-
-private slots:
-    void handleRequestPendingChanged(bool pending);
 private:
+
     void setupUI();
     void populatePlaceholderChatData();
 
     QSplitter *mainSplitter;
-    ChatInterface *chatInterface;
-    DiffView *diffView;
+    ChatInterface *chatInterface;  //Use pointer
+    DiffView *diffView; // Make it a member variable, as we need to access it.
     DiffModel *diffModel;
-    ChatModel *chatModel;
-    QProcess *nodeProcess;  // The Node.js process
-    CommunicationManager * communicationManager;
+    ChatModel* chatModel;
+    QProcess *nodeProcess; // Added process
+    CommunicationManager *communicationManager;
+
+private slots:
+        // void handleRequestPendingChanged(bool pending);
 
 };
-
 #endif // MAINWINDOW_H

@@ -1,3 +1,4 @@
+// src/backend/communicationmanager.cpp
 #include "communicationmanager.h"
 #include <QDebug>
 #include <QJsonObject>
@@ -9,7 +10,7 @@
 #include <QJsonArray>
 #include <QStandardPaths> //For standard paths
 
-CommunicationManager::CommunicationManager(QObject *parent)
+CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel, ChatModel *chatModel)
     : QObject(parent),
       // Use a consistent, known location for the file.
       m_communicationFilePath(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/communication_file.txt"),
@@ -17,8 +18,8 @@ CommunicationManager::CommunicationManager(QObject *parent)
 {
     qDebug() << "Communication file path:" << m_communicationFilePath;
 
-    m_chatModel = new ChatModel(this);
-    m_diffModel = new DiffModel(this);
+    m_chatModel = chatModel;
+    m_diffModel = diffModel;
 
     connect(this, &CommunicationManager::chatMessageReceived,
             [this](const QString &message, int messageType) {
@@ -34,10 +35,37 @@ CommunicationManager::CommunicationManager(QObject *parent)
         emit errorReceived("Could not watch communication file");
         // Don't return; try to proceed anyway. The file might be created later.
     }
-    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this, &CommunicationManager::onFileChanged);
+    // connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this, &CommunicationManager::onFileChanged);
 
     // Initial read, in case the file exists with prior content.
     readFile();
+
+    // --- Hardcoded Diff Data (for testing) ---
+    QStringList filePaths;
+    QList<QString> fileContents;
+
+    filePaths << "file1.txt" << "file2.cpp";
+
+    fileContents << R"(
+-This is the original line.
++This is the modified line.
+ This is an unchanged line.
+-This line was removed.
++This line was added.
+)" << R"(
+ // file2.cpp
+-#include <iostream>
++#include <cstdio>
+
+ int main() {
+-    std::cout << "Hello\n";
++    printf("Hello\n");
+     return 0;
+ }
+)";
+
+    emit diffResultReceived(filePaths, fileContents);
+    // --- End Hardcoded Data ---
 }
 
 CommunicationManager::~CommunicationManager()
@@ -74,96 +102,96 @@ void CommunicationManager::sendJson(const QJsonObject &obj) {
 }
 
 void CommunicationManager::readFile() {
-    // Open the file for reading. *Explicitly* specify the path.
-    QFile file(m_communicationFilePath); // Create a *new* QFile object
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qDebug() << "File does not exist or cannot be opened for reading:" << m_communicationFilePath;
-        // Don't emit an error or return here. The file might not exist yet.
-        return; // Return if the file can't be opened
-    }
-
-    QTextStream in(&file);
-    //Read all content even if it is multiple lines
-    while(!in.atEnd()){
-        QString line = in.readLine();
-        if (line.isEmpty()) continue; // Skip empty lines
-
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
-        if (error.error != QJsonParseError::NoError) {
-            qDebug() << "JSON parse error:" << error.errorString();
-            emit errorReceived("JSON Parse Error: " + error.errorString());
-            continue; // Go to next line
-        }
-
-        if (doc.isObject()) {
-            QJsonObject obj = doc.object();
-            qDebug() << "Received JSON:" << obj;
-
-            if (obj["type"] == "chatMessage") {
-                if (obj.contains("messageType") && obj["messageType"].isString() &&
-                    obj.contains("text") && obj["text"].isString()) {
-
-                    QString messageTypeStr = obj["messageType"].toString();
-                    ChatModel::MessageType messageType;
-
-                    if (messageTypeStr == "User") {
-                        messageType = ChatModel::User;
-                    } else if (messageTypeStr == "LLM") {
-                        messageType = ChatModel::LLM;
-                    } else {
-                        emit errorReceived("Invalid messageType in chatMessage");
-                        continue; // Go to next line
-                    }
-                    emit chatMessageReceived(obj["text"].toString(), messageType);
-                } else {
-                    emit errorReceived("Invalid chatMessage format.");
-                }
-            } else if (obj["type"] == "requestStatus") {
-                if (obj.contains("status") && obj["status"].isBool()) {
-                    emit requestStatusChanged(obj["status"].toBool());
-                } else {
-                    emit errorReceived("Invalid requestStatus format");
-                }
-            } else if (obj["type"] == "diffApplied") {
-                emit diffApplied();
-            } else if (obj["type"] == "diffResult") {
-                if (obj.contains("files") && obj["files"].isArray()) {
-                    QJsonArray filesArray = obj["files"].toArray();
-                    QStringList filePaths;
-                    QList<QString> fileContents;
-
-                    for (const QJsonValue &fileVal : filesArray) {
-                        if (fileVal.isObject()) {
-                            QJsonObject fileObj = fileVal.toObject();
-                            if (fileObj.contains("path") && fileObj["path"].isString() &&
-                                fileObj.contains("content") && fileObj["content"].isString()) {
-                                filePaths << fileObj["path"].toString();
-                                fileContents << fileObj["content"].toString();
-                            } else {
-                                emit errorReceived("Invalid file object in diffResult");
-                                continue;
-                            }
-                        } else {
-                            emit errorReceived("Invalid element in files array (not an object)");
-                            continue;
-                        }
-                    }
-                    emit diffResultReceived(filePaths, fileContents);
-
-                } else {
-                    emit errorReceived("Invalid diffResult format.");
-                }
-            } else {
-                qDebug() << "Unknown message type:" << obj["type"];
-                emit errorReceived("Unknown message type: " + obj["type"].toString());
-            }
-        } else {
-            qDebug() << "Received data is not a JSON object.";
-            emit errorReceived("Received data is not a JSON object.");
-        }
-    }
-    file.close(); // Close the *local* QFile object.
+    // // Open the file for reading. *Explicitly* specify the path.
+    // QFile file(m_communicationFilePath); // Create a *new* QFile object
+    // if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    //     qDebug() << "File does not exist or cannot be opened for reading:" << m_communicationFilePath;
+    //     // Don't emit an error or return here. The file might not exist yet.
+    //     return; // Return if the file can't be opened
+    // }
+    //
+    // QTextStream in(&file);
+    // //Read all content even if it is multiple lines
+    // while(!in.atEnd()){
+    //     QString line = in.readLine();
+    //     if (line.isEmpty()) continue; // Skip empty lines
+    //
+    //     QJsonParseError error;
+    //     QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
+    //     if (error.error != QJsonParseError::NoError) {
+    //         qDebug() << "JSON parse error:" << error.errorString();
+    //         emit errorReceived("JSON Parse Error: " + error.errorString());
+    //         continue; // Go to next line
+    //     }
+    //
+    //     if (doc.isObject()) {
+    //         QJsonObject obj = doc.object();
+    //         qDebug() << "Received JSON:" << obj;
+    //
+    //         if (obj["type"] == "chatMessage") {
+    //             if (obj.contains("messageType") && obj["messageType"].isString() &&
+    //                 obj.contains("text") && obj["text"].isString()) {
+    //
+    //                 QString messageTypeStr = obj["messageType"].toString();
+    //                 ChatModel::MessageType messageType;
+    //
+    //                 if (messageTypeStr == "User") {
+    //                     messageType = ChatModel::User;
+    //                 } else if (messageTypeStr == "LLM") {
+    //                     messageType = ChatModel::LLM;
+    //                 } else {
+    //                     emit errorReceived("Invalid messageType in chatMessage");
+    //                     continue; // Go to next line
+    //                 }
+    //                 emit chatMessageReceived(obj["text"].toString(), messageType);
+    //             } else {
+    //                 emit errorReceived("Invalid chatMessage format.");
+    //             }
+    //         } else if (obj["type"] == "requestStatus") {
+    //             if (obj.contains("status") && obj["status"].isBool()) {
+    //                 emit requestStatusChanged(obj["status"].toBool());
+    //             } else {
+    //                 emit errorReceived("Invalid requestStatus format");
+    //             }
+    //         } else if (obj["type"] == "diffApplied") {
+    //             emit diffApplied();
+    //         } else if (obj["type"] == "diffResult") {
+    //             if (obj.contains("files") && obj["files"].isArray()) {
+    //                 QJsonArray filesArray = obj["files"].toArray();
+    //                 QStringList filePaths;
+    //                 QList<QString> fileContents;
+    //
+    //                 for (const QJsonValue &fileVal : filesArray) {
+    //                     if (fileVal.isObject()) {
+    //                         QJsonObject fileObj = fileVal.toObject();
+    //                         if (fileObj.contains("path") && fileObj["path"].isString() &&
+    //                             fileObj.contains("content") && fileObj["content"].isString()) {
+    //                             filePaths << fileObj["path"].toString();
+    //                             fileContents << fileObj["content"].toString();
+    //                         } else {
+    //                             emit errorReceived("Invalid file object in diffResult");
+    //                             continue;
+    //                         }
+    //                     } else {
+    //                         emit errorReceived("Invalid element in files array (not an object)");
+    //                         continue;
+    //                     }
+    //                 }
+    //                 emit diffResultReceived(filePaths, fileContents);
+    //
+    //             } else {
+    //                 emit errorReceived("Invalid diffResult format.");
+    //             }
+    //         } else {
+    //             qDebug() << "Unknown message type:" << obj["type"];
+    //             emit errorReceived("Unknown message type: " + obj["type"].toString());
+    //         }
+    //     } else {
+    //         qDebug() << "Received data is not a JSON object.";
+    //         emit errorReceived("Received data is not a JSON object.");
+    //     }
+    // }
+    // file.close(); // Close the *local* QFile object.
 }
 
 void CommunicationManager::onFileChanged(const QString &path)
