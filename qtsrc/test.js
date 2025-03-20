@@ -1,79 +1,85 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os'); // Import the 'os' module
-// Determine the temporary directory (cross-platform)
+const WebSocket = require('ws');
 
-// Use the home directory
-const commFilePath = path.join(os.homedir(), 'communication.json');
+const wss = new WebSocket.Server({ port: 8080 });
 
-function sendMessage(message) {
-    try {
-        // Convert the message to a JSON string and append a newline
-        const jsonMessage = JSON.stringify(message) + '\n';
+wss.on('connection', (ws, req) => {
+    const ip = req.socket.remoteAddress;
+    console.log(`Client connected from ${ip}`);
 
-        // Append the message to the file (create it if it doesn't exist)
-        fs.appendFileSync(commFilePath, jsonMessage, 'utf8');
-        console.log(`Sent message to ${commFilePath}:`, message);
-    } catch (err) {
-        console.error('Error writing to communication file:', err);
-    }
-}
+    ws.on('message', (message) => {
+        console.log(`Received from ${ip}: ${message}`);
 
-function sendChatMessage(text, messageType = "User") {
-    sendMessage({
-        type: "chatMessage",
-        text: text,
-        messageType: messageType
+        try {
+            const json = JSON.parse(message);
+
+            if (json.type === 'ready') {
+                console.log("Qt Client is ready!");
+
+                // Send initial chat messages *after* the client is ready
+                setTimeout(() => {
+                    ws.send(JSON.stringify({ type: 'chatMessage', messageType: "LLM", text: 'Hello from Node.js Server!' }));
+                }, 500);
+                setTimeout(() => {
+                    ws.send(JSON.stringify({ type: 'chatMessage', messageType: "LLM", text: 'How are you?' }));
+                }, 1500);
+
+            } else if (json.type === 'chatMessage') {
+                console.log(`Chat message from ${json.messageType}: ${json.text}`);
+
+                // Echo the user's message back (as if it came from the LLM)
+                setTimeout(() => {
+                    ws.send(JSON.stringify({
+                        type: "chatMessage",
+                        messageType: "LLM",  // Pretend it's from the LLM
+                        text: `You said: ${json.text}` // Echo with context
+                    }));
+                }, 500);
+
+
+
+                if(json.messageType === "User"){ //if user sends, respond with diff
+                    setTimeout(() => {
+                        // Generate a large diff (example)
+                        const longContent1 = 'Original file content.\n'.repeat(500) + 'Line added.\n';
+                        const longContent2 = 'Original file content.\n'.repeat(500) + 'Line removed.\n';
+                        const diffFiles = [
+                            { path: 'large_file_1.txt', content: longContent1 },
+                            { path: 'large_file_2.txt', content: `+${longContent2}` } //show as added in diff model
+                        ];
+
+                        ws.send(JSON.stringify({ type: 'diffResult', files: diffFiles }));
+
+                    }, 1000); // Send diff after a delay.
+                }
+
+            } else if (json.type === 'applyDiff') {
+                console.log("Apply Diff requested.");
+                // Simulate applying diff (no actual diff application here)
+                setTimeout(() => {
+                    ws.send(JSON.stringify({ type: 'diffApplied' }));
+                }, 1000);
+            }
+            else if (json.type === 'requestStatus') { //handle request status
+                //do nothing as client is already handling
+
+            }
+            else {
+                console.log("Unknown message type:", json.type);
+                ws.send(JSON.stringify({ error: 'Unknown message type', received: json }));
+            }
+        } catch (error) {
+            console.error('Invalid JSON or other error:', error);
+            ws.send(JSON.stringify({ error: 'Invalid JSON format' }));
+        }
     });
-}
 
-function sendDiffResult(files) {
-    sendMessage({
-        type: "diffResult",
-        files: files
+    ws.on('close', () => {
+        console.log(`Client ${ip} disconnected`);
     });
-}
 
-function sendRequestStatus(status) {
-    sendMessage({
-        type: "requestStatus",
-        status: status
+    ws.on('error', (error) => {
+        console.error(`WebSocket error from ${ip}:`, error);
     });
-}
+});
 
-function sendDiffApplied() {
-    sendMessage({
-        type: "diffApplied"
-    });
-}
-
-
-// --- Example Usage (and testing) ---
-
-setTimeout(() => {
-    // Now, start sending messages:
-    sendChatMessage("Initial message from Node.js!", "LLM");
-    sendRequestStatus(true);
-
-
-    setTimeout(() => {
-        sendChatMessage("Another message from Node.js", "User");
-        sendRequestStatus(false);
-    }, 1000);
-
-    setTimeout(() => {
-        const diffFiles = [
-            { path: "file1.js", content: "+console.log('Hello');\n-console.log('Goodbye');" },
-            { path: "file2.css", content: "body {\n+  color: blue;\n-  color: red;\n}" }
-        ];
-        sendDiffResult(diffFiles);
-    }, 2000);
-
-    // setTimeout(() => {
-    //     sendDiffApplied();
-    // }, 3000);
-
-    setTimeout(() => {
-        sendChatMessage("And a final message", "LLM");
-    }, 4000);
-}, 3000);
+console.log('WebSocket server listening on port 8080');

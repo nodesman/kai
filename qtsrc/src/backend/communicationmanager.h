@@ -1,64 +1,56 @@
 #ifndef COMMUNICATIONMANAGER_H
 #define COMMUNICATIONMANAGER_H
 
-#include <qdir.h>
 #include <QObject>
-#include <QString>
-#include <QJsonObject>
-#include <QFile>
-#include <QFileSystemWatcher>
 #include <QStringList>
+#include <QJsonObject>
 #include "../models/chatmodel.h"
 #include "../models/diffmodel.h"
-#include <QSocketNotifier>
-#include <QTextStream>
+#include <QAbstractSocket>
+
+class QWebSocket; // Forward declaration
+class QUrl;
+
+// Forward declaration of Private *OUTSIDE* CommunicationManager
+class CommunicationManagerPrivate;
 
 class CommunicationManager : public QObject {
     Q_OBJECT
 
-signals:
-    void chatMessageReceived(const QString &message, int messageType);
-    void requestStatusChanged(bool status);
-    void errorReceived(const QString &errorMessage);
-    void diffResultReceived(const QStringList& filePaths, const QList<QString>& fileContents);
-    void diffApplied();
-    void ready(); // Add this signal
-
 public:
-    void initializeWithHardcodedData();
-
     explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
-
-    void sendReadySignal();
-
-    void onFileChanged(const QString &path);
-
-    void readStdin();
-
-    void handleActivated(QSocketDescriptor socket, QSocketNotifier::Type type);
-
     ~CommunicationManager();
+
+    void sendChatMessage(const QString &message);
+    void applyDiff();
+    void initializeWithHardcodedData();
 
     ChatModel* getChatModel() const { return m_chatModel; }
     DiffModel* getDiffModel() const { return m_diffModel; }
 
+    signals:
+        void chatMessageReceived(const QString &message, int messageType);
+    void requestStatusChanged(bool status);
+    void diffResultReceived(const QStringList &filePaths, const QList<QString> &fileContents);
+    void diffApplied();
+    void errorReceived(const QString &errorMessage);
+    void ready();
 
-public slots:
-    void sendChatMessage(const QString &message);
-    void applyDiff();
+    private slots:
+        void onConnected();
+    void onDisconnected();
+    void onTextMessageReceived(const QString &message);
+    void onError(QAbstractSocket::SocketError error);
+    void sendReadySignal();
+    void processReceivedJson(const QJsonObject &obj);
     void sendJson(const QJsonObject &obj);
 
-    void processReceivedJson(const QJsonObject &obj);
-
 private:
-    QSocketNotifier *m_stdinNotifier; // Add this
-    QTextStream *m_stdinStream; // Add this
+    //  Private *d;  // INCORRECT -  d is now of type CommunicationManagerPrivate*
+    CommunicationManagerPrivate *d; // CORRECT - Pointer to the private implementation
+
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;
-    QTextStream * m_stdoutStream;
-    QString m_commFilePath;
-    QFileSystemWatcher  *m_fileWatcher;
-    QString m_buffer;
 };
 
 #endif // COMMUNICATIONMANAGER_H

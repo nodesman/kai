@@ -2,23 +2,27 @@
 #include <QDebug>
 #include <QJsonObject>
 #include <QJsonDocument>
-#include <QFile>
-#include <QFileInfo>
-#include <QFileSystemWatcher>
-#include <QTextStream>
-#include <QCoreApplication>
+#include <QWebSocket>
+#include <QUrl>
 #include <QTimer>
-#include <QStandardPaths>
-#include <QDir>
 #include <QJsonArray>
+#include <QAbstractSocket>
 
+// Define the Private class *OUTSIDE* of CommunicationManager
+class CommunicationManagerPrivate {
+public:
+    CommunicationManagerPrivate() : webSocket(new QWebSocket()) {} // Initialize in constructor
+    ~CommunicationManagerPrivate() { delete webSocket; } // Clean up in destructor
+
+    QWebSocket *webSocket;
+    QUrl serverUrl;
+};
 
 CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel, ChatModel *chatModel)
     : QObject(parent)
     , m_chatModel(chatModel)
     , m_diffModel(diffModel)
-    , m_fileWatcher(new QFileSystemWatcher(this))
-    , m_buffer("")  // Initialize the buffer
+    , d(new CommunicationManagerPrivate) // Use the correct type here
 {
     // Connect signals for chat and diff interaction
     connect(this, &CommunicationManager::chatMessageReceived,
@@ -30,122 +34,77 @@ CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel
     connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel);
     connect(this, &CommunicationManager::ready, this, &CommunicationManager::sendReadySignal);
 
-    // --- File Setup ---
-    QString homePath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
-    m_commFilePath = QDir(homePath).filePath("communication.json");
+    // --- WebSocket Setup ---
+    d->serverUrl = QUrl("ws://localhost:8080");
 
-    // Create or truncate the file
-    QFile commFile(m_commFilePath);
-    if (commFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        commFile.close();
-    } else {
-        qCritical() << "Could not create or truncate communication file:" << m_commFilePath;
-        //  Consider exiting the application here, as communication is impossible.
-        QCoreApplication::exit(1); // Exit with an error code.
-        return;
-    }
-
-     qDebug() << "Communication file:" << m_commFilePath;
+    // Connect signals *using d->webSocket*
+    connect(d->webSocket, &QWebSocket::connected, this, &CommunicationManager::onConnected);
+    connect(d->webSocket, &QWebSocket::disconnected, this, &CommunicationManager::onDisconnected);
+    connect(d->webSocket, &QWebSocket::textMessageReceived, this, &CommunicationManager::onTextMessageReceived);
+    connect(d->webSocket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::errorOccurred),
+           this, &CommunicationManager::onError);
 
 
-    // Watch the file for changes
-    m_fileWatcher->addPath(m_commFilePath);
-    connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this, &CommunicationManager::onFileChanged);
+    d->webSocket->open(d->serverUrl);
 
-    QTimer::singleShot(0, this, &CommunicationManager::ready); // Emit ready after the event loop starts
+    QTimer::singleShot(0, this, &CommunicationManager::ready);
 }
 
-CommunicationManager::~CommunicationManager()
-{
-    // Clean up:  Remove the file (optional, depending on your needs).
-    QFile::remove(m_commFilePath);
+CommunicationManager::~CommunicationManager() {
+    if (d->webSocket->state() == QAbstractSocket::ConnectedState) {
+        d->webSocket->close();  // Close the connection
+    }
+    delete d; // Delete the private data (VERY IMPORTANT!)
 }
 
 void CommunicationManager::sendReadySignal() {
-    QTextStream errStream(stderr, QIODevice::WriteOnly); // Use stderr
-    errStream << "READY\n";
-    errStream.flush();
+    if (d->webSocket->state() == QAbstractSocket::ConnectedState) {
+        QJsonObject readyMessage;
+        readyMessage["type"] = "ready";
+        sendJson(readyMessage);
+    }
 }
 
+void CommunicationManager::onConnected() {
+    qDebug() << "WebSocket connected to:" << d->serverUrl;
+}
 
-void CommunicationManager::onFileChanged(const QString &path)
-{
-    if (path != m_commFilePath) return; // Safety check
+void CommunicationManager::onDisconnected() {
+    qDebug() << "WebSocket disconnected";
+    QTimer::singleShot(5000, this, [this](){
+        qDebug() << "Attempting to reconnect...";
+        d->webSocket->open(d->serverUrl);
+    });
+}
 
-     qDebug() << "File changed:" << path;
-
-    QFile commFile(m_commFilePath);
-    if (!commFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCritical() << "Could not open communication file for reading:" << m_commFilePath;
+void CommunicationManager::onTextMessageReceived(const QString &message) {
+    qDebug() << "Message received:" << message;
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError) {
+        emit errorReceived("JSON Parse Error: " + error.errorString());
         return;
     }
-
-    QTextStream in(&commFile);
-    // in.setCodec("UTF-8"); // Important: Ensure correct encoding
-
-    while (!in.atEnd()) {
-        QString newData = in.readAll(); // Read *all* new data
-         qDebug() << "New data read:" << newData;
-
-        m_buffer += newData; // Append to the buffer
-
-        // Process complete lines from the buffer
-        int newlineIndex;
-        while ((newlineIndex = m_buffer.indexOf('\n')) != -1) {
-            QString completeLine = m_buffer.left(newlineIndex);
-            m_buffer.remove(0, newlineIndex + 1); // Remove the processed line + newline
-
-             qDebug() << "Complete line:" << completeLine;
-
-            // --- JSON Parsing ---
-            QJsonParseError error;
-            QJsonDocument doc = QJsonDocument::fromJson(completeLine.toUtf8(), &error);
-            if (error.error != QJsonParseError::NoError) {
-                emit errorReceived("JSON Parse Error: " + error.errorString());
-                continue; // Skip to the next line
-            }
-
-            if (doc.isObject()) {
-                QJsonObject obj = doc.object();
-                 qDebug() << "Received JSON:" << obj;
-                processReceivedJson(obj);
-            } else {
-                emit errorReceived("Received data is not a JSON object.");
-            }
-        }
+    if (doc.isObject()) {
+        processReceivedJson(doc.object());
+    } else {
+        emit errorReceived("Received data is not a JSON object.");
     }
-
-    commFile.close();
-
-    // Re-add the path.  QFileSystemWatcher sometimes stops watching after a change.
-    m_fileWatcher->addPath(m_commFilePath);
 }
 
-
-void CommunicationManager::sendJson(const QJsonObject &obj)
-{
-    QFile commFile(m_commFilePath);
-    if (!commFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        qCritical() << "Could not open communication file for writing:" << m_commFilePath;
-        return;
-    }
-
-    QTextStream out(&commFile);
-    // out.setCodec("UTF-8"); // Important: Ensure consistent encoding
-
-    QJsonDocument doc(obj);
-    QByteArray jsonData = doc.toJson(QJsonDocument::Compact); // Or Indented, for debugging
-    out << jsonData << "\n"; // Write the JSON data + newline
-    out.flush(); // Ensure data is written immediately
-
-     qDebug() << "Sent JSON:" << QString(jsonData);
-    commFile.close();
+void CommunicationManager::onError(QAbstractSocket::SocketError error) {
+    qDebug() << "WebSocket error:" << d->webSocket->errorString();
 }
 
+void CommunicationManager::sendJson(const QJsonObject &obj) {
+    if (d->webSocket->state() == QAbstractSocket::ConnectedState) {
+        d->webSocket->sendTextMessage(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+        qDebug() << "Sent JSON:" << QJsonDocument(obj).toJson();
+    } else {
+        qDebug() << "WebSocket not connected.  Cannot send JSON.";
+    }
+}
 void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
-    // The rest of this function is *identical* to your previous version,
-    // as the JSON processing logic remains the same.  I've included
-    // the full, improved version for completeness.
      qDebug() << "Entering processReceivedJson.  Received object: " << obj;
 
     if (obj["type"] == "chatMessage") {
@@ -219,7 +178,12 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
              qDebug() << "    Invalid diffResult format.";
             emit errorReceived("Invalid diffResult format.");
         }
-    } else {
+     } else if (obj["type"] == "ready") {
+        //do nothing
+
+    }
+
+    else {
          qDebug() << "  Unknown message type: " << obj["type"];
     }
 
@@ -227,9 +191,12 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
 }
 
 
+
+
 void CommunicationManager::sendChatMessage(const QString &message) {
     sendJson({
         {"type", "chatMessage"},
+        {"messageType", "User"},
         {"text", message}
     });
 }
@@ -237,30 +204,24 @@ void CommunicationManager::sendChatMessage(const QString &message) {
 void CommunicationManager::applyDiff() {
     sendJson({{"type", "applyDiff"}});
 }
-void CommunicationManager::initializeWithHardcodedData() {
-    // Use QTimer::singleShot to introduce delays.  This avoids blocking the main thread.
 
+void CommunicationManager::initializeWithHardcodedData() {
     QTimer::singleShot(100, this, [this]() {
         m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
-        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(500, this, [this]() {
         m_chatModel->addMessage("And this is a response from the LLM.", ChatModel::LLM);
-        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(1000, this, [this]() {
         m_chatModel->addMessage("Another user message.", ChatModel::User);
-        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(1500, this, [this]() {
         m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
-        m_stdinNotifier->setEnabled(true);
     });
     QTimer::singleShot(2000, this, [this]() {
-        // Hardcoded Diff Data
         QStringList paths = {"file1.cpp", "file2.h", "long_file_name_example.txt"};
         QList<QString> contents = {
             "+Added line 1\n-Removed line 2\nUnchanged line 3",
@@ -268,8 +229,6 @@ void CommunicationManager::initializeWithHardcodedData() {
             "-Removed line 1\n+Added very loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong line"
         };
         m_diffModel->setFiles(paths, contents);
-         m_stdinNotifier->setEnabled(true);
-
-        qDebug() << "Initialized with hardcoded data."; // Confirm in output
+        qDebug() << "Initialized with hardcoded data.";
     });
 }

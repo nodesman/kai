@@ -17,7 +17,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core WebSockets Network)
 
 add_executable(KaiDiff
         src/main.cpp
@@ -59,7 +59,7 @@ endif()
 
 # --- End Console Subsystem Handling ---
 
-target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::WebSockets Qt6::Network)
 
 set_target_properties(KaiDiff PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 install(TARGETS KaiDiff DESTINATION bin)
