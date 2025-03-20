@@ -34,7 +34,7 @@ async function main() {
         console.error("An error occurred:", error);
         try {
             const errorLogger: AIClient = new AIClient(new Config());
-            await errorLogger.logConversation({ type: 'error', error: (error as Error).message });
+            await errorLogger.logConversation({ type: 'error', error: (error as Error).message, conversationId: "error" });
         } catch (logError) {
             console.error("Error logging the error:", logError);
         }

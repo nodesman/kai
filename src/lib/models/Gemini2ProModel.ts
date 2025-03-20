@@ -74,7 +74,6 @@ class Gemini2ProModel extends BaseModel {
         }
     }
 
-
     convertToGeminiConversation(messages: Message[]): GeminiChatHistory {
         return messages.map(msg => {
             if (!msg.role || !msg.content) {

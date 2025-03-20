@@ -1,5 +1,4 @@
 // File: src/lib/CodeProcessor.ts
-
 import path from 'path';
 import { FileSystem } from './FileSystem';
 import { AIClient } from './AIClient';
@@ -7,10 +6,12 @@ import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { Config } from "./Config";
 import { DiffFile } from './types'; // Import DiffFile
 import { Conversation, Message } from './models/Conversation';
+import { v4 as uuidv4 } from 'uuid'; // Import UUID generator
 
 interface AIResponse {
     message: string;
     diffFiles: DiffFile[] | null;
+    explanation: string; // Add explanation field
 }
 
 class CodeProcessor {
@@ -19,6 +20,7 @@ class CodeProcessor {
     aiClient: AIClient;
     projectRoot: string;
     currentDiff: DiffFile[] | null = null; // Store the current diff
+    private conversations: { [id: string]: Conversation } = {}; // Store conversations
 
     constructor(config: Config) {
         this.config = config;
@@ -31,7 +33,7 @@ class CodeProcessor {
         return gpt3Encode(text).length;
     }
 
-    async buildPromptString(userPrompt: string): Promise<string> { // Returns a string
+    async buildPromptString(userPrompt: string, conversation: Conversation): Promise<string> { // Returns a string
         const keywords = this.extractKeywords(userPrompt);
         const filePaths = await this.fs.getProjectFiles(this.projectRoot);
         const relevantFilePaths = await this.findRelevantFiles(filePaths, keywords);
@@ -63,12 +65,42 @@ class CodeProcessor {
             promptString += fileContent;
             currentTokenCount += fileTokens;
         }
+
+        let conversationHistory = "";
+        for (const message of conversation.getMessages()) {
+            conversationHistory += `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}\n`;
+        }
+
         // Construct the base prompt
         let basePrompt = `You are a coding assistant.  I will give you files from my project, and you will answer my questions and comply with my change requests.
-            If I request code changes, respond ONLY with a diff of the MINIMAL changes necessary. Do NOT include markdown or additional explanations unless I ask for it. Respond with ONLY the diff. If you provide a diff, it should be inside a codeblock with the word "diff". The file to modify should be listed before the diff code block.`;
+            If I request code changes, provide ONLY a diff of the MINIMAL changes necessary INSIDE a code block with the word 'diff', followed by an explanation of the changes and important considerations formatted like the example that follows.
+            The response MUST include the file name before the diff code block.
+
+            **Example Response Format:**
+
+            **Explanation of Changes and Key Points**
+
+            *   **\`File1.ts\`**
+                *   Explanation of changes to File1.ts
+            *   **\`File2.ts\`**
+                *   Explanation of changes to File2.ts
+
+            **Important Considerations and Improvements**
+
+            *   Consideration 1.
+            *   Consideration 2.
+            File: File1.ts
+            \`\`\`diff
+            ...diff content for File1.ts...
+            \`\`\`
+            File: File2.ts
+            \`\`\`diff
+            ...diff content for File2.ts...
+            \`\`\``;
 
         // Prepend the base prompt
-        promptString = `${basePrompt}\n\n${promptString}\n\nUser: ${userPrompt}\n\nAssistant:`;
+        promptString = `${basePrompt}\n\n${promptString}\n\n${conversationHistory}\nUser: ${userPrompt}\n\nAssistant:`;
+
         return promptString;
     }
 
@@ -100,32 +132,86 @@ class CodeProcessor {
         return Array.from(relevantFiles); //Convert back to array
     }
 
-    async askQuestion(userPrompt: string): Promise<AIResponse> {
-        const promptString = await this.buildPromptString(userPrompt);
-        const aiResponse = await this.aiClient.getResponseFromAI(promptString);
+    async askQuestion(userPrompt: string, conversationId: string | null = null): Promise<AIResponse> {
+        let conversation: Conversation;
+        let newConversationId = false;
+        let safeConversationId: string;
 
-        let message = aiResponse; // Default: entire response is the message
+        if (conversationId && this.conversations[conversationId]) {
+            safeConversationId = conversationId;
+            conversation = this.conversations[safeConversationId];
+        } else {
+            newConversationId = true;
+            safeConversationId = uuidv4();  // Generate a new UUID
+            conversation = new Conversation();
+            this.conversations[safeConversationId] = conversation;
+        }
+
+        const promptString = await this.buildPromptString(userPrompt, conversation);
+        // Create a NEW conversation with the full context prompt
+        const llmConversation = new Conversation();
+        llmConversation.addMessage('user', promptString);
+
+        const aiResponseString = await this.aiClient.getResponseFromAI(llmConversation, safeConversationId);
+
+        conversation.addMessage('user', userPrompt);
+        conversation.addMessage('assistant', aiResponseString);
+
+        let message = "";
         let diffFiles: DiffFile[] | null = null;
+        let explanation = "";
 
-        //const diffRegex = /File:\s*([^\n]+)\n*```diff([\s\S]*?)```/g;
+        // 1. Improved Diff Extraction: Prioritize accurate diff retrieval
+        diffFiles = this.extractDiffs(aiResponseString); // Dedicated method
+
+        // 2. Extract Explanation
+        explanation = this.extractExplanation(aiResponseString);
+
+        // 3. Extract Main Message (After Diffs and Explanation are Removed)
+        message = this.extractMessage(aiResponseString, explanation, diffFiles);
+
+        message = message.trim(); // Clean up any leftover whitespace
+        return { message, diffFiles, explanation };
+    }
+
+    private extractDiffs(aiResponse: string): DiffFile[] | null {
         const diffRegex = /File:\s*([^\n`]+)\s*`{3}diff\n([\s\S]+?)`{3}/g;
+        const files: DiffFile[] = [];
         let match;
 
-        diffFiles = [];
-        let lastIndex = 0;
         while ((match = diffRegex.exec(aiResponse)) !== null) {
-
             const filePath = match[1].trim();
             const diffContent = match[2].trim();
-            diffFiles.push({ path: filePath, content: diffContent });
-            message = message.replace(match[0], '').trim();
-            lastIndex = match.index + match[0].length;
-
+            files.push({ path: filePath, content: diffContent });
         }
-        if(diffFiles.length === 0)
-            diffFiles = null;
 
-        return { message, diffFiles };
+        return files.length > 0 ? files : null;
+    }
+
+    private extractExplanation(aiResponse: string): string {
+        const explanationRegex = /\*\*Explanation of Changes and Key Points\*\*([\s\S]*?)(?:File:|$)/;
+        const match = aiResponse.match(explanationRegex);
+        return match ? match[1].trim() : "";
+    }
+
+    private extractMessage(aiResponse: string, explanation: string, diffFiles: DiffFile[] | null): string {
+        let message = aiResponse;
+
+        // Remove explanation if it exists
+        if (explanation) {
+            const explanationRegex = new RegExp(`\\*\\*Explanation of Changes and Key Points\\*\\*[\\s\\S]*?(?:File:|${escapeRegExp(message.slice(-10))}|$ )`);
+            message = message.replace(explanationRegex, '').trim();
+        }
+
+        // Remove diffs if they exist
+        if (diffFiles) {
+            diffFiles.forEach(diffFile => {
+                const diffBlockRegex = new RegExp(`File:\\s*${escapeRegExp(diffFile.path)}\\s*\`\`\`diff\\n[\\s\\S]*?\`\`\``, 'g');
+                message = message.replace(diffBlockRegex, '').trim();
+            });
+        }
+
+        return message.trim();
     }
 
     setCurrentDiff(diff: DiffFile[]): void {
@@ -140,7 +226,22 @@ class CodeProcessor {
         for (const diffFile of this.currentDiff) {
             await this.fs.applyDiffToFile(diffFile.path, diffFile.content);
         }
+
     }
+    async checkResponse(prompt: string): Promise<string> {
+        let conversation = new Conversation();
+        let safeConversationId = uuidv4();  // Generate a new UUID
+        this.conversations[safeConversationId] = conversation;
+        const promptString =  prompt;
+        conversation.addMessage("user", promptString)
+        const aiResponse = await this.aiClient.getResponseFromAI(conversation, safeConversationId);
+        return aiResponse;
+    }
+}
+
+// Helper function to escape regex special characters
+function escapeRegExp(string: string): string {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export { CodeProcessor };

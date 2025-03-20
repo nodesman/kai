@@ -3,3 +3,4 @@ node_modules
 *.jsonl
 bin
 cmake-build-debug
+qtsrc
