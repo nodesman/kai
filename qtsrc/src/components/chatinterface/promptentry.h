@@ -17,8 +17,6 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
 
-    private slots:`
-
 private:
 };
 
