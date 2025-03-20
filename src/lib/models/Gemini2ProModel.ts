@@ -25,6 +25,7 @@ class Gemini2ProModel extends BaseModel {
         super(config);
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
         this.modelName = "gemini-2.0-pro-exp-02-05";
+        console.log(this.modelName);
         this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     }
 
@@ -58,14 +59,8 @@ class Gemini2ProModel extends BaseModel {
 
             const lastMessageText = lastMessage.parts.map(part => part.text).join('');
 
-            // Use sendMessageStream with the *last message's text*
-            const result = await chatSession.sendMessageStream(lastMessageText);
-            let assistantMessage = "";
-            for await (const chunk of result.stream) {
-                assistantMessage += chunk.text();
-            }
-
-            return assistantMessage;
+            const result = await chatSession.sendMessage(lastMessageText);
+            return result.response.text();
 
         } catch (error) {
             this.handleError(error); // handleError already throws, so this is sufficient.
