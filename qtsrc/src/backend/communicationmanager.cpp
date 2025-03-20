@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QStandardPaths> //For standard paths
+#include <QTimer>
 #ifdef Q_OS_WIN
 #include <io.h>      // For _fileno on Windows
 #define STDIN_FILENO _fileno(stdin)
@@ -167,20 +168,33 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
 }
 
 void CommunicationManager::initializeWithHardcodedData() {
-    // Hardcoded Chat Data
-    m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
-    m_chatModel->addMessage("And this is a response from the LLM.", ChatModel::LLM);
-    m_chatModel->addMessage("Another user message.", ChatModel::User);
-    m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
+    // Use QTimer::singleShot to introduce delays.  This avoids blocking the main thread.
 
-    // Hardcoded Diff Data
-    QStringList paths = {"file1.cpp", "file2.h", "long_file_name_example.txt"};
-    QList<QString> contents = {
-        "+Added line 1\n-Removed line 2\nUnchanged line 3",
-        "Unchanged line 1\n+Added line 2",
-        "-Removed line 1\n+Added very loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong line"
-    };
-    m_diffModel->setFiles(paths, contents);
+    QTimer::singleShot(100, this, [this]() {
+        m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
+    });
 
-    qDebug() << "Initialized with hardcoded data."; // Confirm in output
+    QTimer::singleShot(500, this, [this]() {
+        m_chatModel->addMessage("And this is a response from the LLM.", ChatModel::LLM);
+    });
+
+    QTimer::singleShot(1000, this, [this]() {
+        m_chatModel->addMessage("Another user message.", ChatModel::User);
+    });
+
+    QTimer::singleShot(1500, this, [this]() {
+        m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
+    });
+    QTimer::singleShot(2000, this, [this]() {
+        // Hardcoded Diff Data
+        QStringList paths = {"file1.cpp", "file2.h", "long_file_name_example.txt"};
+        QList<QString> contents = {
+            "+Added line 1\n-Removed line 2\nUnchanged line 3",
+            "Unchanged line 1\n+Added line 2",
+            "-Removed line 1\n+Added very loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong line"
+        };
+        m_diffModel->setFiles(paths, contents);
+
+        qDebug() << "Initialized with hardcoded data."; // Confirm in output
+    });
 }
