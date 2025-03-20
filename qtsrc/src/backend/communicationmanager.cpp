@@ -46,6 +46,8 @@ CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel
 #endif
     m_stdinStream = new QTextStream(stdin, QIODevice::ReadOnly); //For reading
     // --- End Stdin Setup ---
+
+    initializeWithHardcodedData(); // Call the initialization function
 }
 
 void CommunicationManager::readStdin() {
@@ -107,7 +109,6 @@ void CommunicationManager::sendJson(const QJsonObject &obj) {
 
 void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
     if (obj["type"] == "chatMessage") {
-        // ... (your existing message processing logic) ...
         if (obj.contains("messageType") && obj["messageType"].isString() &&
             obj.contains("text") && obj["text"].isString()) {
             QString messageTypeStr = obj["messageType"].toString();
@@ -162,7 +163,24 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
         }
     } else {
         qDebug() << "Unknown message type:" << obj["type"];
-        emit errorReceived("Unknown message type: " + obj["type"].toString());
     }
 }
 
+void CommunicationManager::initializeWithHardcodedData() {
+    // Hardcoded Chat Data
+    m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
+    m_chatModel->addMessage("And this is a response from the LLM.", ChatModel::LLM);
+    m_chatModel->addMessage("Another user message.", ChatModel::User);
+    m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
+
+    // Hardcoded Diff Data
+    QStringList paths = {"file1.cpp", "file2.h", "long_file_name_example.txt"};
+    QList<QString> contents = {
+        "+Added line 1\n-Removed line 2\nUnchanged line 3",
+        "Unchanged line 1\n+Added line 2",
+        "-Removed line 1\n+Added very loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong line"
+    };
+    m_diffModel->setFiles(paths, contents);
+
+    qDebug() << "Initialized with hardcoded data."; // Confirm in output
+}

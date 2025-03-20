@@ -23,6 +23,8 @@ signals:
     void diffApplied();
 
 public:
+    void initializeWithHardcodedData();
+
     explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
 
     void readStdin();
