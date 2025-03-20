@@ -1,4 +1,3 @@
-// src/backend/communicationmanager.cpp
 #include "communicationmanager.h"
 #include <QDebug>
 #include <QJsonObject>
@@ -6,22 +5,25 @@
 #include <QFile>
 #include <QTextStream>
 #include <QCoreApplication>
-#include <unistd.h>  // For STDIN_FILENO on POSIX
+#include <unistd.h>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <QStandardPaths> //For standard paths
+#include <QStandardPaths>
 #include <QTimer>
+#include <QSocketNotifier>
+
 #ifdef Q_OS_WIN
-#include <io.h>      // For _fileno on Windows
+#include <io.h>
 #define STDIN_FILENO _fileno(stdin)
 #endif
 
 CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel, ChatModel *chatModel)
     : QObject(parent)
+    , m_chatModel(chatModel)
+    , m_diffModel(diffModel)
+    , m_stdinStream(nullptr) // Initialize to nullptr
+    , m_stdoutStream(nullptr)
 {
-    m_chatModel = chatModel;
-    m_diffModel = diffModel;
-
     connect(this, &CommunicationManager::chatMessageReceived,
             [this](const QString &message, int messageType) {
                 m_chatModel->addMessage(message, static_cast<ChatModel::MessageType>(messageType));
@@ -29,67 +31,72 @@ CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel
     connect(this, &CommunicationManager::requestStatusChanged, m_chatModel, &ChatModel::setRequestPending);
     connect(this, &CommunicationManager::diffResultReceived, m_diffModel, &DiffModel::setFiles);
     connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel);
+    connect(this, &CommunicationManager::ready, this, &CommunicationManager::sendReadySignal);
 
+    // --- Stdin Setup (Corrected) ---
+    m_stdinStream = new QTextStream(stdin, QIODevice::ReadOnly); // Persistent stream
+    m_stdoutStream = new QTextStream(stdout, QIODevice::WriteOnly);
 
-
-    // --- Stdin Setup ---
-#ifndef Q_OS_WIN //Not windows
+#ifndef Q_OS_WIN
     m_stdinNotifier = new QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read, this);
     connect(m_stdinNotifier, &QSocketNotifier::activated, this, &CommunicationManager::readStdin);
-    m_stdinNotifier->setEnabled(true); // Enable it!
-#else //Windows
-    // QSocketNotifier doesn't work reliably with stdin on Windows.
-    // A better approach on Windows is to use a named pipe or QLocalSocket.
-    //  We use a timer for demonstration only.  This is NOT ideal.
-    QTimer *stdinTimer = new QTimer(this);
-    connect(stdinTimer, &QTimer::timeout, this, &CommunicationManager::readStdin);
-    stdinTimer->start(100); // Check every 100ms. *Not* a good long-term solution.
+    m_stdinNotifier->setEnabled(true);
+#else
+    // Placeholder: Still not ideal, but better than a fast timer.
+    m_stdinNotifier = new QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read, this);
+    connect(m_stdinNotifier, &QSocketNotifier::activated, this, &CommunicationManager::readStdin); //Connect to activated.
+    m_stdinNotifier->setEnabled(true);
 #endif
-    m_stdinStream = new QTextStream(stdin, QIODevice::ReadOnly); //For reading
-    // --- End Stdin Setup ---
 
-    initializeWithHardcodedData(); // Call the initialization function
+    emit ready(); // Emit the ready signal after setup
+    // initializeWithHardcodedData(); // Ideally, replace this.
 }
 
-void CommunicationManager::readStdin() {
-#ifndef Q_OS_WIN
-    if (!m_stdinNotifier->isEnabled()) return;
-#endif
+void CommunicationManager::sendReadySignal() {
+    *m_stdoutStream << "READY\n";
+    m_stdoutStream->flush();
+}
 
-    // while (!m_stdinStream->atEnd()) //Check for data and read until end of line
-    while(m_stdinStream->device()->bytesAvailable() > 0) //Check for any available bytes
-    {
-        QString line = m_stdinStream->readLine();
 
-        if (line.isEmpty()) continue;
 
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
-        if (error.error != QJsonParseError::NoError) {
-            qDebug() << "JSON parse error:" << error.errorString();
-            emit errorReceived("JSON Parse Error: " + error.errorString());
-            continue;
+void CommunicationManager::readStdin()
+{
+    qDebug() << "In readStdin";
+    if (m_stdinNotifier->type() == QSocketNotifier::Read) {
+        while (m_stdinStream->device()->bytesAvailable() > 0)
+        {
+            QString line = m_stdinStream->readLine();
+
+            if (line.isEmpty()) {
+                continue; // Skip empty lines
+            }
+
+            QJsonParseError error;
+            QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
+
+            if (error.error != QJsonParseError::NoError) {
+                emit errorReceived("JSON Parse Error: " + error.errorString());
+                continue;
+            }
+
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                qDebug() << "Received JSON from stdin:" << obj;
+                processReceivedJson(obj);
+            } else {
+                emit errorReceived("Received data is not a JSON object.");
+            }
         }
-
-        if (doc.isObject()) {
-            QJsonObject obj = doc.object();
-            qDebug() << "Received JSON from stdin:" << obj; //VERY important
-
-            processReceivedJson(obj); //Call processing function
-
-        } else {
-            qDebug() << "Received data is not a JSON object.";
-            emit errorReceived("Received data is not a JSON object.");
-        }
+         m_stdinNotifier->setEnabled(false);
     }
+
 }
+
 
 CommunicationManager::~CommunicationManager() {
-
-#ifndef Q_OS_WIN //Cleanup for posix
-    delete m_stdinNotifier; // Clean up
-#endif
-    delete m_stdinStream;
+    delete m_stdinNotifier;
+    delete m_stdinStream;   // Clean up the persistent stream
+    delete m_stdoutStream;
 }
 
 void CommunicationManager::sendChatMessage(const QString &message) {
@@ -106,10 +113,12 @@ void CommunicationManager::applyDiff() {
 void CommunicationManager::sendJson(const QJsonObject &obj) {
     QJsonDocument doc(obj);
     QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
+    *m_stdoutStream << jsonData << "\n";
+    m_stdoutStream->flush();
 }
 
 void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
-    if (obj["type"] == "chatMessage") {
+   if (obj["type"] == "chatMessage") {
         if (obj.contains("messageType") && obj["messageType"].isString() &&
             obj.contains("text") && obj["text"].isString()) {
             QString messageTypeStr = obj["messageType"].toString();
@@ -121,21 +130,23 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
                 messageType = ChatModel::LLM;
             } else {
                 emit errorReceived("Invalid messageType in chatMessage");
-                return; // Exit if invalid type
+                return;
             }
             emit chatMessageReceived(obj["text"].toString(), messageType);
+
         } else {
             emit errorReceived("Invalid chatMessage format.");
         }
     } else if (obj["type"] == "requestStatus") {
-        //... rest of the processing.
         if (obj.contains("status") && obj["status"].isBool()) {
             emit requestStatusChanged(obj["status"].toBool());
+
         } else {
             emit errorReceived("Invalid requestStatus format");
         }
     } else if (obj["type"] == "diffApplied") {
         emit diffApplied();
+
     } else if (obj["type"] == "diffResult") {
         if (obj.contains("files") && obj["files"].isArray()) {
             QJsonArray filesArray = obj["files"].toArray();
@@ -159,12 +170,14 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
                 }
             }
             emit diffResultReceived(filePaths, fileContents);
+
         } else {
             emit errorReceived("Invalid diffResult format.");
         }
     } else {
         qDebug() << "Unknown message type:" << obj["type"];
     }
+    m_stdinNotifier->setEnabled(true); // Re-enable *after* processing.  Crucial!
 }
 
 void CommunicationManager::initializeWithHardcodedData() {
@@ -172,18 +185,22 @@ void CommunicationManager::initializeWithHardcodedData() {
 
     QTimer::singleShot(100, this, [this]() {
         m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
+        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(500, this, [this]() {
         m_chatModel->addMessage("And this is a response from the LLM.", ChatModel::LLM);
+        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(1000, this, [this]() {
         m_chatModel->addMessage("Another user message.", ChatModel::User);
+        m_stdinNotifier->setEnabled(true);
     });
 
     QTimer::singleShot(1500, this, [this]() {
         m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
+        m_stdinNotifier->setEnabled(true);
     });
     QTimer::singleShot(2000, this, [this]() {
         // Hardcoded Diff Data
@@ -194,6 +211,7 @@ void CommunicationManager::initializeWithHardcodedData() {
             "-Removed line 1\n+Added very loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong line"
         };
         m_diffModel->setFiles(paths, contents);
+         m_stdinNotifier->setEnabled(true);
 
         qDebug() << "Initialized with hardcoded data."; // Confirm in output
     });

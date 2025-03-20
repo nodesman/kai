@@ -21,13 +21,18 @@ signals:
     void errorReceived(const QString &errorMessage);
     void diffResultReceived(const QStringList& filePaths, const QList<QString>& fileContents);
     void diffApplied();
+    void ready(); // Add this signal
 
 public:
     void initializeWithHardcodedData();
 
     explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
 
+    void sendReadySignal();
+
     void readStdin();
+
+    void handleActivated(QSocketDescriptor socket, QSocketNotifier::Type type);
 
     ~CommunicationManager();
 
@@ -47,6 +52,7 @@ private:
     QTextStream *m_stdinStream; // Add this
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;
+    QTextStream * m_stdoutStream;
 };
 
 #endif // COMMUNICATIONMANAGER_H
