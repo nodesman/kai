@@ -42,28 +42,11 @@ void ChatInterface::setupUI() {
     QWidget *inputContainer = new QWidget(this);
     inputContainer->setLayout(inputLayout);
 
-
     mainLayout->addWidget(conversationHistory);
     mainLayout->addWidget(inputContainer);
 
     setLayout(mainLayout);
-    connect(promptInput, &QTextEdit::textChanged, this, [this]() {
-        //Adjust height, up to a maximum
-        QTextDocument *doc = promptInput->document();
-        doc->setTextWidth(promptInput->width()); // Important for correct height calculation
-        qreal newHeight = doc->size().height() + 10; // +10 for some padding.
-        QFontMetrics metrics(promptInput->font());
-        qreal maxHeight = metrics.lineSpacing() * 10; // e.g., max 10 lines of text
-
-        if (newHeight > maxHeight) {
-            newHeight = maxHeight;
-            promptInput->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        } else {
-            promptInput->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        }
-
-        promptInput->setFixedHeight(int(newHeight));
-    });
+    // Removed the textChanged connection from here. It's now handled in PromptEntry.
 
     connect(promptInput, &PromptEntry::sendRequested, [this]() {
         if (promptInput->toPlainText().trimmed().isEmpty()) return;
@@ -88,7 +71,6 @@ void ChatInterface::setModel(ChatModel *model) {
     }
 }
 
-
 void ChatInterface::handleRequestPendingChanged() {
     if (chatModel) {
         if (chatModel->requestPending())
@@ -102,7 +84,6 @@ void ChatInterface::handleRequestPendingChanged() {
 void ChatInterface::updateStatus(const QString &statusMessage) {
     statusBar->setText(statusMessage);
 }
-
 
 void ChatInterface::updateChatHistory() {
     conversationHistory->updateHistory();

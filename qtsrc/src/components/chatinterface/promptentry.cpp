@@ -1,18 +1,18 @@
 #include "promptentry.h"
+#include <QTextDocument>
+#include <QFontMetrics>
+#include <QDebug>
 
 PromptEntry::PromptEntry(QWidget *parent) : QTextEdit(parent) {
-    // You can set any default properties for the QTextEdit here, if needed.
-    // For example:
-    // setFont(...);
-    // setPlaceholderText("Enter your message...");
+    //Set up max height for size hint calculation
+    QFontMetrics metrics(this->font());
 }
 
 void PromptEntry::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-        if (event->modifiers() & Qt::ControlModifier) { // Or Qt::ShiftModifier
-            emit sendRequested();
-            return; // Consume the event
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) &&
+        event->modifiers() & Qt::ControlModifier) {
+        emit sendRequested();
+        return;
         }
-    }
-    QTextEdit::keyPressEvent(event); // Call base class implementation
+    QTextEdit::keyPressEvent(event);
 }

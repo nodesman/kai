@@ -2,7 +2,8 @@
 #define PROMPTENTRY_H
 
 #include <QTextEdit>
-#include <QKeyEvent> // Include QKeyEvent
+#include <QKeyEvent>
+#include <QTimer> // Include QTimer
 
 class PromptEntry : public QTextEdit {
     Q_OBJECT
@@ -11,10 +12,14 @@ public:
     explicit PromptEntry(QWidget *parent = nullptr);
 
     signals:
-        void sendRequested(); // Signal to indicate the user wants to send
+        void sendRequested();
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+
+    private slots:
+
+private:
 };
 
 #endif // PROMPTENTRY_H
