@@ -41,13 +41,10 @@ public slots:
     void processReceivedJson(const QJsonObject &obj);
 
 private:
-    QFile m_dataFile; // Regular QFile
-    QFileSystemWatcher m_fileWatcher;
     QSocketNotifier *m_stdinNotifier; // Add this
     QTextStream *m_stdinStream; // Add this
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;
-    const QString m_communicationFilePath; // Store the file path
 };
 
 #endif // COMMUNICATIONMANAGER_H

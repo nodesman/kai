@@ -16,14 +16,8 @@
 #endif
 
 CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel, ChatModel *chatModel)
-    : QObject(parent),
-      // Use a consistent, known location for the file.
-      m_communicationFilePath(
-          QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/communication_file.txt"),
-      m_dataFile(m_communicationFilePath) // Initialize QFile with the path
+    : QObject(parent)
 {
-    qDebug() << "Communication file path:" << m_communicationFilePath;
-
     m_chatModel = chatModel;
     m_diffModel = diffModel;
 
@@ -35,39 +29,7 @@ CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel
     connect(this, &CommunicationManager::diffResultReceived, m_diffModel, &DiffModel::setFiles);
     connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel);
 
-    // Set up file watching (before potentially opening/creating)
-    if (!m_fileWatcher.addPath(m_communicationFilePath)) {
-        qDebug() << "Error: Could not watch file:" << m_communicationFilePath;
-        emit errorReceived("Could not watch communication file");
-        // Don't return; try to proceed anyway. The file might be created later.
-    }
 
-    // --- Hardcoded Diff Data (for testing) ---
-    QStringList filePaths;
-    QList<QString> fileContents;
-
-    filePaths << "file1.txt" << "file2.cpp";
-
-    fileContents << R"(
--This is the original line.
-+This is the modified line.
- This is an unchanged line.
--This line was removed.
-+This line was added.
-)" << R"(
- // file2.cpp
--#include <iostream>
-+#include <cstdio>
-
- int main() {
--    std::cout << "Hello\n";
-+    printf("Hello\n");
-     return 0;
- }
-)";
-
-    emit diffResultReceived(filePaths, fileContents);
-    // --- End Hardcoded Data ---
 
     // --- Stdin Setup ---
 #ifndef Q_OS_WIN //Not windows
@@ -120,9 +82,6 @@ void CommunicationManager::readStdin() {
 }
 
 CommunicationManager::~CommunicationManager() {
-    if (m_fileWatcher.files().contains(m_communicationFilePath)) {
-        m_fileWatcher.removePath(m_communicationFilePath);
-    }
 
 #ifndef Q_OS_WIN //Cleanup for posix
     delete m_stdinNotifier; // Clean up
@@ -144,16 +103,6 @@ void CommunicationManager::applyDiff() {
 void CommunicationManager::sendJson(const QJsonObject &obj) {
     QJsonDocument doc(obj);
     QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
-
-    // Open and *truncate* the file for writing.  *Explicitly* specify the path.
-    if (m_dataFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-        QTextStream out(&m_dataFile);
-        out << jsonData << Qt::endl;
-        m_dataFile.close(); // Close immediately after writing.
-    } else {
-        qDebug() << "Error opening file for writing:" << m_dataFile.errorString();
-        emit errorReceived("Could not write to communication file: " + m_dataFile.errorString());
-    }
 }
 
 void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
