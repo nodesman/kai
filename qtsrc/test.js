@@ -1,109 +1,79 @@
-const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
+const os = require('os'); // Import the 'os' module
+// Determine the temporary directory (cross-platform)
 
-// Path to your KaiDiff executable.
-const kaiDiffPath = path.join(__dirname, './', 'cmake-build-debug', 'bin', 'KaiDiff'); // Modify path
-const scriptDir = __dirname;
-// Function to send a JSON message
-function sendJsonMessage(process, message) {
-    const jsonString = JSON.stringify(message);
-    process.stdin.write(jsonString + '\n');
+// Use the home directory
+const commFilePath = path.join(os.homedir(), 'communication.json');
+
+function sendMessage(message) {
+    try {
+        // Convert the message to a JSON string and append a newline
+        const jsonMessage = JSON.stringify(message) + '\n';
+
+        // Append the message to the file (create it if it doesn't exist)
+        fs.appendFileSync(commFilePath, jsonMessage, 'utf8');
+        console.log(`Sent message to ${commFilePath}:`, message);
+    } catch (err) {
+        console.error('Error writing to communication file:', err);
+    }
 }
 
-// Function for delay
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function sendChatMessage(text, messageType = "User") {
+    sendMessage({
+        type: "chatMessage",
+        text: text,
+        messageType: messageType
+    });
 }
 
-async function testKaiDiff() {
-    // Spawn the KaiDiff process
-    const kaiDiffProcess = spawn(kaiDiffPath, [], {
-        stdio: ['pipe', 'pipe', 'pipe'], // Use stdio: 'pipe'
-        cwd: path.resolve(scriptDir, './')
+function sendDiffResult(files) {
+    sendMessage({
+        type: "diffResult",
+        files: files
     });
-
-    // --- Redirect and Capture stderr --- and WAIT FOR READY
-    let stderrOutput = ''; // Store stderr output
-    kaiDiffProcess.stderr.on('data', async (data) => {
-        stderrOutput += data; // Accumulate stderr data
-        process.stdout.write(data); //  Write to Node.js's stdout (console)
-        if (stderrOutput.includes('READY')) {
-            // Now it's safe to send messages
-            console.log("KaiDiff is ready. Sending messages...");
-
-            // --- Test Cases (Moved inside the 'READY' check) ---
-            console.log("Sending chatMessage...");
-            sendJsonMessage(kaiDiffProcess, { type: 'chatMessage', messageType: 'User', text: 'Hello from Node.js!' });
-            await delay(500);
-
-            console.log("Sending requestStatus...");
-            sendJsonMessage(kaiDiffProcess, { type: 'requestStatus', status: true });
-            await delay(500);
-
-            // ... (the rest of your test messages) ...
-            console.log("Sending diffResult...");
-            sendJsonMessage(kaiDiffProcess, {
-                type: 'diffResult',
-                files: [
-                    { path: 'file1.txt', content: '+This is a new line' },
-                    { path: 'file2.txt', content: '-This line was removed' }
-                ]
-            });
-            await delay(500);
-            //
-            console.log("Sending applyDiff...");
-            sendJsonMessage(kaiDiffProcess, { type: 'applyDiff' });
-            await delay(500);
-            //
-            console.log("Sending invalid message type...");
-            sendJsonMessage(kaiDiffProcess, { type: 'invalidType', data: 'some data' });
-            await delay(500);
-            //
-            console.log("Sending chat message followed by large diff...");
-            sendJsonMessage(kaiDiffProcess, { type: 'chatMessage', messageType: 'User', text: 'Preparing large diff...' });
-            await delay(500);
-            const largeDiffFiles = [];
-            for (let i = 0; i < 100; i++) {
-                largeDiffFiles.push({ path: `large_file_${i}.txt`, content: `+Large content line ${i}` });
-            }
-            sendJsonMessage(kaiDiffProcess, { type: 'diffResult', files: largeDiffFiles });
-            await delay(2000);
-            //
-            console.log("Testing QSocketNotifier Flooding...");
-            for(let i = 0; i < 50; i++) {
-                sendJsonMessage(kaiDiffProcess, { type: 'chatMessage', messageType: 'User', text: `Flooding message ${i}` });
-                await delay(50);
-            }
-            await delay(1000);
-            //
-            console.log("Sending invalid chatMessage...");
-            sendJsonMessage(kaiDiffProcess, { type: 'chatMessage',  text: 'Hello from Node.js!' });
-            await delay(500);
-            //
-            console.log("Sending invalid requestStatus...");
-            sendJsonMessage(kaiDiffProcess, { type: 'requestStatus',  });
-            await delay(500);
-            //
-            console.log("Sending large chat history...");
-            for (let i = 0; i < 50; i++) {
-                sendJsonMessage(kaiDiffProcess, { type: 'chatMessage', messageType: 'LLM', text: `Response line ${i}: ` + "This is a very long line of text to simulate a lengthy chat history entry. ".repeat(10) });
-                await delay(100);
-            }
-            await delay(2000);
-
-            console.log("Testing complete.");
-            kaiDiffProcess.stdin.end(); // Close the input stream
-
-        }
-    });
-
-
-    // Handle process exit
-    kaiDiffProcess.on('close', (code) => {
-        console.log(`KaiDiff process exited with code ${code}`);
-    });
-
-    kaiDiffProcess.stdin.setEncoding('utf-8');
 }
 
-testKaiDiff();
+function sendRequestStatus(status) {
+    sendMessage({
+        type: "requestStatus",
+        status: status
+    });
+}
+
+function sendDiffApplied() {
+    sendMessage({
+        type: "diffApplied"
+    });
+}
+
+
+// --- Example Usage (and testing) ---
+
+setTimeout(() => {
+    // Now, start sending messages:
+    sendChatMessage("Initial message from Node.js!", "LLM");
+    sendRequestStatus(true);
+
+
+    setTimeout(() => {
+        sendChatMessage("Another message from Node.js", "User");
+        sendRequestStatus(false);
+    }, 1000);
+
+    setTimeout(() => {
+        const diffFiles = [
+            { path: "file1.js", content: "+console.log('Hello');\n-console.log('Goodbye');" },
+            { path: "file2.css", content: "body {\n+  color: blue;\n-  color: red;\n}" }
+        ];
+        sendDiffResult(diffFiles);
+    }, 2000);
+
+    // setTimeout(() => {
+    //     sendDiffApplied();
+    // }, 3000);
+
+    setTimeout(() => {
+        sendChatMessage("And a final message", "LLM");
+    }, 4000);
+}, 3000);

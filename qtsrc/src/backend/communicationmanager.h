@@ -1,6 +1,7 @@
 #ifndef COMMUNICATIONMANAGER_H
 #define COMMUNICATIONMANAGER_H
 
+#include <qdir.h>
 #include <QObject>
 #include <QString>
 #include <QJsonObject>
@@ -30,6 +31,8 @@ public:
 
     void sendReadySignal();
 
+    void onFileChanged(const QString &path);
+
     void readStdin();
 
     void handleActivated(QSocketDescriptor socket, QSocketNotifier::Type type);
@@ -53,6 +56,9 @@ private:
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;
     QTextStream * m_stdoutStream;
+    QString m_commFilePath;
+    QFileSystemWatcher  *m_fileWatcher;
+    QString m_buffer;
 };
 
 #endif // COMMUNICATIONMANAGER_H
