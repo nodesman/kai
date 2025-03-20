@@ -1,16 +1,24 @@
-// lib/CodeProcessor.ts
+// File: src/lib/CodeProcessor.ts
+
 import path from 'path';
 import { FileSystem } from './FileSystem';
 import { AIClient } from './AIClient';
 import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { Config } from "./Config";
+import { DiffFile } from './types'; // Import DiffFile
 import { Conversation, Message } from './models/Conversation';
+
+interface AIResponse {
+    message: string;
+    diffFiles: DiffFile[] | null;
+}
 
 class CodeProcessor {
     config: Config;
     fs: FileSystem;
     aiClient: AIClient;
     projectRoot: string;
+    currentDiff: DiffFile[] | null = null; // Store the current diff
 
     constructor(config: Config) {
         this.config = config;
@@ -55,10 +63,15 @@ class CodeProcessor {
             promptString += fileContent;
             currentTokenCount += fileTokens;
         }
+        // Construct the base prompt
+        let basePrompt = `You are a coding assistant.  I will give you files from my project, and you will answer my questions and comply with my change requests.
+            If I request code changes, respond ONLY with a diff of the MINIMAL changes necessary. Do NOT include markdown or additional explanations unless I ask for it. Respond with ONLY the diff. If you provide a diff, it should be inside a codeblock with the word "diff". The file to modify should be listed before the diff code block.`;
 
-        promptString += `\n\nUser: ${userPrompt}\n\nAssistant:`; // Add user prompt directly
+        // Prepend the base prompt
+        promptString = `${basePrompt}\n\n${promptString}\n\nUser: ${userPrompt}\n\nAssistant:`;
         return promptString;
     }
+
     optimizeWhitespace(code: string): string {
         code = code.replace(/[ \t]+$/gm, '');
         code = code.replace(/\n\s*\n/g, '\n\n');
@@ -87,10 +100,46 @@ class CodeProcessor {
         return Array.from(relevantFiles); //Convert back to array
     }
 
-    async askQuestion(userPrompt: string): Promise<string> {
-        const promptString = await this.buildPromptString(userPrompt); // Get the complete prompt string
-        const response = await this.aiClient.getResponseFromAI(promptString); // Pass the STRING
-        return response;
+    async askQuestion(userPrompt: string): Promise<AIResponse> {
+        const promptString = await this.buildPromptString(userPrompt);
+        const aiResponse = await this.aiClient.getResponseFromAI(promptString);
+
+        let message = aiResponse; // Default: entire response is the message
+        let diffFiles: DiffFile[] | null = null;
+
+        //const diffRegex = /File:\s*([^\n]+)\n*```diff([\s\S]*?)```/g;
+        const diffRegex = /File:\s*([^\n`]+)\s*`{3}diff\n([\s\S]+?)`{3}/g;
+        let match;
+
+        diffFiles = [];
+        let lastIndex = 0;
+        while ((match = diffRegex.exec(aiResponse)) !== null) {
+
+            const filePath = match[1].trim();
+            const diffContent = match[2].trim();
+            diffFiles.push({ path: filePath, content: diffContent });
+            message = message.replace(match[0], '').trim();
+            lastIndex = match.index + match[0].length;
+
+        }
+        if(diffFiles.length === 0)
+            diffFiles = null;
+
+        return { message, diffFiles };
+    }
+
+    setCurrentDiff(diff: DiffFile[]): void {
+        this.currentDiff = diff;
+    }
+
+    async applyDiff(): Promise<void> {
+        if (!this.currentDiff) {
+            throw new Error("No diff to apply.");
+        }
+
+        for (const diffFile of this.currentDiff) {
+            await this.fs.applyDiffToFile(diffFile.path, diffFile.content);
+        }
     }
 }
 

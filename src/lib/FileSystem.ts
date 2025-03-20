@@ -1,9 +1,10 @@
+//File: src/lib/FileSystem.ts
 import fs from 'fs/promises';
 import path from 'path';
 import ignore from 'ignore';
 
 class FileSystem {
-    async getProjectFiles(projectRoot: string): Promise<string[]> {
+    async getProjectFiles(projectRoot: string = process.cwd()): Promise<string[]> {
         const gitignorePath = path.join(projectRoot, '.gitignore');
         let gitignoreContent = '';
         try {
@@ -28,7 +29,6 @@ class FileSystem {
         ];
 
         ig.add(ignorePatterns);
-
 
         const isRelevant = (filePath: string, isDirectory = false): boolean => {
             const relativePath = path.relative(projectRoot, filePath);
@@ -73,8 +73,6 @@ class FileSystem {
         return files;
     }
 
-
-
     async readFileContents(filePaths: string[]): Promise<{ [filePath: string]: string | null }> {
         const fileContents: { [filePath: string]: string | null } = {};
         for (const filePath of filePaths) {
@@ -94,7 +92,6 @@ class FileSystem {
         }
         return fileContents;
     }
-
 
     async writeFile(filePath: string, content: string): Promise<void> {
         try {
@@ -160,10 +157,62 @@ class FileSystem {
             }
             return true;
 
-
         } catch (error: any) {
             console.error(`Error checking if file is text: ${filePath}`, error);
             return false;
+        }
+    }
+
+    async applyDiffToFile(filePath: string, diffContent: string, projectRoot: string = process.cwd()): Promise<void> {
+        const fullPath = path.resolve(projectRoot, filePath); // Ensure full path
+        console.log("Applying to file",fullPath)
+        try {
+            let originalContent = await this.readFile(fullPath);
+            if (originalContent === null) {
+                originalContent = ""; // Treat as creating a new file if it doesn't exist.
+            }
+
+            const lines = originalContent.split('\n');
+            const diffLines = diffContent.split('\n');
+
+            let resultLines: string[] = [];
+            let originalLineIndex = 0; // Keep track of where we are in original content
+
+            for (const diffLine of diffLines) {
+                if (diffLine.startsWith('+')) {
+                    // Add the line from the diff
+                    resultLines.push(diffLine.slice(1));
+                } else if (diffLine.startsWith('-')) {
+                    // Skip this line from original, by incrementing pointer
+                    originalLineIndex++;
+                } else {  // Context line
+                    // catch up to the current diffLine
+                    while(originalLineIndex < lines.length && lines[originalLineIndex] !== diffLine){
+                        resultLines.push(lines[originalLineIndex])
+                        originalLineIndex++;
+                    }
+
+                    if(originalLineIndex < lines.length){
+                        resultLines.push(lines[originalLineIndex]);
+                        originalLineIndex++;
+                    } else if (diffLine){ //if we have content but no original line
+                        resultLines.push(diffLine)
+                    }
+
+                }
+            }
+            //If any remaining lines in original that were not removed, add
+            while(originalLineIndex < lines.length){
+                resultLines.push(lines[originalLineIndex]);
+                originalLineIndex++;
+            }
+            const newContent = resultLines.join('\n');
+            await this.writeFile(fullPath, newContent);
+            console.log(`Applied diff to ${filePath}`);
+
+        } catch (error: any) {
+            console.error(`Error applying diff to ${filePath}:`, error);
+            throw error; // Re-throw to be handled by the caller
         }
     }
 }

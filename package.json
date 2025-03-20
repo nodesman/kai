@@ -19,6 +19,7 @@
   "author": "Raj",
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "@types/ws": "^8.18.0",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "chalk": "^5.4.1",
