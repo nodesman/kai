@@ -24,7 +24,8 @@ class Gemini2ProModel extends BaseModel {
     constructor(config: Config) {
         super(config);
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        this.modelName = "gemini-2.0-flash";  // Or whichever model you're using
+        this.modelName = "gemini-2.0-pro-exp-02-05";
+        console.log(this.modelName);
         this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     }
 
