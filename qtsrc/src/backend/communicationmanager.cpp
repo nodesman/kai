@@ -1,111 +1,141 @@
-// src/backend/communicationmanager.cpp
 #include "communicationmanager.h"
 #include <QDebug>
 #include <QJsonObject>
 #include <QJsonDocument>
-#include <QFile>
-#include <QTextStream>
-#include <QCoreApplication>
-#include <unistd.h>  // For STDIN_FILENO on POSIX
-#include <QFileInfo>
 #include <QJsonArray>
-#include <QStandardPaths> //For standard paths
+#include <QLocalSocket>
+#include <QLocalServer>
+#include <QCoreApplication>
 #include <QTimer>
-#ifdef Q_OS_WIN
-#include <io.h>      // For _fileno on Windows
-#define STDIN_FILENO _fileno(stdin)
-#endif
+#include <QThread> // For QThread::msleep
 
 CommunicationManager::CommunicationManager(QObject *parent, DiffModel *diffModel, ChatModel *chatModel)
     : QObject(parent)
+    , m_chatModel(chatModel)
+    , m_diffModel(diffModel)
+    , m_server(new QLocalServer(this))
 {
-    m_chatModel = chatModel;
-    m_diffModel = diffModel;
+    // --- Remove the socket file if it exists (BEFORE listening) ---
+    QLocalServer::removeServer("KaiDiffLocalSocket"); // This is crucial
 
-    connect(this, &CommunicationManager::chatMessageReceived,
-            [this](const QString &message, int messageType) {
-                m_chatModel->addMessage(message, static_cast<ChatModel::MessageType>(messageType));
-            });
-    connect(this, &CommunicationManager::requestStatusChanged, m_chatModel, &ChatModel::setRequestPending);
-    connect(this, &CommunicationManager::diffResultReceived, m_diffModel, &DiffModel::setFiles);
-    connect(this, &CommunicationManager::diffApplied, m_diffModel, &DiffModel::clearDiffModel);
+    // --- Local Socket Setup (with retry) ---
+    int retries = 10;
+    int delayMs = 100; // 100ms delay
+    bool listening = false;
+    for (int i = 0; i < retries; ++i) {
+        if (m_server->listen("KaiDiffLocalSocket")) {
+            listening = true;
+            break; // Success!
+        }
+        qWarning() << "Failed to start local server (attempt" << i + 1 << "):" << m_server->errorString();
+        QThread::msleep(delayMs); // Wait before retrying
+    }
 
-
-
-    // --- Stdin Setup ---
-#ifndef Q_OS_WIN //Not windows
-    m_stdinNotifier = new QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read, this);
-    connect(m_stdinNotifier, &QSocketNotifier::activated, this, &CommunicationManager::readStdin);
-    m_stdinNotifier->setEnabled(true); // Enable it!
-#else //Windows
-    // QSocketNotifier doesn't work reliably with stdin on Windows.
-    // A better approach on Windows is to use a named pipe or QLocalSocket.
-    //  We use a timer for demonstration only.  This is NOT ideal.
-    QTimer *stdinTimer = new QTimer(this);
-    connect(stdinTimer, &QTimer::timeout, this, &CommunicationManager::readStdin);
-    stdinTimer->start(100); // Check every 100ms. *Not* a good long-term solution.
-#endif
-    m_stdinStream = new QTextStream(stdin, QIODevice::ReadOnly); //For reading
-    // --- End Stdin Setup ---
-
-    initializeWithHardcodedData(); // Call the initialization function
+    if (listening) {
+        connect(m_server, &QLocalServer::newConnection, this, &CommunicationManager::handleNewConnection);
+        qDebug() << "Local server listening on: KaiDiffLocalSocket";
+        emit serverReady(); // Emit the signal - Server is ACTUALLY ready
+    } else {
+        qCritical() << "Failed to start local server after multiple retries. Exiting.";
+        QCoreApplication::exit(1); // Exit the application.
+    }
 }
 
-void CommunicationManager::readStdin() {
-#ifndef Q_OS_WIN
-    if (!m_stdinNotifier->isEnabled()) return;
-#endif
+void CommunicationManager::handleNewConnection() {
+    m_clientSocket = m_server->nextPendingConnection();
+    if (!m_clientSocket) {
+        qWarning() << "No pending connection found, despite newConnection signal.";
+        return;
+    }
+    qDebug() << "Client connected!";
+    connect(m_clientSocket, &QLocalSocket::readyRead, this, &CommunicationManager::readFromSocket);
+    connect(m_clientSocket, &QLocalSocket::disconnected, this, &CommunicationManager::clientDisconnected);
+    connect(m_clientSocket, &QLocalSocket::errorOccurred, this, &CommunicationManager::socketError);
 
-    // while (!m_stdinStream->atEnd()) //Check for data and read until end of line
-    while(m_stdinStream->device()->bytesAvailable() > 0) //Check for any available bytes
-    {
-        QString line = m_stdinStream->readLine();
+    sendJson(QJsonObject({{"status", "connected"}, {"message", "Welcome to KaiDiff!"}}));
+}
 
-        if (line.isEmpty()) continue;
+void CommunicationManager::readFromSocket() {
+
+    if (!m_clientSocket) {
+        qWarning() << "readFromSocket called, but m_clientSocket is null.";
+        return;
+    }
+
+    while (m_clientSocket->canReadLine()) {
+        QByteArray jsonData = m_clientSocket->readLine();
+        QString line = QString::fromUtf8(jsonData.trimmed()); // Trim whitespace
+
+         if (line.isEmpty()) continue;
 
         QJsonParseError error;
         QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
+
         if (error.error != QJsonParseError::NoError) {
             qDebug() << "JSON parse error:" << error.errorString();
-            emit errorReceived("JSON Parse Error: " + error.errorString());
+            sendJson(QJsonObject({{"error", "JSON Parse Error"}, {"details", error.errorString()}}));
             continue;
         }
 
         if (doc.isObject()) {
             QJsonObject obj = doc.object();
-            qDebug() << "Received JSON from stdin:" << obj; //VERY important
-
-            processReceivedJson(obj); //Call processing function
+            qDebug() << "Received JSON:" << obj;
+            processReceivedJson(obj); // Call processing function
 
         } else {
             qDebug() << "Received data is not a JSON object.";
-            emit errorReceived("Received data is not a JSON object.");
+            sendJson(QJsonObject({{"error", "Invalid JSON format"}, {"details", "Received data is not a JSON object."}}));
         }
     }
 }
 
-CommunicationManager::~CommunicationManager() {
+void CommunicationManager::clientDisconnected() {
+    qDebug() << "Client disconnected.";
+    if (m_clientSocket) {
+        m_clientSocket->deleteLater(); // Clean up the socket
+        m_clientSocket = nullptr;
+    }
+}
 
-#ifndef Q_OS_WIN //Cleanup for posix
-    delete m_stdinNotifier; // Clean up
-#endif
-    delete m_stdinStream;
+void CommunicationManager::socketError(QLocalSocket::LocalSocketError socketError)
+{
+    qCritical() << "Socket error:" << socketError << ":" << m_clientSocket->errorString();
+    if(m_clientSocket){
+         sendJson(QJsonObject({{"error", "Socket Error"}, {"details", m_clientSocket->errorString()}}));
+    }
+
+}
+
+CommunicationManager::~CommunicationManager() {
+    m_clientSocket->disconnectFromServer();
+    m_clientSocket->deleteLater();
+    m_server->close(); // Close the server
+    m_server->deleteLater();
 }
 
 void CommunicationManager::sendChatMessage(const QString &message) {
-    sendJson({
+   sendJson({
         {"type", "chatMessage"},
         {"text", message}
     });
 }
 
 void CommunicationManager::applyDiff() {
-    sendJson({{"type", "applyDiff"}});
+     sendJson({{"type", "applyDiff"}});
 }
 
 void CommunicationManager::sendJson(const QJsonObject &obj) {
+   if (!m_clientSocket || m_clientSocket->state() != QLocalSocket::ConnectedState) {
+        qWarning() << "Cannot send JSON, client socket not connected.";
+        return;
+    }
+
     QJsonDocument doc(obj);
-    QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
+    QByteArray jsonData = doc.toJson(QJsonDocument::Compact) + "\n"; // Add newline
+    m_clientSocket->write(jsonData);
+    if (!m_clientSocket->waitForBytesWritten()) { // Make sure data is sent
+        qWarning() << "Failed to write all bytes to socket.";
+    }
 }
 
 void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
@@ -121,14 +151,13 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
                 messageType = ChatModel::LLM;
             } else {
                 emit errorReceived("Invalid messageType in chatMessage");
-                return; // Exit if invalid type
+                return;
             }
             emit chatMessageReceived(obj["text"].toString(), messageType);
         } else {
             emit errorReceived("Invalid chatMessage format.");
         }
     } else if (obj["type"] == "requestStatus") {
-        //... rest of the processing.
         if (obj.contains("status") && obj["status"].isBool()) {
             emit requestStatusChanged(obj["status"].toBool());
         } else {
@@ -162,14 +191,21 @@ void CommunicationManager::processReceivedJson(const QJsonObject &obj) {
         } else {
             emit errorReceived("Invalid diffResult format.");
         }
-    } else {
+    }
+      else if (obj.value("type").toString() == "quit") {
+        qDebug() << "Received quit command. Closing connection";
+        if (m_clientSocket)
+        {
+             m_clientSocket->disconnectFromServer();
+        }
+
+    }
+     else {
         qDebug() << "Unknown message type:" << obj["type"];
     }
 }
 
 void CommunicationManager::initializeWithHardcodedData() {
-    // Use QTimer::singleShot to introduce delays.  This avoids blocking the main thread.
-
     QTimer::singleShot(100, this, [this]() {
         m_chatModel->addMessage("Hello, this is a test message from the User.", ChatModel::User);
     });
@@ -186,7 +222,6 @@ void CommunicationManager::initializeWithHardcodedData() {
         m_chatModel->addMessage("Another LLM response.", ChatModel::LLM);
     });
     QTimer::singleShot(2000, this, [this]() {
-        // Hardcoded Diff Data
         QStringList paths = {"file1.cpp", "file2.h", "long_file_name_example.txt"};
         QList<QString> contents = {
             "+Added line 1\n-Removed line 2\nUnchanged line 3",
@@ -195,6 +230,6 @@ void CommunicationManager::initializeWithHardcodedData() {
         };
         m_diffModel->setFiles(paths, contents);
 
-        qDebug() << "Initialized with hardcoded data."; // Confirm in output
+        qDebug() << "Initialized with hardcoded data.";
     });
 }

@@ -8,7 +8,7 @@
 #include "promptentry.h"
 #include "../../models/chatmodel.h"
 class QVBoxLayout;
-class ConversationHistory; // Forward declaration
+class ConversationHistory;
 
 class ChatInterface : public QWidget
 {
@@ -19,23 +19,22 @@ public:
     void setupUI();
     void setModel(ChatModel *model);
 
-signals:
-    void sendMessage(const QString &message);
+    signals:
+        void sendMessage(const QString &message);
 
 protected:
-private slots:
+    private slots:
 
-    void updateStatus(const QString &statusMessage);
-    // void onChatMessageReceived(const QString& message, int messageType);
-public slots:
-    void updateChatHistory();
+        void updateStatus(const QString &statusMessage);
+    public slots:
+        void updateChatHistory();
     void handleRequestPendingChanged();
 private:
     QVBoxLayout *mainLayout;
     PromptEntry *promptInput;
     QLabel *statusBar;
     ChatModel *chatModel;
-    ConversationHistory* conversationHistory;  //No need of this if mainwindow handles.
+    ConversationHistory* conversationHistory;
 
 };
 #endif // CHATINTERFACE_H

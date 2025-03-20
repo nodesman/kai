@@ -27,6 +27,9 @@ public:
 private:
 
     void setupUI();
+
+    void onServerReady();
+
     void populatePlaceholderChatData();
 
     QSplitter *mainSplitter;

@@ -4,7 +4,7 @@
 #include <QTextEdit>
 #include <QLabel>
 #include <QKeyEvent>
-#include <QBrush> //Keep this for consistency
+#include <QBrush>
 #include <QDebug>
 #include <QScrollBar>
 #include <QTextDocument>
@@ -15,7 +15,6 @@ ChatInterface::ChatInterface(QWidget *parent)
     : QWidget(parent)
       , chatModel(nullptr) {
     setupUI();
-    //Don't do setModel, set the model on Mainwindow instead.
 }
 
 void ChatInterface::setupUI() {
@@ -27,10 +26,9 @@ void ChatInterface::setupUI() {
     promptInput = new PromptEntry(this);
     promptInput->setPlaceholderText("Type your prompt here. Press Ctrl+Enter (Cmd+Enter on macOS) to send.");
     promptInput->setStyleSheet("color: white; background-color: #2e2e2e; border: 1px solid #555;");
-    // Darker, more consistent style
 
     statusBar = new QLabel("Ready", this);
-    statusBar->setStyleSheet("background-color: #444; color: white; border: 1px solid #333;"); //Dark
+    statusBar->setStyleSheet("background-color: #444; color: white; border: 1px solid #333;");
     statusBar->setFixedHeight(25);
 
     QVBoxLayout *inputLayout = new QVBoxLayout;
@@ -42,18 +40,16 @@ void ChatInterface::setupUI() {
     QWidget *inputContainer = new QWidget(this);
     inputContainer->setLayout(inputLayout);
 
-
     mainLayout->addWidget(conversationHistory);
     mainLayout->addWidget(inputContainer);
 
     setLayout(mainLayout);
     connect(promptInput, &QTextEdit::textChanged, this, [this]() {
-        //Adjust height, up to a maximum
         QTextDocument *doc = promptInput->document();
-        doc->setTextWidth(promptInput->width()); // Important for correct height calculation
-        qreal newHeight = doc->size().height() + 10; // +10 for some padding.
+        doc->setTextWidth(promptInput->width());
+        qreal newHeight = doc->size().height() + 10;
         QFontMetrics metrics(promptInput->font());
-        qreal maxHeight = metrics.lineSpacing() * 10; // e.g., max 10 lines of text
+        qreal maxHeight = metrics.lineSpacing() * 10;
 
         if (newHeight > maxHeight) {
             newHeight = maxHeight;
@@ -76,18 +72,17 @@ void ChatInterface::setModel(ChatModel *model) {
     if (chatModel) {
         disconnect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
         disconnect(chatModel, &QAbstractListModel::rowsInserted, conversationHistory,
-                   &ConversationHistory::onRowsInserted); //Disconnect if it exists
+                   &ConversationHistory::onRowsInserted);
     }
 
     chatModel = model;
 
     if (chatModel) {
         connect(chatModel, &ChatModel::requestPendingChanged, this, &ChatInterface::handleRequestPendingChanged);
-        conversationHistory->setModel(chatModel); // Important: Set model for history
-        updateChatHistory(); //Update UI
+        conversationHistory->setModel(chatModel);
+        updateChatHistory();
     }
 }
-
 
 void ChatInterface::handleRequestPendingChanged() {
     if (chatModel) {
@@ -102,7 +97,6 @@ void ChatInterface::handleRequestPendingChanged() {
 void ChatInterface::updateStatus(const QString &statusMessage) {
     statusBar->setText(statusMessage);
 }
-
 
 void ChatInterface::updateChatHistory() {
     conversationHistory->updateHistory();

@@ -17,7 +17,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core Network)
 
 add_executable(KaiDiff
         src/main.cpp
@@ -52,14 +52,17 @@ endif()
 # linker flag to keep the console.
 if(APPLE)
     set_target_properties(KaiDiff PROPERTIES MACOSX_BUNDLE FALSE) # Don't create a .app bundle
-    set_target_properties(KaiDiff PROPERTIES
-            LINK_FLAGS "-Wl,-macosx_version_min,10.15 -Wl,-no_pie" # Keep console
-    )
+
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version to target")
+        message(STATUS "Setting CMAKE_OSX_DEPLOYMENT_TARGET to ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+
 endif()
 
 # --- End Console Subsystem Handling ---
 
-target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+target_link_libraries(KaiDiff PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Network)
 
 set_target_properties(KaiDiff PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 install(TARGETS KaiDiff DESTINATION bin)
