@@ -18,25 +18,16 @@ function delay(ms) {
 async function testKaiDiff() {
     // Spawn the KaiDiff process
     const kaiDiffProcess = spawn(kaiDiffPath, [], {
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'], // Use stdio: 'pipe'
         cwd: path.resolve(scriptDir, './')
     });
 
-    // --- Redirect and Capture stderr ---
+    // --- Redirect and Capture stderr --- and WAIT FOR READY
     let stderrOutput = ''; // Store stderr output
-    kaiDiffProcess.stderr.on('data', (data) => {
+    kaiDiffProcess.stderr.on('data', async (data) => {
         stderrOutput += data; // Accumulate stderr data
         process.stdout.write(data); //  Write to Node.js's stdout (console)
-    });
-
-    // --- Redirect stdout and WAIT FOR READY ---
-    let stdoutOutput = '';
-    kaiDiffProcess.stdout.on('data', async (data) => {
-        stdoutOutput += data;
-        process.stdout.write(data); // Echo to console
-
-        // Check for the "READY" signal
-        if (stdoutOutput.includes('READY')) {
+        if (stderrOutput.includes('READY')) {
             // Now it's safe to send messages
             console.log("KaiDiff is ready. Sending messages...");
 
@@ -105,6 +96,7 @@ async function testKaiDiff() {
 
         }
     });
+
 
     // Handle process exit
     kaiDiffProcess.on('close', (code) => {
