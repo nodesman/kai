@@ -1,4 +1,4 @@
-// src/lib/CodeProcessor.ts
+// File: src/lib/codeprocessor/CodeProcessor.ts
 
 import path from 'path';
 import { FileSystem } from '../FileSystem';
@@ -6,7 +6,7 @@ import { AIClient } from '../AIClient';
 import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { Config } from "../Config";
 import { DiffFile } from '../types';
-import { Conversation } from '../models/Conversation';
+import { Conversation, Message } from '../models/Conversation'; // Import Message
 import { ConversationManager } from '../ConversationManager';
 import RelevantFileFinder from "./RelevantFileFinder";
 import PromptBuilder from "./PromptBuilder";
@@ -24,25 +24,25 @@ class CodeProcessor {
     private projectRoot: string;
     private currentDiff: DiffFile[] | null = null;
     private conversationManager: ConversationManager;
+    private readonly filePrefix: string = "### File Context ###\n"; // Prefix
 
     constructor(config: Config) {
         this.config = config;
         this.fs = new FileSystem();
         this.aiClient = new AIClient(config);
         this.projectRoot = process.cwd();
-        this.conversationManager = ConversationManager.getInstance();
+        this.conversationManager =  ConversationManager.getInstance();
     }
 
     public async askQuestion(userPrompt: string, conversation: Conversation): Promise<AIResponse> {
-        conversation.addMessage('user', userPrompt);
-        const promptString = await this.buildPromptString(userPrompt, conversation);
-        const aiResponseString = await this.aiClient.getResponseFromAI(conversation);
-        conversation.addMessage('assistant', aiResponseString);
+        const updatedConversation = await this.buildPromptString(userPrompt, conversation);  // No promptString returned
+        const aiResponseString = await this.aiClient.getResponseFromAI(updatedConversation); // Use updated convo
+        updatedConversation.addMessage('assistant', aiResponseString);
 
         return this.processAIResponse(aiResponseString);
     }
 
-    private async buildPromptString(userPrompt: string, conversation: Conversation): Promise<string> {
+    private async buildPromptString(userPrompt: string, conversation: Conversation): Promise<Conversation> {
         const keywords = this.extractKeywords(userPrompt);
         const relevantFilePaths = await this.findRelevantFiles(keywords);
         const fileContents = await this.fs.readFileContents(relevantFilePaths);
@@ -51,16 +51,32 @@ class CodeProcessor {
         const filteredFileContents: { [filePath: string]: string } = {};
         for (const filePath in fileContents) {
             if (fileContents[filePath] !== null) {
-                filteredFileContents[filePath] = fileContents[filePath]!; // Use non-null assertion (!)
+                filteredFileContents[filePath] = fileContents[filePath]!;
             }
         }
 
         const promptBuilder = new PromptBuilder(this.config.gemini.max_prompt_tokens!);
-        promptBuilder.addFiles(filteredFileContents, this.projectRoot); // Pass the filtered object
-        promptBuilder.addConversationHistory(conversation);
-        promptBuilder.addUserPrompt(userPrompt);
 
-        return promptBuilder.build();
+        // 1. Build the file context string.
+        const fileContextString = promptBuilder.buildFilesPrompt(filteredFileContents, this.projectRoot);
+
+        // 2. Check for existing file context in the conversation.
+        const existingFileContextMessageIndex = conversation.getMessages().findIndex(message => message.content.startsWith(this.filePrefix));
+
+        // 3. Modify the *existing* conversation object in place.
+        if (existingFileContextMessageIndex !== -1) {
+            // 3a. If found, *remove* the old file context message.
+            conversation.getMessages().splice(existingFileContextMessageIndex, 1);
+        }
+
+        // 4. Add the *new* file context as a "system" message at the *beginning*.
+        conversation.addMessage("system", this.filePrefix + fileContextString); // Insert at position 0
+
+        // 5. Add the user prompt *after* the file context (and any other existing messages).
+        conversation.addMessage("user", userPrompt);
+
+        // No need to build the full prompt here, it's handled in getResponseFromAI
+        return conversation; // Return the *modified* original conversation object.
     }
     private async findRelevantFiles(keywords: string[]): Promise<string[]> {
         const filePaths = await this.fs.getProjectFiles(this.projectRoot);
@@ -146,8 +162,5 @@ function escapeRegExp(string: string): string {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 // --- Helper Classes ---
-
-
-
 
 export { CodeProcessor };
