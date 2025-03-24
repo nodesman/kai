@@ -4,10 +4,11 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QListView>
-#include <QSplitter> // Corrected include
+#include <QSplitter>
 #include <QDebug>
 #include <QTimer>
-#include <QWidget> // Include QWidget
+#include <QWidget>
+#include <QMessageBox> // Include QMessageBox
 
 #include "diffviewer/diffview.h"
 
@@ -79,15 +80,27 @@ void MainWindow::setupUI() {
     // Connect button signals
     connect(applyButton, &QPushButton::clicked, this, &MainWindow::applyDiff);
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetDiff);
+    // connect(communicationManager, &CommunicationManager::diffApplied, diffModel, &DiffModel::clearDiffs);
 }
 
 void MainWindow::applyDiff() {
     qDebug() << "Apply button clicked";
-    communicationManager->applyChanges();
+
+    // --- Confirmation Dialog ---
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Confirm Apply", "Are you sure you want to apply the currently active diff?",
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        qDebug() << "User confirmed apply.";
+        communicationManager->applyChanges();
+    } else {
+        qDebug() << "User canceled apply.";
+        // Do nothing - user canceled
+    }
 }
 
 void MainWindow::resetDiff() {
     qDebug() << "Reset button clicked";
-    // diffModel->clearDiffs();  // Clear diffs from the model
-    // No need to call diffView->reset() anymore; DiffView is now connected.
+    // diffModel->clearDiffs();
 }
