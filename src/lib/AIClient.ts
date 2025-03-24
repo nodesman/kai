@@ -2,8 +2,8 @@
 import path from 'path';
 import { FileSystem } from './FileSystem';
 import Gemini2ProModel from "./models/Gemini2ProModel";
-import {Config} from "./Config";
-import Conversation from "./models/Conversation"; // Import Conversation
+import { Config } from "./Config";
+import { Conversation } from "./models/Conversation"; // Import Conversation
 
 interface LogEntryBase {
     type: string; // Common field for all log entries
@@ -55,12 +55,13 @@ class AIClient {
         }
     }
 
-    async getResponseFromAI(conversation: Conversation, conversationId: string): Promise<string> {
+    async getResponseFromAI(conversation: Conversation): Promise<string> { // No conversationId parameter
         try {
-            // Log the request (using the new conversation format)
+            // Log the request. Get the conversation ID *from* the Conversation object.
+            const conversationId = conversation.getId(); // Use the getId() method
             await this.logConversation({ type: 'request', prompt: conversation.getLastMessage()?.content || "", conversationId });
 
-            // Pass the Conversation object to the model's getResponseFromAI
+
             const response = await this.model.getResponseFromAI(conversation);
 
             // Log the response
@@ -68,6 +69,7 @@ class AIClient {
 
             return response;
         } catch (error) {
+            const conversationId = conversation.getId(); //get it here too
             console.error("Error in AIClient:", error);
             await this.logConversation({ type: 'error', error: (error as Error).message, conversationId });
             return ""; // Or throw the error, depending on your error handling strategy

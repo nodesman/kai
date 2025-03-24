@@ -1,12 +1,15 @@
-// File: src/lib/CodeProcessor.ts
+// src/lib/CodeProcessor.ts
+
 import path from 'path';
 import { FileSystem } from './FileSystem';
 import { AIClient } from './AIClient';
 import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { Config } from "./Config";
 import { DiffFile } from './types'; // Import DiffFile
-import { Conversation, Message } from './models/Conversation';
-import { v4 as uuidv4 } from 'uuid'; // Import UUID generator
+import { Conversation } from './models/Conversation';
+// No need to import UUID, ConversationManager handles it
+import { ConversationManager } from './ConversationManager'; // Import
+
 
 interface AIResponse {
     message: string;
@@ -20,13 +23,14 @@ class CodeProcessor {
     aiClient: AIClient;
     projectRoot: string;
     currentDiff: DiffFile[] | null = null; // Store the current diff
-    private conversations: { [id: string]: Conversation } = {}; // Store conversations
+    private conversationManager: ConversationManager; // Use ConversationManager
 
     constructor(config: Config) {
         this.config = config;
         this.fs = new FileSystem();
         this.aiClient = new AIClient(config);
         this.projectRoot = process.cwd();
+        this.conversationManager = new ConversationManager(); // Initialize
     }
 
     countTokens(text: string): number {
@@ -98,9 +102,7 @@ class CodeProcessor {
             ...diff content for File2.ts...
             \`\`\``;
 
-        // Prepend the base prompt
-        promptString = `${basePrompt}\n\n${promptString}\n\n${conversationHistory}\nUser: ${userPrompt}\n\nAssistant:`;
-
+        promptString = `${basePrompt}\n\n${conversationHistory}\nUser: ${userPrompt}\n\nAssistant:`;
         return promptString;
     }
 
@@ -132,29 +134,12 @@ class CodeProcessor {
         return Array.from(relevantFiles); //Convert back to array
     }
 
-    async askQuestion(userPrompt: string, conversationId: string | null = null): Promise<AIResponse> {
-        let conversation: Conversation;
-        let newConversationId = false;
-        let safeConversationId: string;
+    async askQuestion(userPrompt: string, conversation: Conversation): Promise<AIResponse> { // Takes a Conversation object
 
-        if (conversationId && this.conversations[conversationId]) {
-            safeConversationId = conversationId;
-            conversation = this.conversations[safeConversationId];
-        } else {
-            newConversationId = true;
-            safeConversationId = uuidv4();  // Generate a new UUID
-            conversation = new Conversation();
-            this.conversations[safeConversationId] = conversation;
-        }
-
+        conversation.addMessage('user', userPrompt); // Add user message to the conversation
         const promptString = await this.buildPromptString(userPrompt, conversation);
-        // Create a NEW conversation with the full context prompt
-        const llmConversation = new Conversation();
-        llmConversation.addMessage('user', promptString);
+        const aiResponseString = await this.aiClient.getResponseFromAI(conversation);
 
-        const aiResponseString = await this.aiClient.getResponseFromAI(llmConversation, safeConversationId);
-
-        conversation.addMessage('user', userPrompt);
         conversation.addMessage('assistant', aiResponseString);
 
         let message = "";
@@ -229,12 +214,9 @@ class CodeProcessor {
 
     }
     async checkResponse(prompt: string): Promise<string> {
-        let conversation = new Conversation();
-        let safeConversationId = uuidv4();  // Generate a new UUID
-        this.conversations[safeConversationId] = conversation;
-        const promptString =  prompt;
-        conversation.addMessage("user", promptString)
-        const aiResponse = await this.aiClient.getResponseFromAI(conversation, safeConversationId);
+        let conversation = this.conversationManager.createConversation();
+        conversation.conversation.addMessage("user", prompt)
+        const aiResponse = await this.aiClient.getResponseFromAI(conversation.conversation);
         return aiResponse;
     }
 }

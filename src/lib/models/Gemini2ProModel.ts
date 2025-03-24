@@ -1,4 +1,4 @@
-// lib/models/Gemini2ProModel.ts
+// src/lib/models/Gemini2ProModel.ts
 import BaseModel from "./BaseModel";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Config } from "../Config";
@@ -20,6 +20,7 @@ class Gemini2ProModel extends BaseModel {
     genAI: GoogleGenerativeAI;
     modelName: string;
     model: any; // Ideally, this should be a more specific type from the Gemini API
+    private geminiConversationHistory: GeminiChatHistory = [];
 
     constructor(config: Config) {
         super(config);
@@ -29,8 +30,12 @@ class Gemini2ProModel extends BaseModel {
     }
 
     async getResponseFromAI(conversation: Conversation): Promise<string> { // Accepts Conversation ONLY
-        const geminiConversation = this.convertToGeminiConversation(conversation.getMessages());
-        return this.queryGemini(geminiConversation);
+        //const geminiConversation = this.convertToGeminiConversation(conversation.getMessages());
+        //return this.queryGemini(geminiConversation);
+        const geminiMessage = this.convertToGeminiMessage(conversation.getLastMessage()!);
+        this.geminiConversationHistory.push(geminiMessage);
+        return this.queryGemini(this.geminiConversationHistory);
+
     }
 
     async queryGemini(conversation: GeminiChatHistory): Promise<string> {
@@ -86,6 +91,15 @@ class Gemini2ProModel extends BaseModel {
                 parts: [{ text: msg.content }],
             };
         }).filter(msg => msg !== null) as GeminiChatHistory;
+    }
+    convertToGeminiMessage(msg: Message): GeminiMessage {
+
+
+        return {
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: msg.content }],
+        };
+
     }
 
     flattenMessages(conversation: any): any[] { // No longer needed, but kept for potential future use

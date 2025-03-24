@@ -1,180 +1,204 @@
 // File: src/lib/WebSocketServer.ts
 
 import WebSocket from 'ws';
-import {CodeProcessor} from './CodeProcessor';
-import {Config} from './Config';
-import {DiffFile} from './types'; // Import the DiffFile type
+import { CodeProcessor } from './CodeProcessor';
+import { Config } from './Config';
+import { DiffFile } from './types';
+import { Conversation } from "./models/Conversation";
+import { IncomingMessage } from 'http';
+import { ConversationManager } from './ConversationManager';
 
-interface ChatMessage {
+// --- Message Interfaces ---
+
+interface Message {
     type: string;
+    conversationId?: string; // conversationId is now ALWAYS optional in the base interface
+}
+
+interface ChatMessage extends Message {
     messageType: string;
     text: string;
-    conversationId?: string; // Add optional conversationId
 }
 
-interface DiffResult {
-    type: string;
+interface DiffResult extends Message {
     files: DiffFile[];
-    conversationId?: string; // Add optional conversationId
 }
 
-interface ExplanationMessage {
-    type: string;
+interface ExplanationMessage extends Message {
     explanation: string;
-    conversationId?: string; // Add optional conversationId
-}
-interface DiffCheckResult {
-    type: string;
-    hasDiff: boolean;
-    conversationId?: string; // Add optional conversationId
-}
-interface CommentCheckResult {
-    type: string;
-    hasComments: boolean;
-    conversationId?: string; // Add optional conversationId
 }
 
-interface ErrorMessage {
-    type: string;
+interface DiffCheckResult extends Message {
+    hasDiff: boolean;
+}
+
+interface CommentCheckResult extends Message {
+    hasComments: boolean;
+}
+
+interface ErrorMessage extends Message {
     message: string;
     details: string;
-    conversationId?: string; // Add optional conversationId
 }
-type WebSocketMessage = ChatMessage | DiffResult | ExplanationMessage | ErrorMessage | {type: string} // Add other message types as needed
+
+interface DiffAppliedMessage extends Message {
+    // Can add details
+}
+
+interface ReadyMessage extends Message {}
+
+// --- WebSocketServer Class ---
 
 class WebSocketServer {
     private wss: WebSocket.Server;
     private codeProcessor: CodeProcessor;
+    private conversationManager: ConversationManager;
 
     constructor(config: Config) {
-        this.wss = new WebSocket.Server({port: 8080});
+        this.wss = new WebSocket.Server({ port: 8080 });
         this.codeProcessor = new CodeProcessor(config);
+        this.conversationManager = new ConversationManager();
         this.setupConnectionHandler();
     }
 
     private setupConnectionHandler() {
-        this.wss.on('connection', (ws: WebSocket, req) => {
-            const ip = req.socket.remoteAddress;
-            console.log(`Client connected from ${ip}`);
-
-            ws.on('message', async (message: string) => { // Use async here
-                console.log(`Received from ${ip}: ${message}`);
-                let json: ChatMessage;
-                try {
-                    json = JSON.parse(message); // Ensure message is ChatMessage
-                    const conversationId = json.conversationId; // Extract conversation ID
-
-                    if (json.type === 'ready') {
-                        console.log("Qt Client is ready!");
-
-                        // You might want to send a welcome message or initial state here.
-
-                    } else if (json.type === 'chatMessage') {
-                        console.log(`Chat message from ${json.messageType}: ${json.text}`);
-
-                        if (json.messageType === "User") {
-                            ws.send(JSON.stringify({
-                                type: "chatMessage",
-                                messageType: "User",
-                                text: json.text,
-                                conversationId: conversationId // Send back the conversationId
-                            }));
-
-                            // Get response from AI (which might include a diff)
-                            const aiResponse = await this.codeProcessor.askQuestion(json.text, conversationId);
-
-                            // Send the AI response (potentially with a diff later)
-                            const chatMessage: ChatMessage = {
-                                type: "chatMessage",
-                                messageType: "LLM",
-                                text: aiResponse.message,
-                                conversationId: conversationId // Propagate conversationId
-                            };
-                            ws.send(JSON.stringify(chatMessage));
-                            const commentCheckPrompt = `Does the following text contain comments? Respond with "true" or "false".\n\n${aiResponse.message}`;
-                            const commentCheckResponse = await this.codeProcessor.checkResponse(commentCheckPrompt);
-                            const hasComments = commentCheckResponse.toLowerCase().includes("true");
-                            const commentCheckResult: CommentCheckResult = {
-                                type: "commentCheckResult",
-                                hasComments: hasComments,
-                                conversationId: conversationId
-                            };
-                            ws.send(JSON.stringify(commentCheckResult));
-
-                            if (aiResponse.explanation) {
-                                const explanationMessage: ExplanationMessage = {
-                                    type: "explanation",
-                                    explanation: aiResponse.explanation,
-                                    conversationId: conversationId
-                                };
-                                ws.send(JSON.stringify(explanationMessage));
-                            }
-
-                            if (aiResponse.diffFiles) {
-                                this.codeProcessor.setCurrentDiff(aiResponse.diffFiles); // Important! Store the diff
-                                const diffResult: DiffResult = {
-                                    type: 'diffResult',
-                                    files: aiResponse.diffFiles,
-                                    conversationId: conversationId
-                                };
-                                ws.send(JSON.stringify(diffResult));
-                            }
-                        } else {
-                            const chatMessage: ChatMessage = {
-                                type: "chatMessage",
-                                messageType: "LLM",
-                                text: `You said: ${json.text}`,
-                                conversationId: conversationId
-                            };
-                            ws.send(JSON.stringify(chatMessage));
-
-                        }
-
-                    } else if (json.type === 'applyDiff') {
-                        console.log("Apply Diff requested.");
-                        const conversationId = json.conversationId;
-                        try {
-                            await this.codeProcessor.applyDiff(); // Call the applyDiff method
-                            ws.send(JSON.stringify({ type: 'diffApplied', conversationId: conversationId }));
-                        } catch (error: any) {
-                            console.error("Error applying diff:", error);
-                            const errorMessage: ErrorMessage = {
-                                type: 'error',
-                                message: 'Failed to apply diff',
-                                details: error.message,
-                                conversationId: conversationId
-                            };
-                            ws.send(JSON.stringify(errorMessage));
-
-                        }
-                    } else if (json.type === 'requestStatus') {
-                        // Handle request status (if needed)
-                    } else {
-                        console.log("Unknown message type:", json.type);
-                        const errorMessage: ErrorMessage = {
-                            type: 'error',
-                            message: 'Unknown message type',
-                            details: JSON.stringify(json),
-                            conversationId: conversationId
-                        };
-                        ws.send(JSON.stringify(errorMessage));
-                    }
-                } catch (error: any) {
-                    console.error('Invalid JSON or other error:', error);
-
-                }
-            });
-
-            ws.on('close', () => {
-                console.log(`Client ${ip} disconnected`);
-            });
-
-            ws.on('error', (error) => {
-                console.error(`WebSocket error from ${ip}:`, error);
-            });
-        });
-
+        this.wss.on('connection', this.handleConnection.bind(this));
         console.log('WebSocket server listening on port 8080');
+    }
+
+    private handleConnection(ws: WebSocket, req: IncomingMessage) {
+        const ip = this.getClientIp(req);
+        console.log(`Client connected from ${ip}`);
+
+        // Create a new conversation and send the ID to the client
+        const { conversationId } = this.conversationManager.createConversation();
+        this.sendMessage(ws, { type: "initialConversationId", conversationId: conversationId }); // Send initial ID
+
+        ws.on('message', this.handleMessage.bind(this, ws));
+        ws.on('close', this.handleDisconnection.bind(this, ws, ip));
+        ws.on('error', this.handleWsError.bind(this, ws, ip));
+    }
+
+    private getClientIp(req: IncomingMessage): string {
+        return req.socket.remoteAddress || 'unknown';
+    }
+
+    private async handleMessage(ws: WebSocket, message: string) {
+        console.log(`Received: ${message}`);
+
+        try {
+            const json: Message = this.parseMessage(message);
+            let conversationId = json.conversationId;
+            let conversation = null;
+
+            // Validate and/or create conversation
+            if (conversationId) {
+                conversation = this.conversationManager.getConversation(conversationId);
+                if (!conversation) {
+                    console.warn(`Invalid conversationId received: ${conversationId}.  Creating a new conversation.`);
+                    const newConversation = this.conversationManager.createConversation();
+                    conversationId = newConversation.conversationId;
+                    conversation = newConversation.conversation;
+                    // Inform the client about the new ID
+                    this.sendMessage(ws, { type: "newConversationId", conversationId: conversationId });
+                }
+            } else {
+                // No conversationId provided - create a new one and inform the client
+                console.warn(`No conversationId received. Creating a new conversation.`);
+                const newConversation = this.conversationManager.createConversation();
+                conversationId = newConversation.conversationId;
+                conversation = newConversation.conversation;
+                this.sendMessage(ws, { type: "newConversationId", conversationId: conversationId });
+            }
+            switch (json.type) {
+                case 'ready':
+                    console.log("Qt Client is ready!");
+                    break;
+                case 'chatMessage':
+                    await this.handleChatMessage(ws, json as ChatMessage, conversationId);
+                    break;
+                case 'applyDiff':
+                    await this.handleApplyDiff(ws, conversationId);
+                    break;
+                case 'requestStatus':
+                    // Handle if needed
+                    break;
+                default:
+                    console.log("Unknown message type:", json.type);
+                    this.sendError(ws, 'Unknown message type', JSON.stringify(json), conversationId);
+            }
+
+        } catch (error: any) {
+            console.error('Invalid JSON or other error:', error);
+            //In case of error, we DO NOT know the conversation.
+            this.sendError(ws, 'Invalid JSON or other error', error.message, undefined);
+        }
+    }
+    private parseMessage(message: string): Message {
+        try {
+            return JSON.parse(message);
+        } catch (error) {
+            throw new Error('Invalid JSON format');
+        }
+    }
+    //Modified
+    private handleDisconnection(ws: WebSocket, ip: string) {
+        console.log(`Client ${ip} disconnected`);
+        // No specific cleanup needed here, as conversations are not tied to the WebSocket
+    }
+
+    private handleWsError(ws: WebSocket, ip: string, error: Error) {
+        console.error(`WebSocket error from ${ip}:`, error);
+    }
+
+    private async handleChatMessage(ws: WebSocket, json: ChatMessage, conversationId: string) {
+        console.log(`Chat message from ${json.messageType}: ${json.text}`);
+        const conversation = this.conversationManager.getConversation(conversationId);
+        //We checked for null in handleMessage.  It cannot be null now.
+
+        if (json.messageType === "User") {
+            this.sendMessage(ws, { type: "chatMessage", messageType: "User", text: json.text, conversationId: conversationId } as ChatMessage);
+
+            const aiResponse = await this.codeProcessor.askQuestion(json.text, conversation!);
+            this.sendMessage(ws, { type: "chatMessage", messageType: "LLM", text: aiResponse.message, conversationId: conversationId } as ChatMessage);
+
+            const commentCheckPrompt = `Does the following text contain comments? Respond with "true" or "false".\n\n${aiResponse.message}`;
+            const commentCheckResponse = await this.codeProcessor.checkResponse(commentCheckPrompt);
+            const hasComments = commentCheckResponse.toLowerCase().includes("true");
+            this.sendMessage(ws, { type: "commentCheckResult", hasComments: hasComments, conversationId: conversationId } as CommentCheckResult);
+
+            if (aiResponse.explanation) {
+                this.sendMessage(ws, { type: "explanation", explanation: aiResponse.explanation, conversationId: conversationId } as ExplanationMessage);
+            }
+
+            if (aiResponse.diffFiles) {
+                this.codeProcessor.setCurrentDiff(aiResponse.diffFiles);
+                this.sendMessage(ws, { type: 'diffResult', files: aiResponse.diffFiles, conversationId: conversationId } as DiffResult);
+            }
+        } else {
+            this.sendMessage(ws, { type: "chatMessage", messageType: "LLM", text: `You said: ${json.text}`, conversationId: conversationId } as ChatMessage);
+        }
+    }
+
+
+    private async handleApplyDiff(ws: WebSocket, conversationId: string) {
+        console.log("Apply Diff requested.");
+        try {
+            await this.codeProcessor.applyDiff();
+            this.sendMessage(ws, { type: 'diffApplied', conversationId: conversationId } as DiffAppliedMessage);
+        } catch (error: any) {
+            console.error("Error applying diff:", error);
+            this.sendError(ws, 'Failed to apply diff', error.message, conversationId);
+        }
+    }
+
+    private sendMessage(ws: WebSocket, message: Message) {
+        ws.send(JSON.stringify(message));
+    }
+
+    private sendError(ws: WebSocket, message: string, details: string, conversationId: string | undefined) {
+        const errorMessage: ErrorMessage = { type: 'error', message, details, conversationId };
+        this.sendMessage(ws, errorMessage);
     }
 }
 
