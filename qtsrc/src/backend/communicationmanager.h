@@ -21,10 +21,6 @@ public:
     explicit CommunicationManager(QObject *parent = nullptr, DiffModel *diffModel = nullptr, ChatModel *chatModel = nullptr);
     ~CommunicationManager();
 
-    void sendChatMessage(const QString &message);
-    void applyDiff();
-    void initializeWithHardcodedData();
-
     ChatModel* getChatModel() const { return m_chatModel; }
     DiffModel* getDiffModel() const { return m_diffModel; }
 
@@ -36,18 +32,22 @@ public:
     void errorReceived(const QString &errorMessage);
     void ready();
 
+    public slots: // Changed to public slots
+        void sendChatMessage(const QString &message);
+    void applyChanges(); // Renamed slot
+    void initializeWithHardcodedData();
+    void sendReadySignal();
+
     private slots:
         void onConnected();
     void onDisconnected();
     void onTextMessageReceived(const QString &message);
     void onError(QAbstractSocket::SocketError error);
-    void sendReadySignal();
     void processReceivedJson(const QJsonObject &obj);
     void sendJson(const QJsonObject &obj);
 
 private:
-    //  Private *d;  // INCORRECT -  d is now of type CommunicationManagerPrivate*
-    CommunicationManagerPrivate *d; // CORRECT - Pointer to the private implementation
+    CommunicationManagerPrivate *d; // Pointer to the private implementation
 
     ChatModel *m_chatModel;
     DiffModel *m_diffModel;

@@ -1,3 +1,4 @@
+// communicationmanager.cpp
 #include "communicationmanager.h"
 #include <QDebug>
 #include <QJsonObject>
@@ -201,8 +202,8 @@ void CommunicationManager::sendChatMessage(const QString &message) {
     });
 }
 
-void CommunicationManager::applyDiff() {
-    sendJson({{"type", "applyDiff"}});
+void CommunicationManager::applyChanges() { // Corrected name
+    sendJson({{"type", "applyDiff"}}); // Corrected type
 }
 
 void CommunicationManager::initializeWithHardcodedData() {

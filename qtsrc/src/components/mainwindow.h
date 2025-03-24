@@ -1,9 +1,11 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QHBoxLayout>
 #include <QMainWindow>
 #include <QSplitter>
 #include <QProcess>  // Include QProcess
+#include <QPushButton>
 
 #include "../backend/communicationmanager.h"
 #include "chatinterface/chatinterface.h" // Assuming the header is here
@@ -27,6 +29,11 @@ public:
 private:
 
     void setupUI();
+
+    void applyDiff();
+
+    void resetDiff();
+
     void populatePlaceholderChatData();
 
     QSplitter *mainSplitter;
@@ -36,6 +43,9 @@ private:
     ChatModel* chatModel;
     QProcess *nodeProcess; // Added process
     CommunicationManager *communicationManager;
+    QHBoxLayout *buttonLayout; // Layout for buttons
+    QPushButton *applyButton;
+    QPushButton *resetButton;
 
 private slots:
         // void handleRequestPendingChanged(bool pending);
