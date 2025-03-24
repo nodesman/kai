@@ -1,7 +1,7 @@
 // File: src/lib/WebSocketServer.ts
 
 import WebSocket from 'ws';
-import { CodeProcessor } from './CodeProcessor';
+import { CodeProcessor } from './codeprocessor/CodeProcessor';
 import { Config } from './Config';
 import { DiffFile } from './types';
 import { Conversation } from "./models/Conversation";

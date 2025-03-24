@@ -3,7 +3,7 @@
 
 import { Config } from './lib/Config';
 import { UserInterface } from './lib/UserInterface';
-import { CodeProcessor } from './lib/CodeProcessor';
+import { CodeProcessor } from './lib/codeprocessor/CodeProcessor';
 import { AIClient } from './lib/AIClient'; // Import AIClient
 import { WebSocketServer } from './lib/WebSocketServer'; // Import WebSocketServer
 import FullScreenUI from "./lib/iterativeDiff/FullScreenUI"
