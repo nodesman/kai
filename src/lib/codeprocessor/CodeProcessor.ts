@@ -1,13 +1,11 @@
 // File: src/lib/codeprocessor/CodeProcessor.ts
 
-import path from 'path';
-import { FileSystem } from '../FileSystem';
-import { AIClient } from '../AIClient';
-import { encode as gpt3Encode } from 'gpt-3-encoder';
-import { Config } from "../Config";
-import { DiffFile } from '../types';
-import { Conversation, Message } from '../models/Conversation'; // Import Message
-import { ConversationManager } from '../ConversationManager';
+import {FileSystem} from '../FileSystem';
+import {AIClient} from '../AIClient';
+import {Config} from "../Config";
+import {DiffFile} from '../types';
+import {Conversation} from '../models/Conversation'; // Import Message
+import {ConversationManager} from '../ConversationManager';
 import RelevantFileFinder from "./RelevantFileFinder";
 import PromptBuilder from "./PromptBuilder";
 
@@ -43,8 +41,7 @@ class CodeProcessor {
     }
 
     private async buildPromptString(userPrompt: string, conversation: Conversation): Promise<Conversation> {
-        const keywords = this.extractKeywords(userPrompt);
-        const relevantFilePaths = await this.findRelevantFiles(keywords);
+        const relevantFilePaths = await this.findRelevantFiles();
         const fileContents = await this.fs.readFileContents(relevantFilePaths);
 
         // Filter out null values:
@@ -78,17 +75,10 @@ class CodeProcessor {
         // No need to build the full prompt here, it's handled in getResponseFromAI
         return conversation; // Return the *modified* original conversation object.
     }
-    private async findRelevantFiles(keywords: string[]): Promise<string[]> {
-        const filePaths = await this.fs.getProjectFiles(this.projectRoot);
-        const relevantFiles = new RelevantFileFinder(this.fs).findRelevantFiles(filePaths, keywords)
-        return relevantFiles;
+    private async findRelevantFiles(): Promise<string[]> {
+        return new RelevantFileFinder(this.fs).findRelevantFiles(this.projectRoot);
     }
 
-    private extractKeywords(prompt: string): string[] {
-        const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'is', 'are', 'of', 'and', 'it', 'this', 'that', "i", "my", "you", "your"]);
-        const words = prompt.toLowerCase().split(/\s+/);
-        return [...new Set(words.filter(word => !stopWords.has(word) && word.length > 2))];
-    }
 
 
     private processAIResponse(aiResponseString: string): AIResponse {

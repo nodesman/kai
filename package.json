@@ -27,6 +27,7 @@
     "gpt-3-encoder": "^1.1.4",
     "ignore": "^7.0.3",
     "inquirer": "^9.2.12",
+    "isbinaryfile": "^5.0.4",
     "js-yaml": "^4.1.0",
     "typescript": "^5.8.2",
     "uuid": "^11.1.0",
