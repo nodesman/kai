@@ -12,7 +12,7 @@ import { ConversationManager } from './ConversationManager';
 
 interface Message {
     type: string;
-    conversationId?: string; // conversationId is now ALWAYS optional in the base interface
+    conversationId?: string; // Conversation ID is optional in the base interface
 }
 
 interface ChatMessage extends Message {
@@ -42,98 +42,108 @@ interface ErrorMessage extends Message {
 }
 
 interface DiffAppliedMessage extends Message {
-    // Can add details
+    // Can add details about the applied diff, if needed
 }
 
 interface ReadyMessage extends Message {}
 
-// --- WebSocketServer Class ---
+interface NewConversationMessage extends Message {
+    // Specifically for informing the client of a new conversation ID
+}
 
+interface InitialConversationMessage extends Message {
+    // Specifically for the initial conversation ID.
+}
+
+interface InitialConversationIdMessage extends Message {
+}
+
+// --- WebSocketServer Class ---
 class WebSocketServer {
-    private wss: WebSocket.Server;
+    private webSocketServer: WebSocket.Server;
     private codeProcessor: CodeProcessor;
     private conversationManager: ConversationManager;
 
     constructor(config: Config) {
-        this.wss = new WebSocket.Server({ port: 8080 });
+        this.webSocketServer = new WebSocket.Server({ port: 8080 });
         this.codeProcessor = new CodeProcessor(config);
         this.conversationManager = ConversationManager.getInstance();
         this.setupConnectionHandler();
     }
 
     private setupConnectionHandler() {
-        this.wss.on('connection', this.handleConnection.bind(this));
+        this.webSocketServer.on('connection', this.handleConnection.bind(this));
         console.log('WebSocket server listening on port 8080');
     }
 
-    private handleConnection(ws: WebSocket, req: IncomingMessage) {
-        const ip = this.getClientIp(req);
-        console.log(`Client connected from ${ip}`);
+    private handleConnection(webSocket: WebSocket, request: IncomingMessage) {
+        const ipAddress = this.getClientIpAddress(request);
+        console.log(`Client connected from ${ipAddress}`);
 
-        // Create a new conversation and send the ID to the client
+        // 1. Create conversation and get ID
         const { conversationId } = this.conversationManager.createConversation();
-        this.sendMessage(ws, { type: "initialConversationId", conversationId: conversationId }); // Send initial ID
 
-        ws.on('message', this.handleMessage.bind(this, ws));
-        ws.on('close', this.handleDisconnection.bind(this, ws, ip));
-        ws.on('error', this.handleWsError.bind(this, ws, ip));
+        // 2. *Crucially* store the conversationId on the WebSocket itself.
+        // @ts-ignore
+        webSocket.conversationId = conversationId;
+
+        // 3. Send the initial conversationId to the client.
+        this.sendMessage(webSocket, { type: 'initialConversationId', conversationId } as InitialConversationIdMessage);
+
+        // Set up event listeners.  No closures needed now!
+        webSocket.on('message', this.handleMessage.bind(this, webSocket));
+        webSocket.on('close', this.handleDisconnection.bind(this, webSocket, ipAddress));
+        webSocket.on('error', this.handleWebSocketError.bind(this, webSocket, ipAddress));
     }
 
-    private getClientIp(req: IncomingMessage): string {
-        return req.socket.remoteAddress || 'unknown';
+    private getClientIpAddress(request: IncomingMessage): string {
+        return request.socket.remoteAddress || 'unknown';
     }
 
-    private async handleMessage(ws: WebSocket, message: string) {
+    private async handleMessage(webSocket: WebSocket, message: string) {
+        // Now we can access conversationId DIRECTLY from the webSocket object.
+
+        // @ts-ignore
+        const conversationId = webSocket.conversationId;
+
+        // This should NEVER happen, but it's a good safety check.
+        if (!conversationId) {
+            console.error("WebSocket connection has no associated conversationId!");
+            this.sendError(webSocket, "Internal Server Error", "No conversation associated with this connection.", undefined);
+            return; // Stop processing
+        }
+
+        console.log(`Message received for conversationId: ${conversationId}`);
         console.log(`Received: ${message}`);
 
         try {
             const json: Message = this.parseMessage(message);
-            let conversationId = json.conversationId;
-            let conversation = null;
 
-            // Validate and/or create conversation
-            if (conversationId) {
-                conversation = this.conversationManager.getConversation(conversationId);
-                if (!conversation) {
-                    console.warn(`Invalid conversationId received: ${conversationId}.  Creating a new conversation.`);
-                    const newConversation = this.conversationManager.createConversation();
-                    conversationId = newConversation.conversationId;
-                    conversation = newConversation.conversation;
-                    // Inform the client about the new ID
-                    this.sendMessage(ws, { type: "newConversationId", conversationId: conversationId });
-                }
-            } else {
-                // No conversationId provided - create a new one and inform the client
-                console.warn(`No conversationId received. Creating a new conversation.`);
-                const newConversation = this.conversationManager.createConversation();
-                conversationId = newConversation.conversationId;
-                conversation = newConversation.conversation;
-                this.sendMessage(ws, { type: "newConversationId", conversationId: conversationId });
-            }
             switch (json.type) {
                 case 'ready':
                     console.log("Qt Client is ready!");
                     break;
                 case 'chatMessage':
-                    await this.handleChatMessage(ws, json as ChatMessage, conversationId);
+                    // Pass the conversationId, even though we could access it from the WebSocket, it's clearer.
+                    await this.handleChatMessage(webSocket, json as ChatMessage, conversationId);
                     break;
                 case 'applyDiff':
-                    await this.handleApplyDiff(ws, conversationId);
+                    await this.handleApplyDiff(webSocket, conversationId);
                     break;
                 case 'requestStatus':
-                    // Handle if needed
+                    // Handle request status
                     break;
                 default:
                     console.log("Unknown message type:", json.type);
-                    this.sendError(ws, 'Unknown message type', JSON.stringify(json), conversationId);
+                    this.sendError(webSocket, 'Unknown message type', JSON.stringify(json), conversationId);
             }
-
         } catch (error: any) {
             console.error('Invalid JSON or other error:', error);
-            //In case of error, we DO NOT know the conversation.
-            this.sendError(ws, 'Invalid JSON or other error', error.message, undefined);
+            //We can still try and send back an error with the conversation Id
+            this.sendError(webSocket, 'Invalid JSON or other error', error.message, conversationId);
         }
     }
+
     private parseMessage(message: string): Message {
         try {
             return JSON.parse(message);
@@ -141,64 +151,73 @@ class WebSocketServer {
             throw new Error('Invalid JSON format');
         }
     }
-    //Modified
-    private handleDisconnection(ws: WebSocket, ip: string) {
-        console.log(`Client ${ip} disconnected`);
-        // No specific cleanup needed here, as conversations are not tied to the WebSocket
+
+    private handleDisconnection(webSocket: WebSocket, ipAddress: string) {
+        console.log(`Client ${ipAddress} disconnected`);
+        // @ts-ignore
+        const conversationId = webSocket.conversationId; // Get conversationId
+        if (conversationId) {
+            this.conversationManager.removeConversation(conversationId);
+        }
     }
 
-    private handleWsError(ws: WebSocket, ip: string, error: Error) {
-        console.error(`WebSocket error from ${ip}:`, error);
+    private handleWebSocketError(webSocket: WebSocket, ipAddress: string, error: Error) {
+        console.error(`WebSocket error from ${ipAddress}:`, error);
     }
 
-    private async handleChatMessage(ws: WebSocket, json: ChatMessage, conversationId: string) {
+    private async handleChatMessage(webSocket: WebSocket, json: ChatMessage, conversationId: string) {
         console.log(`Chat message from ${json.messageType}: ${json.text}`);
         const conversation = this.conversationManager.getConversation(conversationId);
-        //We checked for null in handleMessage.  It cannot be null now.
 
+        // Add the user message to the conversation.
         if (json.messageType === "User") {
-            this.sendMessage(ws, { type: "chatMessage", messageType: "User", text: json.text, conversationId: conversationId } as ChatMessage);
+            // Echo the user's message back (optional, but good for UI feedback).
+            this.sendMessage(webSocket, { type: "chatMessage", messageType: "User", text: json.text } as ChatMessage);
 
             const aiResponse = await this.codeProcessor.askQuestion(json.text, conversation!);
-            this.sendMessage(ws, { type: "chatMessage", messageType: "LLM", text: aiResponse.message, conversationId: conversationId } as ChatMessage);
+            // Send the LLM's response.
+            this.sendMessage(webSocket, { type: "chatMessage", messageType: "LLM", text: aiResponse.message } as ChatMessage);
 
             const commentCheckPrompt = `Does the following text contain comments? Respond with "true" or "false".\n\n${aiResponse.message}`;
             const commentCheckResponse = await this.codeProcessor.checkResponse(commentCheckPrompt);
             const hasComments = commentCheckResponse.toLowerCase().includes("true");
-            this.sendMessage(ws, { type: "commentCheckResult", hasComments: hasComments, conversationId: conversationId } as CommentCheckResult);
+            this.sendMessage(webSocket, { type: "commentCheckResult", hasComments: hasComments } as CommentCheckResult);
 
             if (aiResponse.explanation) {
-                this.sendMessage(ws, { type: "explanation", explanation: aiResponse.explanation, conversationId: conversationId } as ExplanationMessage);
+                this.sendMessage(webSocket, { type: "explanation", explanation: aiResponse.explanation } as ExplanationMessage);
             }
 
             if (aiResponse.diffFiles) {
                 this.codeProcessor.setCurrentDiff(aiResponse.diffFiles);
-                this.sendMessage(ws, { type: 'diffResult', files: aiResponse.diffFiles, conversationId: conversationId } as DiffResult);
+                this.sendMessage(webSocket, { type: 'diffResult', files: aiResponse.diffFiles } as DiffResult);
             }
         } else {
-            this.sendMessage(ws, { type: "chatMessage", messageType: "LLM", text: `You said: ${json.text}`, conversationId: conversationId } as ChatMessage);
+            this.sendMessage(webSocket, { type: "chatMessage", messageType: "LLM", text: `You said: ${json.text}` } as ChatMessage);
         }
     }
 
-
-    private async handleApplyDiff(ws: WebSocket, conversationId: string) {
+    private async handleApplyDiff(webSocket: WebSocket, conversationId: string) {
         console.log("Apply Diff requested.");
         try {
             await this.codeProcessor.applyDiff();
-            this.sendMessage(ws, { type: 'diffApplied', conversationId: conversationId } as DiffAppliedMessage);
+            this.sendMessage(webSocket, { type: 'diffApplied', conversationId: conversationId } as DiffAppliedMessage);
         } catch (error: any) {
             console.error("Error applying diff:", error);
-            this.sendError(ws, 'Failed to apply diff', error.message, conversationId);
+            this.sendError(webSocket, 'Failed to apply diff', error.message, conversationId);
         }
     }
 
-    private sendMessage(ws: WebSocket, message: Message) {
-        ws.send(JSON.stringify(message));
+    private sendMessage(webSocket: WebSocket, message: Message) {
+        webSocket.send(JSON.stringify(message));
     }
 
-    private sendError(ws: WebSocket, message: string, details: string, conversationId: string | undefined) {
-        const errorMessage: ErrorMessage = { type: 'error', message, details, conversationId };
-        this.sendMessage(ws, errorMessage);
+    private sendError(webSocket: WebSocket, errorMessage: string, details: string, conversationId: string | undefined) {
+        const errorObject: ErrorMessage = {type: "error", message: errorMessage, details};
+
+        if(conversationId) {
+            errorObject.conversationId = conversationId
+        }
+        this.sendMessage(webSocket, errorObject);
     }
 }
 
