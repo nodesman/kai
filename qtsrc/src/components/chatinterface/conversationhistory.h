@@ -12,6 +12,9 @@ public:
     explicit ConversationHistory(QWidget *parent = nullptr);
     void setModel(ChatModel *model);
     void updateHistory();
+
+    QString convertMarkdownToHtml(const QString &markdown);
+
 private:
     QTextEdit *textEdit;
     ChatModel *chatModel;

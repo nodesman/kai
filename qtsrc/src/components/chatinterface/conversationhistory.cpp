@@ -1,5 +1,5 @@
+// conversationhistory.cpp
 #include "conversationhistory.h"
-
 #include <iostream>
 #include <QVBoxLayout>
 #include <QTextCursor>
@@ -10,6 +10,10 @@
 #include <QTextCharFormat>
 #include <QDebug>
 #include <QScrollBar>
+#include <QTextDocumentFragment> // For HTML conversion
+#include <QRegularExpression>  // For simple Markdown parsing
+#include <Qt>
+#include <QAbstractTextDocumentLayout> //for scroll
 
 ConversationHistory::ConversationHistory(QWidget *parent)
     : QWidget(parent)
@@ -25,12 +29,14 @@ void ConversationHistory::setupUI() {
 
     textEdit = new QTextEdit(this);
     textEdit->setReadOnly(true);
-    textEdit->setStyleSheet("background-color: lightgrey; color: black; border: none;");
-    textEdit->document()->setDocumentMargin(10);
+    //  Removed border: none;
+    textEdit->setStyleSheet("background-color: lightgrey; color: black;");
+    textEdit->document()->setDocumentMargin(10);  // Margin around the entire document
     layout->addWidget(textEdit);
     setLayout(layout);
     qDebug() << "ConversationHistory UI setup complete";
 }
+
 
 void ConversationHistory::setModel(ChatModel *model) {
     qDebug() << "Setting model to ConversationHistory:" << (model ? "valid model" : "null model");
@@ -54,11 +60,18 @@ void ConversationHistory::onRowsInserted(const QModelIndex &parent, int first, i
     updateHistory();
 }
 
+
+
 void ConversationHistory::updateHistory() {
     qDebug() << "updateHistory called";
 
     if (!chatModel) {
         qDebug() << "No chat model available, returning";
+        return;
+    }
+
+    if (!textEdit) {  // Check if textEdit is valid
+        qDebug() << "textEdit is null, returning.";
         return;
     }
 
@@ -72,20 +85,10 @@ void ConversationHistory::updateHistory() {
     doc->setDocumentMargin(10);
 
     for (int i = 0; i < chatModel->rowCount(); ++i) {
-        // Get data from the same column using the different roles
         QModelIndex index = chatModel->index(i, 0);
-
-        qDebug() << "Message" << i << "index valid:" << index.isValid();
-        qDebug() << "Available roles:" << chatModel->roleNames();
-
-        // Try to get both values from the same index but different roles
         QVariant typeVariant = chatModel->data(index, ChatModel::MessageTypeRole);
         QVariant textVariant = chatModel->data(index, ChatModel::MessageTextRole);
 
-        qDebug() << "Message" << i << "type valid:" << typeVariant.isValid()
-                 << "text valid:" << textVariant.isValid();
-
-        // Check if we have valid data
         if (!typeVariant.isValid() || !textVariant.isValid()) {
             qDebug() << "WARNING: Invalid data for message" << i;
             continue;
@@ -94,28 +97,19 @@ void ConversationHistory::updateHistory() {
         ChatModel::MessageType msgType = static_cast<ChatModel::MessageType>(typeVariant.toInt());
         QString msgText = textVariant.toString();
 
-        qDebug() << "Message" << i << "- Type:" << (msgType == ChatModel::User ? "User" : "LLM")
-                 << "- Text length:" << msgText.length()
-                 << "- Text (first 30 chars):" << msgText.left(30);
 
-        // Insert block with proper spacing
+        // --- Block Format (Spacing and Alignment) ---
         QTextBlockFormat blockFormat;
         blockFormat.setBottomMargin(10); // Space between messages
-
-        if (i > 0) {
-            cursor.insertBlock(blockFormat);
-        }
-
-        // Message alignment
-        blockFormat = QTextBlockFormat();
         if (msgType == ChatModel::User) {
             blockFormat.setAlignment(Qt::AlignRight);
         } else {
             blockFormat.setAlignment(Qt::AlignLeft);
         }
-        cursor.setBlockFormat(blockFormat);
+        cursor.insertBlock(blockFormat); // Apply block format *before* inserting content
 
-        // Message frame format
+
+        // --- Frame Format (Borders, Padding, Background) ---
         QTextFrameFormat frameFormat;
         frameFormat.setBorder(1);
         frameFormat.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
@@ -133,30 +127,96 @@ void ConversationHistory::updateHistory() {
             frameFormat.setBackground(QBrush(QColor("#f0f0e0")));
         }
 
-        // Insert frame
+        // --- Insert Frame ---
         QTextFrame *frame = cursor.insertFrame(frameFormat);
         QTextCursor frameCursor = frame->firstCursorPosition();
 
-        // Set text format
+        // --- Text Format (Font) ---
         QTextCharFormat textFormat;
         textFormat.setFont(QFont("Verdana", 12));
         frameCursor.setCharFormat(textFormat);
 
 
-
+        // --- HTML Content ---
         if (msgText.isEmpty()) {
             qDebug() << "WARNING: Message text is empty for message" << i;
             msgText = "[Empty message]";
         }
 
-        frameCursor.insertText(msgText.replace("\n", " "));
+        // Convert Markdown to HTML *before* inserting into the document.
+        QString html = convertMarkdownToHtml(msgText);
+        frameCursor.insertHtml(html); // Insert as HTML
 
-        // Move cursor after frame
-        cursor = frame->lastCursorPosition();
+
+        // --- Move Cursor ---
+        cursor = frame->lastCursorPosition(); // Crucial: Get the cursor *after* the frame.
         cursor.movePosition(QTextCursor::NextBlock);
     }
 
+
+    // --- Scroll to End ---
     // Scroll to end
-    textEdit->verticalScrollBar()->setValue(textEdit->verticalScrollBar()->maximum());
+    QScrollBar *scrollBar = textEdit->verticalScrollBar();
+    if (scrollBar)
+    {
+       scrollBar->setValue(scrollBar->maximum());
+    }
     qDebug() << "History update complete";
+}
+QString ConversationHistory::convertMarkdownToHtml(const QString& markdown) {
+    QString html = markdown;
+
+    // --- Basic Markdown Support ---
+    // Bold: **text**  -> <strong>text</strong>
+    html.replace(QRegularExpression("\\*\\*(.*?)\\*\\*"), "<strong>\\1</strong>");
+
+    // Italics: *text* -> <em>text</em>
+    html.replace(QRegularExpression("\\*(.*?)\\*"), "<em>\\1</em>");
+    html.replace(QRegularExpression("_(.*?)_"), "<em>\\1</em>"); // Also support _italics_
+
+    // Strikethrough: ~~text~~ -> <del>text</del>
+    html.replace(QRegularExpression("~~(.*?)~~"), "<del>\\1</del>");
+
+
+    // Code blocks: `code` -> <pre><code>code</code></pre>  (multiline)
+      html.replace(QRegularExpression("```([^`]*?)```", QRegularExpression::DotMatchesEverythingOption), "<pre><code style=\"background-color: #f0f0f0; display: block; white-space: pre-wrap;\">\\1</code></pre>");
+
+
+    // Inline code: `code` -> <code>code</code>
+    html.replace(QRegularExpression("`([^`]*)`"), "<code style=\"background-color: #f0f0f0;\">\\1</code>");
+
+
+    // Headers: # Header -> <h1>Header</h1>, ## Header -> <h2>Header</h2>, etc.
+    html.replace(QRegularExpression("^###### (.*)$", QRegularExpression::MultilineOption), "<h6>\\1</h6>");
+    html.replace(QRegularExpression("^##### (.*)$", QRegularExpression::MultilineOption), "<h5>\\1</h5>");
+    html.replace(QRegularExpression("^#### (.*)$", QRegularExpression::MultilineOption), "<h4>\\1</h4>");
+    html.replace(QRegularExpression("^### (.*)$", QRegularExpression::MultilineOption), "<h3>\\1</h3>");
+    html.replace(QRegularExpression("^## (.*)$", QRegularExpression::MultilineOption), "<h2>\\1</h2>");
+    html.replace(QRegularExpression("^# (.*)$", QRegularExpression::MultilineOption), "<h1>\\1</h1>");
+
+     //Unordered Lists
+    QRegularExpression ulRegex("^[\\*\\-\\+]\\s+(.*)$", QRegularExpression::MultilineOption);
+    html.replace(ulRegex, "<ul>\n<li>\\1</li>\n</ul>");
+	// Fix for mulitple list entries.
+    html.replace(QRegularExpression("<\\/ul>\\n<ul>", QRegularExpression::MultilineOption), "");
+
+
+    //Ordered list
+    QRegularExpression olRegex(R"(^\d+\.\s+(.*)$)", QRegularExpression::MultilineOption);
+    html.replace(olRegex, "<ol>\n<li>\\1</li>\n</ol>");
+    html.replace(QRegularExpression("</ol>\\n<ol>", QRegularExpression::MultilineOption), ""); //remove duplicates.
+
+
+    // Links: [text](url) -> <a href="url">text</a>
+    html.replace(QRegularExpression("\\[(.*?)\\]\\((.*?)\\)"), "<a href=\"\\2\">\\1</a>");
+
+    // Images: ![alt text](url) -> <img src="url" alt="alt text">
+    html.replace(QRegularExpression("!\\[(.*?)\\]\\((.*?)\\)"), "<img src=\"\\2\" alt=\"\\1\">");
+
+    // --- Newlines ---
+    // Replace \r\n and \n with <br> for line breaks.  Do this *after* block-level elements.
+    html.replace("\r\n", "<br>");
+    html.replace("\n", "<br>");
+
+    return html;
 }
