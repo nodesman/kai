@@ -30,7 +30,7 @@ class CodeProcessor {
         this.fs = new FileSystem();
         this.aiClient = new AIClient(config);
         this.projectRoot = process.cwd();
-        this.conversationManager = new ConversationManager();
+        this.conversationManager = ConversationManager.getInstance();
     }
 
     public async askQuestion(userPrompt: string, conversation: Conversation): Promise<AIResponse> {

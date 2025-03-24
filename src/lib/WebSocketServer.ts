@@ -57,7 +57,7 @@ class WebSocketServer {
     constructor(config: Config) {
         this.wss = new WebSocket.Server({ port: 8080 });
         this.codeProcessor = new CodeProcessor(config);
-        this.conversationManager = new ConversationManager();
+        this.conversationManager = ConversationManager.getInstance();
         this.setupConnectionHandler();
     }
 
