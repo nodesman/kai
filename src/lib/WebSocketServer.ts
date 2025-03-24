@@ -1,62 +1,20 @@
 // File: src/lib/WebSocketServer.ts
-
 import WebSocket from 'ws';
 import { CodeProcessor } from './codeprocessor/CodeProcessor';
 import { Config } from './Config';
-import { DiffFile } from './types';
+import {
+    ChatMessage,
+    CommentCheckResult,
+    DiffAppliedMessage,
+    DiffFile,
+    DiffResult, ErrorMessage,
+    ExplanationMessage,
+    Message
+} from './types';
 import { Conversation } from "./models/Conversation";
 import { IncomingMessage } from 'http';
 import { ConversationManager } from './ConversationManager';
-
-// --- Message Interfaces ---
-
-interface Message {
-    type: string;
-    conversationId?: string; // Conversation ID is optional in the base interface
-}
-
-interface ChatMessage extends Message {
-    messageType: string;
-    text: string;
-}
-
-interface DiffResult extends Message {
-    files: DiffFile[];
-}
-
-interface ExplanationMessage extends Message {
-    explanation: string;
-}
-
-interface DiffCheckResult extends Message {
-    hasDiff: boolean;
-}
-
-interface CommentCheckResult extends Message {
-    hasComments: boolean;
-}
-
-interface ErrorMessage extends Message {
-    message: string;
-    details: string;
-}
-
-interface DiffAppliedMessage extends Message {
-    // Can add details about the applied diff, if needed
-}
-
-interface ReadyMessage extends Message {}
-
-interface NewConversationMessage extends Message {
-    // Specifically for informing the client of a new conversation ID
-}
-
-interface InitialConversationMessage extends Message {
-    // Specifically for the initial conversation ID.
-}
-
-interface InitialConversationIdMessage extends Message {
-}
+import { InitialConversationIdMessage } from "./types"
 
 // --- WebSocketServer Class ---
 class WebSocketServer {
@@ -178,7 +136,7 @@ class WebSocketServer {
             // Send the LLM's response.
             this.sendMessage(webSocket, { type: "chatMessage", messageType: "LLM", text: aiResponse.message } as ChatMessage);
 
-            const commentCheckPrompt = `Does the following text contain comments? Respond with "true" or "false".\n\n${aiResponse.message}`;
+            const commentCheckPrompt = `Does the following text contain text other than diff of code - such as text explaining the code changes and other text?? Respond with "true" or "false".\n\n${aiResponse.message}`;
             const commentCheckResponse = await this.codeProcessor.checkResponse(commentCheckPrompt);
             const hasComments = commentCheckResponse.toLowerCase().includes("true");
             this.sendMessage(webSocket, { type: "commentCheckResult", hasComments: hasComments } as CommentCheckResult);
