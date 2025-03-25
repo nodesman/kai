@@ -11,6 +11,7 @@
 #include <QFontMetrics>
 #include <QPalette>
 #include <QDebug>
+#include <QRegularExpression> // Add this for regular expressions
 
 DiffView::DiffView(QWidget *parent, DiffModel *model) // Add model parameter
     : QWidget(parent)
@@ -138,24 +139,51 @@ QList<DiffView::DiffLine> DiffView::parseDiffContent(const QString& content) {
     QList<DiffView::DiffLine> diffData;
     QStringList lines = content.split('\n');
 
-    for (const QString& line : lines) {
-        DiffLine diffLine;
+    QRegularExpression hunkHeaderRegex(R"(^@@\s*-(\d+)(?:,(\d+))?\s*\+(\d+)(?:,(\d+))?\s*@@.*)");
+    int originalLine = 1;
+    int modifiedLine = 1;
+    bool isFullAddition = true; // Track if it's a full addition
 
-        if (line.startsWith('+')) {
-            diffLine.changeType = DiffLine::Added;
-            diffLine.text = line.mid(1);
-        } else if (line.startsWith('-')) {
-            diffLine.changeType = DiffLine::Removed;
-            diffLine.text = line.mid(1);
-        } else {
-            diffLine.changeType = DiffLine::Unchanged;
-            diffLine.text = line;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& line = lines[i];
+
+        QRegularExpressionMatch match = hunkHeaderRegex.match(line);
+        if (match.hasMatch()) {
+            // Reset line numbers based on hunk header
+            originalLine = match.captured(1).toInt();
+            modifiedLine = match.captured(3).toInt();
+            continue; // Skip hunk header lines
         }
 
-        diffData.append(diffLine);
+
+        if (line.startsWith("---")) { //skip the 3 --- and +++ diff lines
+            ++i; //skip next line which is +++
+            continue;
+        }
+        if (line.startsWith('+')) {
+            diffData.append({DiffLine::Added, line.mid(1), 0, modifiedLine++});
+        } else if (line.startsWith('-')) {
+            diffData.append({DiffLine::Removed, line.mid(1), originalLine++, 0});
+            isFullAddition = false;
+        } else {
+            diffData.append({DiffLine::Unchanged, line, originalLine++, modifiedLine++});
+            isFullAddition = false;
+        }
     }
 
-    return diffData;
+    if (diffData.size() > 0 && isFullAddition) {
+        QList<DiffLine> fullAdditionData;
+
+        for(const auto& line : diffData)
+        {
+            fullAdditionData.append({DiffLine::Added, line.text, 0, 0});
+        }
+       return fullAdditionData;
+    }
+    else
+    {
+        return diffData;
+    }
 }
 
 void DiffView::mousePressEvent(QMouseEvent *event) {
