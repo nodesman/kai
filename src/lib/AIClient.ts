@@ -69,7 +69,7 @@ class AIClient {
             let response = "";
             if (modelName === "gemini-2.0-flash") {
                 response = await this.gemini2ProModel.getResponseFromAI(conversation);
-            } else if (modelName === "gpt-4o") {
+            } else if (modelName === "gpt-4o-mini") {
                 response = await this.gpt4oMiniModel.getResponseFromAI(conversation);
             } else {
                 throw new Error(`Unsupported model: ${modelName}`);
