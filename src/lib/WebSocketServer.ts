@@ -9,12 +9,12 @@ import {
     DiffFile,
     DiffResult, ErrorMessage,
     ExplanationMessage,
-    Message
+    Message,
+    InitialConversationIdMessage
 } from './types';
 import { Conversation } from "./models/Conversation";
 import { IncomingMessage } from 'http';
 import { ConversationManager } from './ConversationManager';
-import { InitialConversationIdMessage } from "./types"
 
 // --- WebSocketServer Class ---
 class WebSocketServer {
@@ -146,6 +146,9 @@ class WebSocketServer {
             }
 
             if (aiResponse.diffFiles) {
+                // ADD LOGGING HERE
+                console.log("Sending diffResult message with files:", JSON.stringify(aiResponse.diffFiles, null, 2));
+
                 this.codeProcessor.setCurrentDiff(aiResponse.diffFiles);
                 this.sendMessage(webSocket, { type: 'diffResult', files: aiResponse.diffFiles } as DiffResult);
             }
