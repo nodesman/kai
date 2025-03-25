@@ -2,41 +2,46 @@
 import path from 'path';
 import { FileSystem } from './FileSystem';
 import Gemini2ProModel from "./models/Gemini2ProModel";
+import GPT4oMiniModel from './models/GPT4oMiniModel';
 import { Config } from "./Config";
-import { Conversation } from "./models/Conversation"; // Import Conversation
+import { Conversation } from "./models/Conversation";
 
 interface LogEntryBase {
-    type: string; // Common field for all log entries
+    type: string;
 }
 
 interface RequestLogEntry extends LogEntryBase {
     type: 'request';
     prompt: string;
-    conversationId: string; // Add conversationId for logging
+    conversationId: string;
+    modelName: string;
 }
 
 interface ResponseLogEntry extends LogEntryBase {
     type: 'response';
     response: string;
-    conversationId: string; // Add conversationId for logging
+    conversationId: string;
+    modelName: string;
 }
 
 interface ErrorLogEntry extends LogEntryBase {
     type: 'error';
     error: string;
-    conversationId: string; // Add conversationId for logging
+    conversationId: string;
+    modelName: string;
 }
 
-// Union type:  A log entry can be one of these types
 type LogEntry = RequestLogEntry | ResponseLogEntry | ErrorLogEntry;
 
 class AIClient {
     conversationLogFile: string;
     fs: FileSystem;
-    model: Gemini2ProModel;
+    gemini2ProModel: Gemini2ProModel;
+    gpt4oMiniModel: GPT4oMiniModel;
 
     constructor(config: Config) {
-        this.model = new Gemini2ProModel(config);
+        this.gemini2ProModel = new Gemini2ProModel(config);
+        this.gpt4oMiniModel = new GPT4oMiniModel(config);
         this.conversationLogFile = path.join(process.cwd(), 'conversation_log.jsonl');
         this.fs = new FileSystem();
     }
@@ -55,24 +60,29 @@ class AIClient {
         }
     }
 
-    async getResponseFromAI(conversation: Conversation): Promise<string> { // No conversationId parameter
+    async getResponseFromAI(conversation: Conversation, modelName: string = "gemini-2.0-flash"): Promise<string> {
         try {
-            // Log the request. Get the conversation ID *from* the Conversation object.
-            const conversationId = conversation.getId(); // Use the getId() method
-            await this.logConversation({ type: 'request', prompt: conversation.getLastMessage()?.content || "", conversationId });
+            const conversationId = conversation.getId();
+            const prompt = conversation.getLastMessage()?.content || "";
+            await this.logConversation({ type: 'request', prompt, conversationId, modelName });
 
+            let response = "";
+            if (modelName === "gemini-2.0-flash") {
+                response = await this.gemini2ProModel.getResponseFromAI(conversation);
+            } else if (modelName === "gpt-4o") {
+                response = await this.gpt4oMiniModel.getResponseFromAI(conversation);
+            } else {
+                throw new Error(`Unsupported model: ${modelName}`);
+            }
 
-            const response = await this.model.getResponseFromAI(conversation);
-
-            // Log the response
-            await this.logConversation({ type: 'response', response, conversationId });
-
+            await this.logConversation({ type: 'response', response, conversationId, modelName });
             return response;
+
         } catch (error) {
-            const conversationId = conversation.getId(); //get it here too
+            const conversationId = conversation.getId();
             console.error("Error in AIClient:", error);
-            await this.logConversation({ type: 'error', error: (error as Error).message, conversationId });
-            return ""; // Or throw the error, depending on your error handling strategy
+            await this.logConversation({ type: 'error', error: (error as Error).message, conversationId, modelName:"Unknown" }); // Log error with model name.
+            return ""; // Or re-throw, depending on how you want to handle it higher up
         }
     }
 }

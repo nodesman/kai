@@ -1,18 +1,18 @@
 // src/lib/models/Conversation.ts
-import { v4 as uuidv4 } from 'uuid'; // Import UUID generator
+import { v4 as uuidv4 } from 'uuid';
 
 export interface Message {
-    role: 'user' | 'assistant' | 'system'; // Standard roles  (you can remove 'system' if not used)
+    role: 'user' | 'assistant' | 'system';
     content: string;
 }
 
 export class Conversation {
-    private id: string; // Add an ID field
+    private id: string;
     private messages: Message[];
 
-    constructor(id?: string) { // Make id optional
-        this.id = id || uuidv4();  // Generate a unique ID if one isn't provided
-        this.messages = [];
+    constructor(id?: string, initialMessages?: Message[]) { // Make id and initialMessages optional
+        this.id = id || uuidv4();
+        this.messages = initialMessages || []; // Initialize with provided messages, or an empty array
     }
 
     getId(): string {
