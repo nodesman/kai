@@ -2,3 +2,4 @@
 node_modules
 *.jsonl
 bin/
+.kaichats
