@@ -68,12 +68,6 @@ class CodeProcessor {
             const fileBlock = fileHeader + content + fileFooter;
             const fileTokens = this.countTokens(fileBlock);
 
-            if (currentTokenCount + fileTokens > maxContextTokens) {
-                console.warn(chalk.yellow(`Context truncated. Reached token limit (${maxContextTokens}) near file: ${relativePath}`));
-                excludedFiles += (sortedFilePaths.length - includedFiles); // Count remaining as excluded
-                break; // Stop adding files
-            }
-
             contextString += fileBlock;
             currentTokenCount += fileTokens;
             includedFiles++;
@@ -143,56 +137,34 @@ class CodeProcessor {
 
                 const userPrompt = interactionResult.newPrompt;
 
-                // --- Prepend Context ---
-                console.log(chalk.blue("Checking context and token limits..."));
-                let fullPromptContent = userPrompt;
-                let contextString = '';
-                let contextTokens = 0;
+// --- Prepend Context (Simplified - No Token Checks) ---
+                console.log(chalk.blue("Building context...")); // Indicate context building attempt
 
-                // Calculate history tokens (excluding system messages if any)
-                const historyTokens = conversation.getMessages()
-                    .filter(m => m.role === 'user' || m.role === 'assistant') // Only count user/assistant turns for history limit
-                    .reduce((sum, m) => sum + this.countTokens(m.content), 0);
+// Always attempt to build and prepend context
+                const contextResult = await this.buildContextString(); // Rebuild context each time
+                const contextString = contextResult.context;
+// const contextTokens = contextResult.tokenCount; // Token count is no longer used for limiting
 
-                const promptTokens = this.countTokens(userPrompt);
-                const maxAllowedTotal = this.config.gemini.max_prompt_tokens || 8000;
-                // Leave a buffer for the AI's response and overhead
-                const buffer = 1000; // Adjust buffer as needed
-                const availableForContext = maxAllowedTotal - historyTokens - promptTokens - buffer;
+// Unconditionally prepend the context string to the user's prompt
+                const fullPromptContent = `${contextString}\n\n---\nUser Question:\n${userPrompt}`;
+                console.log(chalk.green(`Prepending project context to prompt.`)); // Simplified confirmation
 
-                console.log(`Tokens - History: ${historyTokens}, Prompt: ${promptTokens}, Available for Context: ${availableForContext}`);
-
-                if (availableForContext > 100) { // Only add context if there's a reasonable amount of space
-                    const contextResult = await this.buildContextString(); // Rebuild context each time (could be cached)
-                    contextString = contextResult.context;
-                    contextTokens = contextResult.tokenCount;
-
-                    if (contextTokens <= availableForContext) {
-                        fullPromptContent = `${contextString}\n\n---\nUser Question:\n${userPrompt}`;
-                        console.log(chalk.green(`Prepending project context (${contextTokens} tokens) to prompt.`));
-                    } else {
-                        console.warn(chalk.yellow(`Built context (${contextTokens} tokens) exceeds available space (${availableForContext}). Sending prompt without full context.`));
-                        // Optionally, try sending a truncated context? For now, just send the prompt.
-                        fullPromptContent = `User Question:\n${userPrompt}`; // Add marker for clarity even without context
-                    }
-                } else {
-                    console.warn(chalk.yellow(`Not enough space for context (Available: ${availableForContext}). Sending prompt without context.`));
-                    fullPromptContent = `User Question:\n${userPrompt}`; // Add marker for clarity
-                }
                 isFirstUserPromptOfSession = false; // No longer the first prompt after the first iteration
-                // --- End Prepend Context ---
+// --- End Prepend Context ---
 
-                // Add the potentially context-prepended user message
+// Add the potentially context-prepended user message
                 conversation.addMessage('user', fullPromptContent);
 
                 try {
                     // Get response (AIClient logs request/response)
+                    // The AIClient or the API itself might still reject the request if it exceeds the absolute maximum token limit.
                     await this.aiClient.getResponseFromAI(conversation, conversationFilePath);
                     // AI response is added to 'conversation' inside getResponseFromAI
 
                 } catch (aiError) {
                     console.error(chalk.red("Error during AI interaction:"), aiError);
                     // Log error and add a system message for Sublime display
+                    // Note: The error might now more frequently be related to exceeding token limits at the API level.
                     conversation.addMessage('system', `[Error occurred during AI request: ${(aiError as Error).message}. Please check logs. You can try again or exit.]`);
                     // This system message is temporary for display and not saved unless explicitly logged by AIClient
                 }
