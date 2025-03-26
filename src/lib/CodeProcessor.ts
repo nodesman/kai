@@ -82,11 +82,7 @@ class CodeProcessor {
             const fileBlock = fileHeader + content + fileFooter;
             const fileTokens = this.countTokens(fileBlock);
 
-            if (estimatedTokens + fileTokens > maxContextTokens) {
-                console.warn(chalk.yellow(`Skipping file due to token limit: ${relativePath} (${fileTokens} tokens)`));
-                excludedFiles++;
-                continue;
-            }
+
             contextString += fileBlock;
             estimatedTokens += fileTokens;
             includedFiles++;
