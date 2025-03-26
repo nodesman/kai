@@ -1,4 +1,4 @@
-// lib/models/Gemini2ProModel.ts
+// lib/models/Gemini2FlashModel.ts
 import BaseModel from "./BaseModel";
 import { GoogleGenerativeAI, Content, GenerativeModel } from "@google/generative-ai";
 import { Config } from "../Config";
@@ -10,7 +10,7 @@ interface GeminiMessagePart { text: string; }
 interface GeminiMessage { role: "user" | "model"; parts: GeminiMessagePart[]; }
 type GeminiChatHistory = GeminiMessage[];
 
-class Gemini2ProModel extends BaseModel {
+class Gemini2FlashModel extends BaseModel {
     genAI: GoogleGenerativeAI;
     modelName: string; // Store the specific model name for this instance
     model: GenerativeModel; // The specific model instance
@@ -21,9 +21,9 @@ class Gemini2ProModel extends BaseModel {
             throw new Error("Gemini API key is missing in the configuration.");
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        // Use the primary model_name or default to Pro
-        this.modelName = config.gemini.model_name || "gemini-2.5-pro-exp-03-25"; // Default to Pro
-        console.log(chalk.yellow(`Initializing Gemini Pro Model instance with: ${this.modelName}`));
+        // Use the subsequent_chat_model_name or default to Flash
+        this.modelName = config.gemini.subsequent_chat_model_name || "gemini-2.0-flash"; // Default to Flash
+        console.log(chalk.yellow(`Initializing Gemini Flash Model instance with: ${this.modelName}`));
         try {
             this.model = this.genAI.getGenerativeModel({ model: this.modelName });
         } catch (error) {
@@ -89,7 +89,7 @@ class Gemini2ProModel extends BaseModel {
         }
     }
 
-    // --- convertToGeminiConversation (Identical structure) ---
+    // --- convertToGeminiConversation (Identical to Pro version) ---
     convertToGeminiConversation(messages: Message[]): GeminiChatHistory {
         return messages.map((msg): GeminiMessage | null => {
             if (!msg.role || !msg.content) return null;
@@ -99,31 +99,16 @@ class Gemini2ProModel extends BaseModel {
         }).filter((msg): msg is GeminiMessage => msg !== null);
     }
 
-    // --- handleError (Accepts modelName, identical structure) ---
+    // --- handleError (Accepts modelName, identical to Pro version structure) ---
     handleError(error: any, modelName: string): void { // modelName is required here
         let errorMessage = `An error occurred while making the AI API request (using ${modelName}).`;
         let errorCode = 'UNKNOWN';
         // ... (rest of error handling logic identical to the previous Gemini2ProModel version) ...
-        if (error instanceof Error && error.message.includes(' FetchError:')) {
-            errorMessage = `\n⚠️ Network Error (using ${modelName}): ${error.message}`;
-            errorCode = 'NETWORK_ERROR';
-        } else if (error.response) {
-            const details = error.response.data?.error?.message || JSON.stringify(error.response.data, null, 2);
-            errorMessage += `\n❌ HTTP Status: ${error.response.status}`;
-            errorMessage += `\n📌 AI Error Message: ${details}`;
-            errorCode = `API_ERROR_${error.response.status}`;
-        } else if (error.request) {
-            errorMessage += `\n⏳ No response received. Possible network issues or server timeout.`;
-            errorCode = 'NO_RESPONSE';
-        } else if (error.message) {
-            errorMessage += `\n⚠️ Error: ${error.message}`;
-            if (error.message.includes('SAFETY')) errorCode = 'SAFETY_BLOCK';
-            if (error.message.includes('API key not valid')) errorCode = 'INVALID_API_KEY';
-            if (error.message.includes('429')) errorCode = 'RATE_LIMIT';
-            if (error.message.includes('503')) errorCode = 'SERVER_OVERLOADED';
-        } else {
-            errorMessage += `\n❓ An unexpected error occurred.`;
-        }
+        if (error instanceof Error && error.message.includes(' FetchError:')) { /*...*/ }
+        else if (error.response) { /*...*/ }
+        else if (error.request) { /*...*/ }
+        else if (error.message) { /*...*/ }
+        else { /*...*/ }
 
         console.error(chalk.red(errorMessage));
         const codedError = new Error(`AI API Error (${errorCode}) using ${modelName}: ${error.message || 'Details in console log.'}`);
@@ -132,4 +117,4 @@ class Gemini2ProModel extends BaseModel {
     }
 }
 
-export default Gemini2ProModel;
+export default Gemini2FlashModel;

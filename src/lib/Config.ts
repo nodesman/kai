@@ -9,26 +9,33 @@ interface GeminiRateLimitConfig {
     requests_per_minute?: number;
 }
 
+// *** ADDED subsequent_chat_model_name ***
 interface GeminiConfig {
-    api_key: string; // <-- Add this
-    model_name?: string;
-    max_prompt_tokens?: number;
+    api_key: string; // Loaded from ENV
+    model_name?: string; // Primary model (e.g., Pro)
+    subsequent_chat_model_name?: string; // Secondary model (e.g., Flash) <-- ADDED
+    max_output_tokens?: number; // Max tokens for model response
+    max_prompt_tokens?: number; // Max tokens for input (used for context building limit)
     rate_limit?: GeminiRateLimitConfig;
     max_retries?: number;
     retry_delay?: number;
+    // Add safetySettings if needed:
+    // safetySettings?: SafetySetting[];
 }
+// *** END ADDITION ***
 
 interface ProjectConfig {
     root_dir?: string;
     prompts_dir?: string;
     prompt_template?: string;
-    chats_dir?: string;
+    chats_dir?: string; // Directory for conversation logs
 }
 
-// Main Config structure used internally
-interface Config {
+// Main Config structure used internally (interfaces, not class for simpler structure)
+interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: GeminiConfig;
-    project: ProjectConfig; // Make project non-optional internally
+    project: Required<ProjectConfig>; // Make project settings required internally after defaults
+    chatsDir: string; // Absolute path to chats directory
 }
 
 // Type for the raw data loaded from YAML (all fields optional)
@@ -38,21 +45,22 @@ type YamlConfigData = {
 };
 
 // --- Config Class ---
-class ConfigClass implements Config {
+// Renamed class to avoid conflict with IConfig interface
+class ConfigLoader implements IConfig {
     gemini: GeminiConfig;
-    project: ProjectConfig;
+    project: Required<ProjectConfig>; // Use Required utility type
     chatsDir: string; // Absolute path
 
     constructor() {
         const loadedConfig = this.loadConfig();
         this.gemini = loadedConfig.gemini;
         this.project = loadedConfig.project;
-        this.chatsDir = path.resolve(process.cwd(), this.project.chats_dir || '.kaichats'); // Use loaded project config
+        this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 
-    private loadConfig(): Config {
+    private loadConfig(): IConfig {
         const configPath = path.resolve(process.cwd(), 'config.yaml');
-        let yamlConfig: YamlConfigData = {}; // Initialize as empty object
+        let yamlConfig: YamlConfigData = {};
 
         // 1. Load API Key from Environment Variable
         const apiKey = process.env.GEMINI_API_KEY;
@@ -77,53 +85,57 @@ class ConfigClass implements Config {
             }
         } catch (e) {
             console.error(chalk.red(`Error loading or parsing config.yaml at ${configPath}:`), e);
-            // Decide if you want to exit or continue with defaults
             console.warn(chalk.yellow('Continuing with default configurations...'));
         }
 
         // 3. Construct the final Config object with defaults
-        const finalConfig: Config = {
-            gemini: {
-                api_key: apiKey, // Mandatory, loaded from env
-                model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default model
-                max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 8000,
-                rate_limit: {
-                    requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
-                },
-                max_retries: yamlConfig.gemini?.max_retries || 3,
-                retry_delay: yamlConfig.gemini?.retry_delay || 60000,
+        // Default subsequent model to Flash if not specified
+        const defaultSubsequentModel = "gemini-2.0-flash";
+
+        const finalGeminiConfig: GeminiConfig = {
+            api_key: apiKey, // Mandatory, loaded from env
+            model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default initial model
+            // *** USE defaultSubsequentModel ***
+            subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || defaultSubsequentModel, // Default subsequent
+            max_output_tokens: yamlConfig.gemini?.max_output_tokens || 8192,
+            max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 32000, // Default context limit for context building
+            rate_limit: {
+                requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
             },
-            project: {
-                // Use defaults if values are missing in yamlConfig.project
-                root_dir: yamlConfig.project?.root_dir || "generated_project",
-                prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
-                prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
-                chats_dir: yamlConfig.project?.chats_dir || ".kaichats",
-            }
+            max_retries: yamlConfig.gemini?.max_retries || 3,
+            retry_delay: yamlConfig.gemini?.retry_delay || 60000, // 1 minute default
         };
+
+        const finalProjectConfig: Required<ProjectConfig> = {
+            root_dir: yamlConfig.project?.root_dir || "generated_project",
+            prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
+            prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
+            chats_dir: yamlConfig.project?.chats_dir || ".kaichats",
+        };
+
+        // Calculate absolute chats directory path
+        const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
 
         // Ensure chats directory exists immediately
         try {
-            let absoluteChatsDir: string;
-            if (finalConfig.project.chats_dir === undefined) {
-                throw new Error("Configuration error: 'project.chats_dir' must be defined in your configuration.");
-            }
-            absoluteChatsDir = path.resolve(process.cwd(), finalConfig.project.chats_dir);
             if (!fs.existsSync(absoluteChatsDir)) {
                 fs.mkdirSync(absoluteChatsDir, { recursive: true });
-                console.log(`Created chats directory: ${absoluteChatsDir}`);
+                console.log(chalk.blue(`Created chats directory: ${absoluteChatsDir}`));
             }
         } catch (dirError) {
-            console.error(chalk.red(`Fatal: Could not create chats directory at ${finalConfig.project.chats_dir}:`), dirError);
+            console.error(chalk.red(`Fatal: Could not create chats directory at ${absoluteChatsDir}:`), dirError);
             process.exit(1);
         }
 
-
-        return finalConfig;
+        return {
+            gemini: finalGeminiConfig,
+            project: finalProjectConfig,
+            chatsDir: absoluteChatsDir
+        };
     }
 }
 
-// Export the class itself, typically used as `new Config()`
-export { ConfigClass as Config };
-// Also export the interface if needed elsewhere for type hints
-export type { Config as IConfig, GeminiConfig, ProjectConfig };
+// Export the class implementation as 'Config'
+export { ConfigLoader as Config };
+// Export the interface type separately if needed for type hinting elsewhere
+export type { IConfig, GeminiConfig, ProjectConfig };
