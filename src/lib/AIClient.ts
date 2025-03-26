@@ -7,7 +7,7 @@ import Conversation, { Message } from "./models/Conversation";
 import chalk from 'chalk'; // For better console logging
 import { encode as gpt3Encode } from 'gpt-3-encoder'; // For token counting
 
-// --- LogEntry Types (Unchanged) ---
+// --- LogEntry Types (Unchanged from provided context) ---
 interface LogEntryBase {
     type: string;
     timestamp: string;
@@ -15,27 +15,37 @@ interface LogEntryBase {
 
 interface RequestLogEntry extends LogEntryBase {
     type: 'request';
-    role: 'user'; // Role is expected here
+    role: 'user';
     content: string;
 }
 
 interface ResponseLogEntry extends LogEntryBase {
     type: 'response';
-    role: 'assistant'; // Role is expected here
+    role: 'assistant';
+    content: string;
+}
+
+interface SystemLogEntry extends LogEntryBase {
+    type: 'system';
+    role: 'system';
     content: string;
 }
 
 interface ErrorLogEntry extends LogEntryBase {
     type: 'error';
     error: string;
+    // Optional: Add role if errors can be associated with a step
+    role?: 'system' | 'user' | 'assistant';
 }
 
-type LogEntry = RequestLogEntry | ResponseLogEntry | ErrorLogEntry;
+// Allow LogEntryData to represent SystemLogEntry as well
+type LogEntry = RequestLogEntry | ResponseLogEntry | ErrorLogEntry | SystemLogEntry;
 
 type LogEntryData =
     | Omit<RequestLogEntry, 'timestamp'>
     | Omit<ResponseLogEntry, 'timestamp'>
-    | Omit<ErrorLogEntry, 'timestamp'>;
+    | Omit<ErrorLogEntry, 'timestamp'>
+    | Omit<SystemLogEntry, 'timestamp'>; // Add SystemLogEntry here
 // --- End LogEntry Types ---
 
 class AIClient {
@@ -56,10 +66,11 @@ class AIClient {
         return gpt3Encode(text).length;
     }
 
-    // --- logConversation (Unchanged) ---
+    // --- logConversation (Unchanged but ensure it handles SystemLogEntry) ---
     async logConversation(conversationFilePath: string, entryData: LogEntryData): Promise<void> {
         const timestamp = new Date().toISOString();
-        const logData: LogEntry = { ...entryData, timestamp }; // Add timestamp
+        // Type assertion needed as entryData doesn't perfectly map to LogEntry structure initially
+        const logData: LogEntry = { ...entryData, timestamp } as LogEntry;
 
         try {
             await this.fs.appendJsonlFile(conversationFilePath, logData);
@@ -69,13 +80,12 @@ class AIClient {
         }
     }
 
-    // --- MODIFIED getResponseFromAI ---
+    // --- getResponseFromAI (Handles context, logging, history mutation) ---
     async getResponseFromAI(
         conversation: Conversation,
         conversationFilePath: string,
-        // Add the optional contextString parameter
         contextString?: string
-    ): Promise<void> { // Changed return type to void as it mutates conversation
+    ): Promise<void> { // Returns void as it mutates conversation
 
         const messages = conversation.getMessages(); // Get all current messages
         const lastMessage = messages[messages.length - 1];
@@ -83,7 +93,6 @@ class AIClient {
         // Basic validation
         if (!lastMessage || lastMessage.role !== 'user') {
             console.error(chalk.red("Conversation history doesn't end with a user message. Aborting AI call."));
-            // Log error and throw to indicate failure
             await this.logConversation(conversationFilePath, {
                 type: 'error',
                 error: "Internal error: Conversation history doesn't end with a user message."
@@ -91,8 +100,7 @@ class AIClient {
             throw new Error("Conversation history must end with a user message to get AI response.");
         }
 
-        // --- Log the ORIGINAL user request for the persistent history ---
-        // This happens *before* we potentially modify the content for the API call
+        // --- Log the ORIGINAL user request ---
         await this.logConversation(conversationFilePath, {
             type: 'request',
             role: 'user',
@@ -102,43 +110,27 @@ class AIClient {
         let messagesForModel: Message[];
         let contextTokenCount = 0;
 
-        // --- Prepare the messages payload for the model ---
-        if (contextString && contextString.length > "Code Base Context:\n".length) { // Check if context has content
+        // --- Prepare messages for the model, potentially adding context ---
+        if (contextString && contextString.length > "Code Base Context:\n".length) {
             contextTokenCount = this.countTokens(contextString);
             console.log(chalk.magenta(`Prepending context (${contextTokenCount} tokens) to final user prompt for AI call.`));
 
-            // Create the enhanced prompt text for the *last* message
             const finalUserPromptText =
-                `This is the code base for which the aforementioned conversation history is for:
-${contextString}
+                `This is the code base for which the aforementioned conversation history is for:\n${contextString}\n\n---\nUser Question:\n${lastMessage.content}`;
 
----
-User Question:
-${lastMessage.content}`; // Append original user question
-
-            // Create a *new* array with the modified last message
-            // This avoids mutating the original 'messages' array or the 'conversation' object yet
             messagesForModel = [
-                ...messages.slice(0, -1), // All messages before the last one
-                { // The modified last user message object
-                    ...lastMessage, // Copy other properties like role
-                    content: finalUserPromptText // Use the combined text
-                }
+                ...messages.slice(0, -1),
+                { ...lastMessage, content: finalUserPromptText }
             ];
-
         } else {
-            // No context string provided, use messages as they are
             messagesForModel = messages;
             console.log(chalk.gray("No context string provided or context is empty. Sending messages as is."));
         }
 
         // --- Make the call to the underlying model ---
         try {
-            // **Crucial Change:** Pass the potentially modified `messagesForModel` array
-            // Assuming Gemini2ProModel's method now accepts Message[]
-            // You *might* need to adapt Gemini2ProModel.getResponseFromAI signature
-            // from getResponseFromAI(conversation: Conversation) to
-            // getResponseFromAI(messages: Message[])
+            // Pass the potentially modified messagesForModel array
+            // Assumes Gemini2ProModel.getResponseFromAI accepts Message[]
             const responseText = await this.model.getResponseFromAI(messagesForModel);
 
             // --- Log the AI response ---
@@ -149,26 +141,58 @@ ${lastMessage.content}`; // Append original user question
             });
 
             // --- Add AI response to the ORIGINAL conversation object ---
-            // This ensures the persistent history remains clean
             conversation.addMessage('assistant', responseText);
-
-            // No return value needed as we mutated the conversation object
-            // (Changed from Promise<string> to Promise<void>)
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(chalk.red("Error getting response from AI model:"), errorMessage);
 
-            // --- Log the error ---
+            // Log the error
             await this.logConversation(conversationFilePath, {
                 type: 'error',
                 error: `AI Model Error: ${errorMessage}`
             });
 
-            // Re-throw the error so the caller (CodeProcessor) knows the operation failed
+            // Re-throw the error for the caller (CodeProcessor)
             throw error;
         }
     }
+
+    // --- NEW: getResponseTextFromAI (Raw text retrieval, no logging/mutation) ---
+    /**
+     * Gets a raw text response from the AI model for a given set of messages.
+     * This method does NOT log the request/response to the conversation file
+     * and does NOT modify any Conversation object. It's intended for
+     * intermediate steps like analysis or generation where the output needs parsing.
+     * @param messages The array of messages to send to the model.
+     * @returns A promise that resolves with the raw text response from the AI.
+     * @throws Re-throws any error encountered during the AI call.
+     */
+    async getResponseTextFromAI(messages: Message[]): Promise<string> {
+        console.log(chalk.blue(`Querying AI for intermediate step (using ${this.model.modelName})...`));
+        if (!messages || messages.length === 0) {
+            console.error(chalk.red("Cannot get raw AI response with empty message history."));
+            throw new Error("Cannot get raw AI response with empty message history.");
+        }
+        // Note: Assumes the 'messages' passed here *already* include any necessary context
+        // (e.g., manually constructed prompts for consolidation steps).
+
+        try {
+            // Call the underlying model directly with the provided messages
+            // Assumes the model's getResponseFromAI method accepts Message[]
+            const responseText = await this.model.getResponseFromAI(messages);
+            console.log(chalk.blue(`Received raw response (Length: ${responseText.length})`));
+            return responseText;
+
+        } catch (error) {
+            // Log the error locally for immediate feedback, but don't log to conversation file.
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(chalk.red("Error getting raw response from AI model:"), errorMessage);
+            // Re-throw the error so the caller (e.g., CodeProcessor's analysis/generation steps) can handle it.
+            throw error;
+        }
+    }
+    // --- End New Method ---
 }
 
-export { AIClient, LogEntry }; // Export LogEntry if needed elsewhere
+export { AIClient, LogEntry, LogEntryData }; // Export necessary types
