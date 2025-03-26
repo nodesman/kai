@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 // bin/kai.ts
 
+import path from 'path'; // Import path for logging if re-enabled
 import { Config } from './lib/Config';
 import { UserInterface } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
-import { AIClient } from './lib/AIClient'; // Keep for error logging if needed elsewhere
+import { AIClient } from './lib/AIClient'; // Keep for potential error logging
 import FullScreenUI from "./lib/iterativeDiff/FullScreenUI"; // Keep for TUI mode
+// Import utility if needed for logging path (though commented out)
+// import { toSnakeCase } from './lib/utils';
 
 async function main() {
-    let codeProcessor: CodeProcessor | null = null; // Define outside try block for access in finally
+    let codeProcessor: CodeProcessor | null = null; // Define outside try block
     let conversationName: string | null = null;
     let editorFilePath: string | null = null; // Track for final cleanup
 
     try {
-        const config = new Config();
-        const ui = new UserInterface(config); // Pass config
-        codeProcessor = new CodeProcessor(config); // Pass config
+        const config = new Config(); // Load initial config (with defaults)
+        const ui = new UserInterface(config); // Pass initial config to UI for default selection
 
-        // Get mode and conversation details first
+        // Get mode, conversation details, AND selected model
         const interactionResult = await ui.getUserInteraction();
 
         if (!interactionResult) {
@@ -25,19 +27,40 @@ async function main() {
             return; // Exit if user cancels initial prompts
         }
 
-        const { mode, conversationName: convName, isNewConversation } = interactionResult;
-        conversationName = convName; // Store for potential cleanup
+        // Destructure results including the selected model
+        const {
+            mode,
+            conversationName: convName,
+            isNewConversation,
+            selectedModel // Get the chosen model name
+        } = interactionResult;
 
+        // --- Override Config with Selected Model ---
+        // Check if the selected model is different from the default/initial one
+        if (selectedModel && config.gemini.model_name !== selectedModel) {
+            console.log(`Overriding default model. Using: ${selectedModel}`);
+            config.gemini.model_name = selectedModel;
+        } else {
+            // Inform the user which model is being used (either default or explicitly selected same as default)
+            console.log(`Using AI Model: ${config.gemini.model_name}`);
+        }
+        // --- End Config Override ---
+
+
+        // Now instantiate CodeProcessor with the potentially updated config
+        codeProcessor = new CodeProcessor(config);
+        conversationName = convName; // Store for potential cleanup/logging
+
+
+        // --- Handle selected mode ---
         if (mode === 'Start/Continue Conversation') {
-            // Start the conversation loop managed by CodeProcessor
+            // The codeProcessor now has the config with the correct model name
             await codeProcessor.startConversation(conversationName, isNewConversation);
 
         } else if (mode === 'Request Code Changes (TUI - Experimental)') {
-            // Handle the TUI mode separately
+            // The codeProcessor now has the config with the correct model name
             await codeProcessor.startCodeChangeTUI();
-            // The TUI promise might keep the process alive, or we need other logic here
             console.log("TUI Mode started (Press q or Ctrl+C in TUI to exit).");
-
 
         } else {
             console.log("Unknown mode selected. Exiting.");
@@ -45,30 +68,18 @@ async function main() {
 
     } catch (error) {
         console.error("\n🛑 An unexpected error occurred in main:", error);
-        // Centralized error logging (optional, AIClient handles its errors)
-        // try {
-        //     const errorLogger = new AIClient(new Config()); // Needs config
-        //     const logPath = conversationName
-        //         ? path.join(new Config().chatsDir, `${toSnakeCase(conversationName)}.jsonl`)
-        //         : path.join(new Config().chatsDir, `general_error_log.jsonl`);
-        //     await errorLogger.logConversation(logPath, { type: 'error', error: `Main loop error: ${(error as Error).message}` });
-        // } catch (logError) {
-        //     console.error("🚨 Error logging the main error:", logError);
-        // }
+        // Optional: Centralized error logging
+        // ... (logging code remains the same, might use conversationName) ...
         process.exitCode = 1; // Indicate failure
 
     } finally {
-        // Ensure editor file is cleaned up even if errors occur,
-        // but only if CodeProcessor didn't handle it already (e.g., startConversation loop completion)
-        // This might be redundant if startConversation's finally block always runs.
+        // Cleanup logic remains the same
         if (editorFilePath && codeProcessor) {
             try {
-                // Check if file still exists before attempting deletion
                 await codeProcessor.fs.access(editorFilePath);
                 await codeProcessor.fs.deleteFile(editorFilePath);
-                console.log(`Final cleanup ensured for editor file: ${editorFilePath}`);
+                // console.log(`Final cleanup ensured for editor file: ${editorFilePath}`); // Optional logging
             } catch (finalCleanupError) {
-                // Ignore ENOENT (file already deleted), log others
                 if ((finalCleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
                     console.warn(`\nWarning: Final cleanup failed for editor file ${editorFilePath}:`, finalCleanupError);
                 }

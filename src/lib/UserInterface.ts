@@ -13,6 +13,15 @@ import Conversation, { Message } from './models/Conversation'; // Import Convers
 const HISTORY_SEPARATOR = '--------------------';
 const INPUT_MARKER = 'User:\n\n'; // Marker for the user input area
 
+// Define the expected return type for getUserInteraction
+interface UserInteractionResult {
+    mode: string;
+    conversationName: string;
+    isNewConversation: boolean;
+    selectedModel: string; // Add the selected model here
+}
+
+
 class UserInterface {
     fs: FileSystem;
     config: Config; // Add config
@@ -22,8 +31,7 @@ class UserInterface {
         this.config = config; // Store config
     }
 
-    // --- NEW METHODS (from previous response - keep as is) ---
-
+    // --- selectOrCreateConversation (Keep as is) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
         await this.fs.ensureDirExists(this.config.chatsDir); // Ensure dir exists
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
@@ -62,25 +70,33 @@ class UserInterface {
         }
     }
 
+    // --- formatHistoryForSublime (Keep as is) ---
     formatHistoryForSublime(messages: Message[]): string {
-        let content = INPUT_MARKER; // Start with the input marker
-
-        // Add messages in reverse chronological order
+        let historyBlock = '';
+        // Add messages in reverse chronological order, below the separator
         for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
-            // Handle potential missing timestamps gracefully
             const timestampStr = msg.timestamp
                 ? new Date(msg.timestamp).toLocaleString()
                 : 'Unknown Time';
-            const roleLabel = msg.role === 'user' ? 'User' : 'LLM'; // Simpler label
+            const roleLabel = msg.role === 'user' ? 'User' : 'LLM';
 
-            content += `\n${HISTORY_SEPARATOR}\n`;
-            content += `${roleLabel}: [${timestampStr}]\n\n`;
-            content += `${msg.content.trim()}\n`; // Trim content before adding
+            // Separator will be added *once* before the whole block if history exists
+            historyBlock += `${roleLabel}: [${timestampStr}]\n\n`; // Simplified slightly
+            historyBlock += `${msg.content.trim()}\n\n`; // Add extra newline for spacing between messages
         }
-        return content;
+
+        if (historyBlock) {
+            // Add the separator ONCE, above the entire history block
+            // Ensure a blank line exists above the separator for typing.
+            return '\n\n' + HISTORY_SEPARATOR + '\n\n' + historyBlock.trimEnd(); // Add blank lines above separator, trim trailing space from history
+        } else {
+            // No history, just return empty string.
+            return ''; // User starts with a blank slate.
+        }
     }
 
+    // --- extractNewPrompt (Keep as is) ---
     extractNewPrompt(fullContent: string): string | null {
         const separatorIndex = fullContent.indexOf(HISTORY_SEPARATOR);
         let promptRaw: string;
@@ -99,7 +115,7 @@ class UserInterface {
         return promptTrimmed ? promptTrimmed : null;
     }
 
-    // Modified getPromptViaSublimeLoop - handles ONE iteration of the edit cycle
+    // --- getPromptViaSublimeLoop (Keep as is) ---
     async getPromptViaSublimeLoop(
         conversationName: string, // Expect original or snake_case name
         currentMessages: Message[] // Pass the current state
@@ -121,7 +137,7 @@ class UserInterface {
         }
 
         console.log(`\nOpening conversation "${conversationName}" in Sublime Text...`);
-        console.log(`(Type your prompt, save, and close Sublime to send)`);
+        console.log(`(Type your prompt above the '${HISTORY_SEPARATOR}', save, and close Sublime to send)`);
         console.log(`(Close without saving OR save without changes to exit conversation)`);
 
         const sublProcess = spawn('subl', ['-w', editorFilePath], { stdio: 'inherit' });
@@ -142,57 +158,45 @@ class UserInterface {
         // Handle Sublime exit codes or errors
         if (exitCode === null || exitCode !== 0) {
             console.warn(`\nSublime Text process closed unexpectedly (code: ${exitCode}). Assuming exit.`);
-            // No need to delete editor file here, CodeProcessor will handle cleanup
             return { newPrompt: null, conversationFilePath, editorFilePath }; // Indicate exit
         }
 
         // Read the potentially modified content
         let modifiedContent: string;
         try {
-            // Ensure file exists before reading, handle potential race condition or deletion
             await fs.access(editorFilePath);
-            modifiedContent = await this.fs.readFile(editorFilePath) || ''; // Read back, default to empty string if somehow null
+            modifiedContent = await this.fs.readFile(editorFilePath) || '';
         } catch (readError) {
             if ((readError as NodeJS.ErrnoException).code === 'ENOENT') {
                 console.warn(`\nEditor file ${editorFilePath} not found after closing Sublime. Assuming exit.`);
-                return { newPrompt: null, conversationFilePath, editorFilePath }; // Indicate exit
+                return { newPrompt: null, conversationFilePath, editorFilePath };
             }
             console.error(`\nError reading editor file ${editorFilePath} after closing:`, readError);
-            // No cleanup here, let CodeProcessor handle it
-            throw readError; // Propagate error
+            throw readError;
         }
 
         const modifiedHash = crypto.createHash('sha256').update(modifiedContent).digest('hex');
 
-        // Compare hashes to see if the user actually typed anything new
         if (initialHash === modifiedHash) {
             console.log("\nNo changes detected in Sublime Text. Exiting conversation.");
-            // No cleanup here
-            return { newPrompt: null, conversationFilePath, editorFilePath }; // Indicate exit
+            return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
-        // Extract the *new* text entered by the user
         const newPrompt = this.extractNewPrompt(modifiedContent);
 
         if (newPrompt === null || !newPrompt.trim()) {
             console.log("\nNo new prompt entered. Exiting conversation.");
-            // No cleanup here
-            return { newPrompt: null, conversationFilePath, editorFilePath }; // Indicate exit
+            return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
-        // Return the new prompt and paths for processing
         console.log("\nPrompt received, processing with AI...");
         return { newPrompt: newPrompt.trim(), conversationFilePath, editorFilePath };
     }
 
-    // --- getUserInteraction - Simplified ---
-    // This now ONLY selects the mode and conversation details.
-    // The actual prompt input is handled by getPromptViaSublimeLoop within CodeProcessor.
-    async getUserInteraction(): Promise<{
-        mode: string;
-        conversationName: string; // This will be the user-facing or selected name
-        isNewConversation: boolean;
-    } | null> {
+
+    // --- MODIFIED getUserInteraction ---
+    // Added model selection prompt and updated return type.
+    async getUserInteraction(): Promise<UserInteractionResult | null> { // Use defined interface
         try {
             const { mode } = await inquirer.prompt([
                 {
@@ -203,29 +207,51 @@ class UserInterface {
                 },
             ]);
 
+            // --- Model Selection Prompt ---
+            const { modelChoice } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'modelChoice',
+                    message: 'Select the AI model to use:',
+                    choices: [
+                        { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' }, // Use actual model name strings
+                        { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
+                        // Optionally allow keeping the configured default without explicitly choosing
+                        // { name: `Use Config Default (${this.config.gemini.model_name})`, value: this.config.gemini.model_name }
+                    ],
+                    // Default to the value currently in config for pre-selection
+                    default: this.config.gemini.model_name,
+                },
+            ]);
+            const selectedModel = modelChoice;
+            // --- End Model Selection ---
+
+
             if (mode === 'Request Code Changes (TUI - Experimental)') {
                 console.log("Code Change mode selected. Starting UI...");
-                // Return null or specific object for TUI mode if needed
-                // For now, let's assume TUI needs separate handling initiated differently
-                // We need conversationName for TUI too, perhaps? For now, focus on chat.
-                return { mode, conversationName: "code_changes_tui", isNewConversation: true }; // Placeholder
+                // TUI mode also gets the selected model
+                return {
+                    mode,
+                    conversationName: "code_changes_tui", // Placeholder, might need refinement
+                    isNewConversation: true,
+                    selectedModel: selectedModel, // Pass selected model
+                };
             } else if (mode === 'Start/Continue Conversation') {
                 const conversationDetails = await this.selectOrCreateConversation();
                 return {
                     mode,
                     conversationName: conversationDetails.name, // Original or selected name
                     isNewConversation: conversationDetails.isNew,
+                    selectedModel: selectedModel, // Pass selected model
                 };
             } else {
-                return null; // Should not happen with the choices given
+                return null; // Should not happen
             }
 
         } catch (error) {
-            // Handle potential errors during prompts (e.g., user force-quitting)
             if ((error as any).isTtyError) {
                 console.error("\nPrompt couldn't be rendered in this environment.");
             } else if (error instanceof Error && error.message.includes("'subl' command not found")) {
-                // Error already logged in getPromptViaSublimeLoop if called, but catch here too
                 console.error("\nFailed to start Sublime Text. Please ensure it's installed and 'subl' is in your PATH.");
             }
             else {
@@ -234,8 +260,6 @@ class UserInterface {
             return null; // Indicate failure or exit
         }
     }
-
-    // --- Removed getPromptFromSublime (replaced by getPromptViaSublimeLoop) ---
 }
 
 export { UserInterface };
