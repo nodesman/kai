@@ -82,24 +82,21 @@ class UserInterface {
     }
 
     extractNewPrompt(fullContent: string): string | null {
-        const inputMarkerIndex = fullContent.indexOf(INPUT_MARKER);
-        // The history separator might not exist if it's the very first prompt
         const separatorIndex = fullContent.indexOf(HISTORY_SEPARATOR);
+        let promptRaw: string;
 
-        if (inputMarkerIndex === -1) {
-            console.error("Could not find input marker in Sublime file content.");
-            return null; // Or throw error
+        if (separatorIndex !== -1) {
+            // Separator found, take everything before it
+            promptRaw = fullContent.substring(0, separatorIndex);
+        } else {
+            // No separator found, take the whole content
+            promptRaw = fullContent;
         }
 
-        const startIndex = inputMarkerIndex + INPUT_MARKER.length;
-        // If separator exists and is *after* the input marker, use it as end. Otherwise, use end of file.
-        const endIndex = (separatorIndex !== -1 && separatorIndex > startIndex)
-            ? separatorIndex
-            : fullContent.length;
+        const promptTrimmed = promptRaw.trim();
 
-        // Extract and trim the prompt
-        const prompt = fullContent.substring(startIndex, endIndex).trim();
-        return prompt;
+        // Return the trimmed prompt if it's not empty, otherwise null
+        return promptTrimmed ? promptTrimmed : null;
     }
 
     // Modified getPromptViaSublimeLoop - handles ONE iteration of the edit cycle

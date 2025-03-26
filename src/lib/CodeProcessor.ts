@@ -1,48 +1,45 @@
 // lib/CodeProcessor.ts
 import path from 'path';
 import { FileSystem } from './FileSystem';
-import { AIClient } from './AIClient';
+import { AIClient } from './AIClient'; // Assuming AIClient is correctly imported
 import { encode as gpt3Encode } from 'gpt-3-encoder';
 import { Config } from "./Config";
-import { UserInterface } from './UserInterface'; // Import UserInterface
-import Conversation, { Message, JsonlLogEntry } from './models/Conversation'; // Import Conversation types
+import { UserInterface } from './UserInterface';
+import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { toSnakeCase } from './utils';
-import FullScreenUI from "./iterativeDiff/FullScreenUI"; // Import utility
-import chalk from 'chalk'; // Import chalk for better logging
+import FullScreenUI from "./iterativeDiff/FullScreenUI";
+import chalk from 'chalk';
 
 class CodeProcessor {
     config: Config;
     fs: FileSystem;
     aiClient: AIClient;
-    ui: UserInterface; // Add UI instance
+    ui: UserInterface;
     projectRoot: string;
-    // Cache for context string to avoid rebuilding unnecessarily if files haven't changed
-    // For simplicity, we'll rebuild each time for now, but caching is an optimization path.
-    // private contextCache: string | null = null;
-    // private contextCacheTimestamp: number = 0;
 
     constructor(config: Config) {
         this.config = config;
         this.fs = new FileSystem();
+        // Pass config to AIClient if needed, ensure it's instantiated correctly
         this.aiClient = new AIClient(config);
-        this.ui = new UserInterface(config); // Instantiate UI here
-        this.projectRoot = process.cwd(); // Keep this if needed for context building later
+        this.ui = new UserInterface(config);
+        this.projectRoot = process.cwd();
     }
 
     countTokens(text: string): number {
-        // Consider caching token counts per file content if performance becomes an issue
         return gpt3Encode(text).length;
     }
 
-    // --- buildContextString - Refined ---
+    // --- buildContextString - Refined (No major changes needed here) ---
     async buildContextString(): Promise<{ context: string, tokenCount: number }> {
         console.log(chalk.blue('\nBuilding project context...'));
         const filePaths = await this.fs.getProjectFiles(this.projectRoot);
         const fileContents = await this.fs.readFileContents(filePaths);
 
-        let contextString = "Project Context:\n";
+        // Use a slightly more descriptive starting string for clarity when prepended
+        let contextString = "Code Base Context:\n"; // Changed header
         let currentTokenCount = this.countTokens(contextString);
-        // Use a slightly larger portion, maybe 60-70%? Adjust as needed.
+        // Keep token limit for context building itself, even if not limiting the *entire* prompt here
         const maxContextTokens = (this.config.gemini.max_prompt_tokens || 8000) * 0.6;
         let includedFiles = 0;
         let excludedFiles = 0;
@@ -54,13 +51,13 @@ class CodeProcessor {
             let content = fileContents[filePath];
             if (!content) {
                 excludedFiles++;
-                continue; // Skip empty files
+                continue;
             }
 
             content = this.optimizeWhitespace(content);
             if (!content) {
                 excludedFiles++;
-                continue; // Skip files empty after optimization
+                continue;
             }
 
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
@@ -72,12 +69,12 @@ class CodeProcessor {
             currentTokenCount += fileTokens;
             includedFiles++;
         }
-        console.log(chalk.blue(`Context built with ${currentTokenCount} tokens from ${includedFiles} files (${excludedFiles} files excluded/truncated).`));
+        console.log(chalk.blue(`Context built with ${currentTokenCount} tokens from ${includedFiles} files (${excludedFiles} files excluded/skipped).`));
         return { context: contextString, tokenCount: currentTokenCount };
     }
 
     optimizeWhitespace(code: string): string {
-        // Simple optimizations
+        // Simple optimizations (same as before)
         code = code.replace(/[ \t]+$/gm, ''); // Remove trailing whitespace
         code = code.replace(/\r\n/g, '\n');   // Normalize line endings
         code = code.replace(/\n{3,}/g, '\n\n'); // Collapse multiple blank lines
@@ -104,29 +101,15 @@ class CodeProcessor {
             } else {
                 console.log(`Starting new conversation: ${conversationName}`);
                 conversation = new Conversation();
-                // --- Add Initial Context on New Conversation ---
-                // Build context once when starting a new conversation.
-                // The user's first actual prompt will be asked *after* this.
-                const { context: initialContext } = await this.buildContextString();
-                if (initialContext.length > "Project Context:\n".length) { // Check if context isn't empty
-                    // Add as a system message? Or just prepend to the *first* user prompt later?
-                    // Let's add it as a system message for clarity in history, though it won't be shown in Sublime.
-                    // Note: Gemini API might treat 'system' differently or ignore it.
-                    // A safer approach might be to prepend it to the *first* user message.
-                    // Let's stick to prepending for now. We'll do it before the first user prompt *inside* the loop.
-                    console.log(chalk.green("Initial context prepared."));
-                }
-                // --- End Initial Context ---
+                // No initial context message added to history here
             }
-
-            let isFirstUserPromptOfSession = isNew; // Track if it's the first prompt *we ask for* in this run
 
             // --- The Conversation Loop ---
             while (true) {
-                // Get user prompt via Sublime loop
+                // 1. Get user prompt via Sublime loop
                 const interactionResult = await this.ui.getPromptViaSublimeLoop(
                     conversationName,
-                    conversation.getMessages()
+                    conversation.getMessages() // Pass current history for display
                 );
 
                 editorFilePath = interactionResult.editorFilePath;
@@ -137,36 +120,31 @@ class CodeProcessor {
 
                 const userPrompt = interactionResult.newPrompt;
 
-// --- Prepend Context (Simplified - No Token Checks) ---
-                console.log(chalk.blue("Building context...")); // Indicate context building attempt
-
-// Always attempt to build and prepend context
-                const contextResult = await this.buildContextString(); // Rebuild context each time
-                const contextString = contextResult.context;
-// const contextTokens = contextResult.tokenCount; // Token count is no longer used for limiting
-
-// Unconditionally prepend the context string to the user's prompt
-                const fullPromptContent = `${contextString}\n\n---\nUser Question:\n${userPrompt}`;
-                console.log(chalk.green(`Prepending project context to prompt.`)); // Simplified confirmation
-
-                isFirstUserPromptOfSession = false; // No longer the first prompt after the first iteration
-// --- End Prepend Context ---
-
-// Add the potentially context-prepended user message
-                conversation.addMessage('user', fullPromptContent);
+                // 2. Add ONLY the user's prompt to the conversation history
+                // The context will be handled by the AIClient just before sending
+                conversation.addMessage('user', userPrompt);
 
                 try {
-                    // Get response (AIClient logs request/response)
-                    // The AIClient or the API itself might still reject the request if it exceeds the absolute maximum token limit.
-                    await this.aiClient.getResponseFromAI(conversation, conversationFilePath);
-                    // AI response is added to 'conversation' inside getResponseFromAI
+                    // 3. Build the context string NOW, right before the AI call
+                    console.log(chalk.blue("Building context for current request..."));
+                    const { context: currentContextString } = await this.buildContextString();
+                    // We still build it fresh each time to reflect potential file changes.
+
+                    // 4. Call AIClient, passing the conversation AND the context string separately
+                    // AIClient will be responsible for combining history + context + prompt for the API
+                    await this.aiClient.getResponseFromAI(
+                        conversation,
+                        conversationFilePath,
+                        currentContextString // Pass the context here
+                    );
+                    // AI response is added to 'conversation' inside getResponseFromAI (as before)
 
                 } catch (aiError) {
                     console.error(chalk.red("Error during AI interaction:"), aiError);
-                    // Log error and add a system message for Sublime display
-                    // Note: The error might now more frequently be related to exceeding token limits at the API level.
+                    // Add a temporary error message for display in Sublime
                     conversation.addMessage('system', `[Error occurred during AI request: ${(aiError as Error).message}. Please check logs. You can try again or exit.]`);
-                    // This system message is temporary for display and not saved unless explicitly logged by AIClient
+                    // Important: This system message is for UI feedback and likely won't be persisted unless AIClient logs it separately on error.
+                    // If the AI call failed, the user's prompt *is* still in the history.
                 }
             } // --- End while loop ---
 
@@ -176,6 +154,7 @@ class CodeProcessor {
             console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
             if (conversationFilePath) {
                 try {
+                    // Log the processor-level error if possible
                     await this.aiClient.logConversation(conversationFilePath, {
                         type: 'error',
                         error: `CodeProcessor loop error: ${(error as Error).message}`
@@ -185,15 +164,13 @@ class CodeProcessor {
                 }
             }
         } finally {
-            // --- Cleanup ---
+            // --- Cleanup (same as before) ---
             if (editorFilePath) {
                 try {
-                    // Check if file exists before deleting (might already be gone if error occurred early)
                     await this.fs.access(editorFilePath);
                     await this.fs.deleteFile(editorFilePath);
                     console.log(`Cleaned up editor file: ${editorFilePath}`);
                 } catch (cleanupError) {
-                    // Ignore ENOENT (File not found), log other errors
                     if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
                         console.warn(chalk.yellow(`\nWarning: Failed to clean up editor file ${editorFilePath}:`), cleanupError);
                     }

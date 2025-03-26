@@ -85,7 +85,7 @@ class ConfigClass implements Config {
         const finalConfig: Config = {
             gemini: {
                 api_key: apiKey, // Mandatory, loaded from env
-                model_name: yamlConfig.gemini?.model_name || "gemini-1.5-pro-latest", // Default model
+                model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default model
                 max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 8000,
                 rate_limit: {
                     requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
