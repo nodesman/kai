@@ -10,15 +10,13 @@ import { Config } from './Config'; // Import Config
 import Conversation, { Message } from './models/Conversation'; // Import Conversation types
 import chalk from 'chalk'; // Import chalk for logging
 
-// --- Define the missing constant ---
 const HISTORY_SEPARATOR = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
-// --- End constant definition ---
 
 // Define the expected return type for getUserInteraction
 interface UserInteractionResult {
-    mode: string;
-    conversationName: string | null; // Can be null for modes not needing a specific conversation yet (like TUI)
-    isNewConversation: boolean;
+    mode: 'Start/Continue Conversation' | 'Consolidate Changes...' | 'Delete Conversation...'; // Add new mode
+    conversationName: string | null; // Used for conversation ops AND deletion target
+    isNewConversation: boolean; // Relevant only for Start/Continue
     selectedModel: string; // Add the selected model here
 }
 
@@ -31,8 +29,9 @@ class UserInterface {
         this.config = config; // Store config
     }
 
-    // --- selectOrCreateConversation (Unchanged from previous version) ---
+    // --- selectOrCreateConversation (Unchanged) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
+        // ... (keep existing implementation) ...
         await this.fs.ensureDirExists(this.config.chatsDir); // Ensure dir exists
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
@@ -61,7 +60,7 @@ class UserInterface {
             // Check if a conversation with the snake-cased version already exists
             const snakeName = toSnakeCase(newName);
             if (existingConversations.includes(snakeName)) {
-                console.warn(`A conversation file for "${snakeName}" already exists. Reusing it.`);
+                console.warn(chalk.yellow(`Warning: A conversation file for "${snakeName}" already exists. Reusing it.`));
                 return { name: snakeName, isNew: false }; // Treat as existing if file name conflicts
             }
             return { name: newName, isNew: true }; // Return original name for display, snake_case happens later
@@ -70,8 +69,39 @@ class UserInterface {
         }
     }
 
-    // --- formatHistoryForSublime (Now uses the defined constant) ---
+    // --- NEW: selectConversationToDelete ---
+    async selectConversationToDelete(): Promise<string | null> {
+        await this.fs.ensureDirExists(this.config.chatsDir); // Ensure dir exists
+        const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
+
+        if (existingConversations.length === 0) {
+            console.log(chalk.yellow("No conversations found to delete."));
+            return null;
+        }
+
+        const choices = [...existingConversations, new inquirer.Separator(), '[ Cancel ]'];
+
+        const { selected } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'selected',
+                message: 'Select a conversation to DELETE:',
+                choices: choices,
+                loop: false,
+            },
+        ]);
+
+        if (selected === '[ Cancel ]') {
+            return null;
+        } else {
+            // Return the selected name (which is the base name without .jsonl)
+            return selected;
+        }
+    }
+
+    // --- formatHistoryForSublime (Unchanged) ---
     formatHistoryForSublime(messages: Message[]): string {
+        // ... (keep existing implementation) ...
         let historyBlock = '';
         for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
@@ -91,8 +121,9 @@ class UserInterface {
         }
     }
 
-    // --- extractNewPrompt (Now uses the defined constant) ---
+    // --- extractNewPrompt (Unchanged) ---
     extractNewPrompt(fullContent: string): string | null {
+        // ... (keep existing implementation) ...
         const separatorIndex = fullContent.indexOf(HISTORY_SEPARATOR);
         let promptRaw: string;
 
@@ -108,11 +139,12 @@ class UserInterface {
         return promptTrimmed ? promptTrimmed : null;
     }
 
-    // --- getPromptViaSublimeLoop (Now uses the defined constant) ---
+    // --- getPromptViaSublimeLoop (Unchanged) ---
     async getPromptViaSublimeLoop(
         conversationName: string,
         currentMessages: Message[]
     ): Promise<{ newPrompt: string | null; conversationFilePath: string; editorFilePath: string }> {
+        // ... (keep existing implementation) ...
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
         const editorFileName = `${toSnakeCase(conversationName)}_edit.txt`;
@@ -184,36 +216,43 @@ class UserInterface {
 
         console.log(chalk.green("\nPrompt received, processing with AI..."));
         return { newPrompt: newPrompt, conversationFilePath, editorFilePath }; // Return trimmed prompt
+
     }
 
-    // --- getUserInteraction (Unchanged from previous version) ---
+    // --- getUserInteraction (MODIFIED) ---
     async getUserInteraction(): Promise<UserInteractionResult | null> {
         try {
-            const { mode } = await inquirer.prompt([
+            const { mode } = await inquirer.prompt<{ mode: UserInteractionResult['mode'] }>([ // Use typed prompt
                 {
                     type: 'list',
                     name: 'mode',
                     message: 'Select a mode:',
                     choices: [
                         'Start/Continue Conversation',
-                        'Consolidate Changes...',                        
+                        'Consolidate Changes...',
+                        'Delete Conversation...', // <-- Added delete option
                     ],
                 },
             ]);
 
-            const { modelChoice } = await inquirer.prompt([
-                {
-                    type: 'list',
-                    name: 'modelChoice',
-                    message: 'Select the AI model to use for this operation:',
-                    choices: [
-                        { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' },
-                        { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
-                    ],
-                    default: this.config.gemini.model_name,
-                },
-            ]);
-            const selectedModel = modelChoice;
+            // Model selection is only relevant for conversation/consolidation
+            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-exp-03-25"; // Default
+            if (mode === 'Start/Continue Conversation' || mode === 'Consolidate Changes...') {
+                const { modelChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'modelChoice',
+                        message: 'Select the AI model to use for this operation:',
+                        choices: [
+                            { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' },
+                            { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
+                        ],
+                        default: this.config.gemini.model_name,
+                    },
+                ]);
+                selectedModel = modelChoice;
+            }
+
 
             let conversationDetails: { name: string; isNew: boolean } | null = null;
             let conversationName: string | null = null;
@@ -227,13 +266,47 @@ class UserInterface {
                 }
                 conversationName = conversationDetails.name;
                 isNewConversation = conversationDetails.isNew;
+            } else if (mode === 'Delete Conversation...') {
+                const nameToDelete = await this.selectConversationToDelete();
+                if (!nameToDelete) {
+                    console.log(chalk.yellow("Deletion cancelled."));
+                    return null; // User cancelled or no conversations exist
+                }
+
+                // Ask for confirmation
+                const { confirmDelete } = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'confirmDelete',
+                        message: `Are you sure you want to permanently delete the conversation '${nameToDelete}'?`,
+                        default: false,
+                    },
+                ]);
+
+                if (confirmDelete) {
+                    conversationName = nameToDelete; // Store the name to delete
+                    // isNewConversation and selectedModel are not relevant here
+                } else {
+                    console.log(chalk.yellow("Deletion cancelled."));
+                    return null; // User aborted confirmation
+                }
             }
 
+
+            // Return based on mode
             if (mode === 'Start/Continue Conversation') {
                 return { mode, conversationName: conversationName, isNewConversation: isNewConversation, selectedModel: selectedModel };
             } else if (mode === 'Consolidate Changes...') {
                 return { mode, conversationName: conversationName, isNewConversation: false, selectedModel: selectedModel };
-            } else {
+            } else if (mode === 'Delete Conversation...') {
+                // Only return if conversationName is set (meaning deletion was confirmed)
+                if (conversationName) {
+                    return { mode, conversationName: conversationName, isNewConversation: false, selectedModel: selectedModel };
+                } else {
+                    return null; // Should have already returned if cancelled earlier
+                }
+            }
+            else {
                 console.warn(chalk.yellow(`Unhandled mode selection: ${mode}`));
                 return null;
             }

@@ -3,105 +3,146 @@
 
 import path from 'path';
 import { Config } from './lib/Config';
-import { UserInterface } from './lib/UserInterface';
+import { UserInterface, UserInteractionResult } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
-import { AIClient } from './lib/AIClient'; // Keep for potential error logging
+import { AIClient } from './lib/AIClient';
+import { FileSystem } from './lib/FileSystem';
 import chalk from 'chalk';
-import {toSnakeCase} from "./lib/utils"; // For logging
-
-// Import utility if needed for logging path
-// import { toSnakeCase } from './lib/utils';
+import { toSnakeCase } from "./lib/utils";
 
 async function main() {
-    let codeProcessor: CodeProcessor | null = null; // Define outside try block
+    // --- Declare variables outside the try block ---
+    let codeProcessor: CodeProcessor | null = null;
     let conversationName: string | null = null;
-    // editorFilePath is managed within startConversation, no need to track here for consolidation
-    // let editorFilePath: string | null = null;
+    let interactionResult: UserInteractionResult | null = null;
+    // --- MODIFICATION: Initialize config to undefined ---
+    let config: Config | undefined = undefined;
+    // ---
 
     try {
-        const config = new Config(); // Load initial config (with defaults)
-        const ui = new UserInterface(config); // Pass initial config to UI
+        // --- Assign config here ---
+        config = new Config();
+        // ---
 
-        // Get mode, conversation details, AND selected model
-        // UserInterface should now return these based on its prompts
-        const interactionResult = await ui.getUserInteraction();
+        const ui = new UserInterface(config);
+        const fs = new FileSystem();
+
+        interactionResult = await ui.getUserInteraction();
 
         if (!interactionResult) {
-            console.log(chalk.yellow("Exiting. User cancelled initial prompts."));
-            return; // Exit if user cancels initial prompts
+            console.log(chalk.yellow("Exiting."));
+            return;
         }
 
-        // Destructure results including the selected model
         const {
             mode,
-            conversationName: convName, // Will be defined for Conversation and Consolidation modes
-            isNewConversation, // Relevant only for Conversation mode
-            selectedModel // Get the chosen model name
+            conversationName: convName,
+            isNewConversation,
+            selectedModel
         } = interactionResult;
 
-        conversationName = convName; // Store for potential logging, ensure it's available
-
-        // --- Override Config with Selected Model ---
-        // Check if the selected model is different from the default/initial one
-        if (selectedModel && config.gemini.model_name !== selectedModel) {
-            console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
-            config.gemini.model_name = selectedModel;
-        } else {
-            // Inform the user which model is being used (either default or explicitly selected same as default)
-            console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
-        }
-        // --- End Config Override ---
-
-        // Now instantiate CodeProcessor with the potentially updated config
-        codeProcessor = new CodeProcessor(config);
+        conversationName = convName;
 
         // --- Handle selected mode ---
         if (mode === 'Start/Continue Conversation') {
-            if (!conversationName) { // Should always have a name here, but check defensively
+            if (selectedModel && config.gemini.model_name !== selectedModel) {
+                console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
+                config.gemini.model_name = selectedModel;
+            } else {
+                console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
+            }
+
+            if (!conversationName) {
                 console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
                 throw new Error("Conversation name is required for this mode.");
             }
-            // The codeProcessor now has the config with the correct model name
-            await codeProcessor.startConversation(conversationName, isNewConversation ?? false); // Pass isNewConversation
+            codeProcessor = new CodeProcessor(config);
+            await codeProcessor.startConversation(conversationName, isNewConversation ?? false);
 
-        } else if (mode === 'Consolidate Changes...') { // <-- New Consolidation Mode Handler
-            if (!conversationName) { // Should always have a name here
+        } else if (mode === 'Consolidate Changes...') {
+            if (selectedModel && config.gemini.model_name !== selectedModel) {
+                console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
+                config.gemini.model_name = selectedModel;
+            } else {
+                console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
+            }
+
+            if (!conversationName) {
                 console.error(chalk.red("Internal Error: Conversation name missing for Consolidation mode."));
                 throw new Error("Conversation name is required for consolidation.");
             }
             console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(conversationName)}...`));
-            // The codeProcessor now has the config with the correct model name
+            codeProcessor = new CodeProcessor(config);
             await codeProcessor.processConsolidationRequest(conversationName);
             console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(conversationName)}.`));
+
+        } else if (mode === 'Delete Conversation...') {
+            if (!conversationName) {
+                console.error(chalk.red("Internal Error: Conversation name missing for Delete mode after confirmation."));
+                throw new Error("Conversation name is required for deletion.");
+            }
+
+            // config is guaranteed to be defined here if we reached this point successfully
+            const conversationFileName = `${conversationName}.jsonl`;
+            const conversationFilePath = path.join(config.chatsDir, conversationFileName);
+            const editorFileName = `${conversationName}_edit.txt`;
+            const editorFilePath = path.join(config.chatsDir, editorFileName);
+
+            console.log(chalk.yellow(`\nAttempting to delete conversation: ${chalk.cyan(conversationName)}...`));
+
+            try {
+                await fs.deleteFile(conversationFilePath);
+                console.log(chalk.green(`  ✓ Successfully deleted conversation file: ${conversationFilePath}`));
+
+                try {
+                    await fs.access(editorFilePath);
+                    await fs.deleteFile(editorFilePath);
+                    console.log(chalk.green(`  ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
+                } catch (editorError) {
+                    if ((editorError as NodeJS.ErrnoException).code === 'ENOENT') {
+                        console.log(chalk.gray(`  ⓘ No temporary editor file found to delete for ${conversationName}.`));
+                    } else {
+                        console.warn(chalk.yellow(`  ! Warning: Could not delete temporary editor file ${editorFilePath}:`), editorError);
+                    }
+                }
+
+            } catch (deleteError) {
+                if ((deleteError as NodeJS.ErrnoException).code === 'ENOENT') {
+                    console.error(chalk.red(`\n❌ Error: Conversation file not found: ${conversationFilePath}. It might have already been deleted.`));
+                } else {
+                    console.error(chalk.red(`\n❌ Error deleting conversation file ${conversationFilePath}:`), deleteError);
+                }
+                throw deleteError;
+            }
 
         } else {
             console.log(chalk.yellow(`Unknown mode selected: "${mode}". Exiting.`));
         }
 
     } catch (error) {
-        // Centralized error handling
         console.error(chalk.red("\n🛑 An unexpected error occurred in main execution:"), error);
 
-        // Optional: Log error to a central log file or specific conversation if identifiable
-        if (conversationName && codeProcessor) {
+        // Now 'interactionResult' and 'config' should be accessible here
+        // The 'if (config && ...)' check handles the case where config might still be undefined
+        // (e.g., if new Config() itself threw an error).
+        if (config && conversationName && codeProcessor && codeProcessor.aiClient) { // Check config IS defined
             try {
-                const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-                const conversationFilePath = path.join(codeProcessor.config.chatsDir, conversationFileName);
-                await codeProcessor.aiClient.logConversation(conversationFilePath, { type: 'error', error: `Main execution error: ${(error as Error).message}` });
+                if (interactionResult?.mode !== 'Delete Conversation...') {
+                    const logFileName = `${toSnakeCase(conversationName)}.jsonl`;
+                    // --- Access config safely here because of the 'if (config)' check above ---
+                    const logFilePath = path.join(config.chatsDir, logFileName);
+                    await codeProcessor.aiClient.logConversation(logFilePath, { type: 'error', error: `Main execution error: ${(error as Error).message}` });
+                }
             } catch (logError) {
-                console.error(chalk.red("Additionally failed to log main error to conversation file:"), logError);
+                console.error(chalk.red("Additionally failed to log main error:"), logError);
             }
         } else {
-            // Log general error if conversation context isn't available
-            // Could use a general 'kai_error.log' file here
+            console.error(chalk.red("General error occurred, potentially before config or conversation context was established."), error);
         }
 
-        process.exitCode = 1; // Indicate failure
+        process.exitCode = 1;
 
     } finally {
-        // --- Final Cleanup ---
-        // No editorFilePath cleanup needed here as it's handled within startConversation
-        // If other global resources were opened, clean them up here.
         console.log(chalk.dim("\nKai finished execution."));
     }
 }
