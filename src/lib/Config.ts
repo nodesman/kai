@@ -9,16 +9,18 @@ interface GeminiRateLimitConfig {
     requests_per_minute?: number;
 }
 
-// *** ADDED subsequent_chat_model_name ***
+// *** ADDED subsequent_chat_model_name AND RETRY SETTINGS ***
 interface GeminiConfig {
     api_key: string; // Loaded from ENV
     model_name?: string; // Primary model (e.g., Pro)
-    subsequent_chat_model_name?: string; // Secondary model (e.g., Flash) <-- ADDED
+    subsequent_chat_model_name?: string; // Secondary model (e.g., Flash)
     max_output_tokens?: number; // Max tokens for model response
     max_prompt_tokens?: number; // Max tokens for input (used for context building limit)
     rate_limit?: GeminiRateLimitConfig;
-    max_retries?: number;
-    retry_delay?: number;
+    max_retries?: number; // General retries (might deprecate if specific ones are better)
+    retry_delay?: number; // General retry delay (might deprecate)
+    generation_max_retries?: number; // Max retries specifically for the generation step (Step B) <-- ADDED
+    generation_retry_base_delay_ms?: number; // Base delay for generation step retries (ms) <-- ADDED
     // Add safetySettings if needed:
     // safetySettings?: SafetySetting[];
 }
@@ -91,19 +93,24 @@ class ConfigLoader implements IConfig {
         // 3. Construct the final Config object with defaults
         // Default subsequent model to Flash if not specified
         const defaultSubsequentModel = "gemini-2.0-flash";
+        const defaultGenerationMaxRetries = 3;
+        const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
 
         const finalGeminiConfig: GeminiConfig = {
             api_key: apiKey, // Mandatory, loaded from env
             model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default initial model
-            // *** USE defaultSubsequentModel ***
             subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || defaultSubsequentModel, // Default subsequent
             max_output_tokens: yamlConfig.gemini?.max_output_tokens || 8192,
             max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 32000, // Default context limit for context building
             rate_limit: {
                 requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
             },
+            // Keep general retry settings for now, but prioritize specific ones
             max_retries: yamlConfig.gemini?.max_retries || 3,
-            retry_delay: yamlConfig.gemini?.retry_delay || 60000, // 1 minute default
+            retry_delay: yamlConfig.gemini?.retry_delay || 60000,
+            // *** USE new generation retry settings ***
+            generation_max_retries: yamlConfig.gemini?.generation_max_retries ?? defaultGenerationMaxRetries,
+            generation_retry_base_delay_ms: yamlConfig.gemini?.generation_retry_base_delay_ms ?? defaultGenerationRetryBaseDelayMs,
         };
 
         const finalProjectConfig: Required<ProjectConfig> = {

@@ -1,6 +1,6 @@
 // lib/models/Gemini2ProModel.ts
 import BaseModel from "./BaseModel";
-import { GoogleGenerativeAI, Content, GenerativeModel } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, GenerativeModel, GenerateContentRequest, GenerateContentResult } from "@google/generative-ai";
 import { Config } from "../Config";
 import { Message } from "../models/Conversation"; // Correct path
 import chalk from 'chalk';
@@ -88,6 +88,49 @@ class Gemini2ProModel extends BaseModel {
             return ''; // Unreachable due to handleError throwing
         }
     }
+
+    // --- *** NEW: generateContent Method *** ---
+    async generateContent(request: GenerateContentRequest): Promise<GenerateContentResult> {
+        try {
+            console.log(chalk.blue(`Calling generateContent on ${this.modelName}...`));
+            // Add generationConfig if not already present in the request, respecting existing one
+            const finalRequest: GenerateContentRequest = {
+                ...request,
+                generationConfig: {
+                    maxOutputTokens: this.config.gemini.max_output_tokens || 8192,
+                    ...(request.generationConfig || {}), // Merge existing config
+                },
+            };
+
+            // Make the API call using the model instance
+            const result = await this.model.generateContent(finalRequest);
+
+            // Basic check for response validity before returning
+            if (!result || !result.response) {
+                console.warn(chalk.yellow(`generateContent call to ${this.modelName} returned an empty result/response.`));
+                // You might want to throw an error here depending on expected behavior
+                throw new Error(`AI response from ${this.modelName} was unexpectedly empty.`);
+            }
+
+            // Log finish reason if not OK
+            const finishReason = result.response?.candidates?.[0]?.finishReason;
+            if (finishReason && finishReason !== 'STOP') {
+                console.warn(chalk.yellow(`Model ${this.modelName} finished with reason: ${finishReason}`));
+                if (finishReason === 'SAFETY') {
+                    console.warn(chalk.yellow(`Safety Ratings: ${JSON.stringify(result.response?.candidates?.[0]?.safetyRatings)}`));
+                }
+            }
+
+            return result;
+        } catch (error) {
+            // Use the existing detailed error handler
+            this.handleError(error, this.modelName);
+            // handleError throws, so this next line is technically unreachable
+            // but needed for type safety if handleError were modified.
+            throw error;
+        }
+    }
+    // --- *** END NEW METHOD *** ---
 
     // --- convertToGeminiConversation (Identical structure) ---
     convertToGeminiConversation(messages: Message[]): GeminiChatHistory {
