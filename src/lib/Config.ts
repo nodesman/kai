@@ -1,115 +1,148 @@
-// lib/Config.ts
-import fs from 'fs';
+// File: src/lib/Config.ts
+import fs from 'fs'; // Use synchronous fs for config loading
 import path from 'path';
 import yaml from 'js-yaml';
 import chalk from 'chalk';
 
-// --- Interfaces (Ideally in a separate types.ts file) ---
-interface GeminiConfig {
-    max_prompt_tokens?: number;
-    api_key: string;
-    model_name?: string;
-    rate_limit?: {
-        requests_per_minute?: number;
-    };
-    max_retries?: number;
-    retry_delay?: number;
+// --- Interfaces ---
+interface GeminiRateLimitConfig {
+    requests_per_minute?: number;
 }
 
-interface OpenAIConfig {
-    api_key: string;
-    model_name?: string; // Added model_name for OpenAI
-    api_base?: string;  // Added api_base for custom endpoints
+// *** ADDED subsequent_chat_model_name AND RETRY SETTINGS ***
+interface GeminiConfig {
+    api_key: string; // Loaded from ENV
+    model_name?: string; // Primary model (e.g., Pro)
+    subsequent_chat_model_name?: string; // Secondary model (e.g., Flash)
+    max_output_tokens?: number; // Max tokens for model response
+    max_prompt_tokens?: number; // Max tokens for input (used for context building limit)
+    rate_limit?: GeminiRateLimitConfig;
+    max_retries?: number; // General retries (might deprecate if specific ones are better)
+    retry_delay?: number; // General retry delay (might deprecate)
+    generation_max_retries?: number; // Max retries specifically for the generation step (Step B) <-- ADDED
+    generation_retry_base_delay_ms?: number; // Base delay for generation step retries (ms) <-- ADDED
+    // Add safetySettings if needed:
+    // safetySettings?: SafetySetting[];
 }
+// *** END ADDITION ***
 
 interface ProjectConfig {
     root_dir?: string;
     prompts_dir?: string;
-    conversation_file?: string;
-    prompt_history_file?: string;
     prompt_template?: string;
+    chats_dir?: string; // Directory for conversation logs
 }
 
-interface Config {
+// Main Config structure used internally (interfaces, not class for simpler structure)
+interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: GeminiConfig;
-    project?: ProjectConfig;
-    openai: OpenAIConfig;
+    project: Required<ProjectConfig>; // Make project settings required internally after defaults
+    chatsDir: string; // Absolute path to chats directory
 }
+
+// Type for the raw data loaded from YAML (all fields optional)
+type YamlConfigData = {
+    gemini?: Partial<GeminiConfig>;
+    project?: Partial<ProjectConfig>;
+};
 
 // --- Config Class ---
-
-class ConfigClass implements Config {
+// Renamed class to avoid conflict with IConfig interface
+class ConfigLoader implements IConfig {
     gemini: GeminiConfig;
-    project?: ProjectConfig;
-    openai: OpenAIConfig;
+    project: Required<ProjectConfig>; // Use Required utility type
+    chatsDir: string; // Absolute path
 
     constructor() {
-        const loadedConfig = this.loadConfig(); // Load once
+        const loadedConfig = this.loadConfig();
         this.gemini = loadedConfig.gemini;
-        this.openai = loadedConfig.openai;
         this.project = loadedConfig.project;
+        this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 
-    private loadConfig(): Config {
-        let config: Partial<Config> = {};
-        const configPath = path.join(__dirname, '../../config/config.yaml');
+    private loadConfig(): IConfig {
+        const configPath = path.resolve(process.cwd(), 'config.yaml');
+        let yamlConfig: YamlConfigData = {};
 
+        // 1. Load API Key from Environment Variable
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            console.error(chalk.red('Error: GEMINI_API_KEY environment variable is not set.'));
+            console.log(chalk.yellow('Please set the GEMINI_API_KEY environment variable with your API key.'));
+            process.exit(1); // Exit if API key is missing
+        }
+
+        // 2. Load config.yaml
         try {
-            const configFile = fs.readFileSync(configPath, 'utf8');
-            config = yaml.load(configFile) as Partial<Config>;
-        } catch (e) {
-            console.warn(chalk.yellow("config.yaml not found or invalid.  Using default values and environment variables."));
-            // Provide defaults for BOTH Gemini and OpenAI if config.yaml is missing.
-            config = {
-                gemini: { api_key: '' },
-                openai: { api_key: '' },  // Initialize openai here
-            };
-        }
-
-        // --- Environment Variable Checks and Error Handling ---
-        if (!process.env.GEMINI_API_KEY) {
-            console.error(chalk.red('Gemini API key (GEMINI_API_KEY) required as an environment variable.'));
-            process.exit(1);
-        }
-
-        // Check for OpenAI API key *if* it's provided in the config file.
-        // This allows users to *either* use the config file *or* the environment variable.
-        if (config.openai && !config.openai.api_key && !process.env.OPENAI_API_KEY) {
-            console.error(chalk.red('OpenAI API key (OPENAI_API_KEY) required.  Set either in config.yaml or as an environment variable.'));
-            process.exit(1);
-        }
-
-
-
-        // --- Construct the final Config object with defaults ---
-
-        const loadedConfig: Config = {
-            gemini: {
-                api_key: process.env.GEMINI_API_KEY!, // Use environment variable (checked above)
-                model_name: config.gemini?.model_name || "gemini-2.0-flash",
-                rate_limit: {
-                    requests_per_minute: config.gemini?.rate_limit?.requests_per_minute || 60
-                },
-                max_retries: config.gemini?.max_retries || 3,
-                retry_delay: config.gemini?.retry_delay || 1000, // Reduced to 1 second (more reasonable default)
-            },
-            project: {
-                root_dir: config.project?.root_dir || "generated_project",
-                prompts_dir: config.project?.prompts_dir || "prompts",
-                conversation_file: config.project?.conversation_file || "conversation.jsonl",
-                prompt_history_file: config.project?.prompt_history_file || "prompt_history.jsonl",
-                prompt_template: config.project?.prompt_template || "prompt_template.yaml",
-            },
-            openai: {
-                api_key: config.openai?.api_key || process.env.OPENAI_API_KEY || "", // Prioritize config, then env, then empty string
-                model_name: config.openai?.model_name || "gpt-4o", // Sensible default
-                api_base: config.openai?.api_base || "https://api.openai.com/v1",  // Default OpenAI endpoint
-
+            if (fs.existsSync(configPath)) {
+                const fileContents = fs.readFileSync(configPath, 'utf8');
+                const loadedYaml = yaml.load(fileContents);
+                if (loadedYaml && typeof loadedYaml === 'object') {
+                    yamlConfig = loadedYaml as YamlConfigData;
+                } else {
+                    console.warn(chalk.yellow(`Warning: config.yaml at ${configPath} is empty or invalid. Using defaults.`));
+                }
+            } else {
+                console.warn(chalk.yellow(`Warning: config.yaml not found at ${configPath}. Using defaults.`));
             }
+        } catch (e) {
+            console.error(chalk.red(`Error loading or parsing config.yaml at ${configPath}:`), e);
+            console.warn(chalk.yellow('Continuing with default configurations...'));
+        }
+
+        // 3. Construct the final Config object with defaults
+        // Default subsequent model to Flash if not specified
+        const defaultSubsequentModel = "gemini-2.0-flash";
+        const defaultGenerationMaxRetries = 3;
+        const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
+
+        const finalGeminiConfig: GeminiConfig = {
+            api_key: apiKey, // Mandatory, loaded from env
+            model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default initial model
+            subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || defaultSubsequentModel, // Default subsequent
+            max_output_tokens: yamlConfig.gemini?.max_output_tokens || 8192,
+            max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 32000, // Default context limit for context building
+            rate_limit: {
+                requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
+            },
+            // Keep general retry settings for now, but prioritize specific ones
+            max_retries: yamlConfig.gemini?.max_retries || 3,
+            retry_delay: yamlConfig.gemini?.retry_delay || 60000,
+            // *** USE new generation retry settings ***
+            generation_max_retries: yamlConfig.gemini?.generation_max_retries ?? defaultGenerationMaxRetries,
+            generation_retry_base_delay_ms: yamlConfig.gemini?.generation_retry_base_delay_ms ?? defaultGenerationRetryBaseDelayMs,
         };
 
-        return loadedConfig;
+        const finalProjectConfig: Required<ProjectConfig> = {
+            root_dir: yamlConfig.project?.root_dir || "generated_project",
+            prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
+            prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
+            chats_dir: yamlConfig.project?.chats_dir || ".kaichats",
+        };
+
+        // Calculate absolute chats directory path
+        const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
+
+        // Ensure chats directory exists immediately
+        try {
+            if (!fs.existsSync(absoluteChatsDir)) {
+                fs.mkdirSync(absoluteChatsDir, { recursive: true });
+                console.log(chalk.blue(`Created chats directory: ${absoluteChatsDir}`));
+            }
+        } catch (dirError) {
+            console.error(chalk.red(`Fatal: Could not create chats directory at ${absoluteChatsDir}:`), dirError);
+            process.exit(1);
+        }
+
+        return {
+            gemini: finalGeminiConfig,
+            project: finalProjectConfig,
+            chatsDir: absoluteChatsDir
+        };
     }
 }
 
-export { ConfigClass as Config };
+// Export the class implementation as 'Config'
+export { ConfigLoader as Config };
+// Export the interface type separately if needed for type hinting elsewhere
+export type { IConfig, GeminiConfig, ProjectConfig };

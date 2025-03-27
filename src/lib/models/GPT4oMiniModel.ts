@@ -1,13 +1,6 @@
-// src/lib/models/GPT4oMiniModel.ts
-
 import BaseModel from "./BaseModel";
-import { OpenAI } from "openai"; // Import OpenAI
-import { Config } from "../Config";
-import { Conversation, Message } from "./Conversation";
-
-interface OpenAIMessage {  //Interface to convert back to OPENAI message format.
-    role: "user" | "assistant" | "system";
-    content: string;
+class GPT4oMiniModel extends BaseModel {
+    // ... GPT-4 specific implementation
 }
 
 class GPT4oMiniModel extends BaseModel {
