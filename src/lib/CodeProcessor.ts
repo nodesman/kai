@@ -1,50 +1,18 @@
 // lib/CodeProcessor.ts
 import path from 'path';
 import { FileSystem } from './FileSystem';
-// Use correct type import from AIClient
 import { AIClient, LogEntryData } from './AIClient';
-import { encode as gpt3Encode } from 'gpt-3-encoder';
-// Import Config class itself
 import { Config } from "./Config";
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { toSnakeCase, countTokens } from './utils';
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
-import * as Diff from 'diff'; // Import the diff library
 import { ConsolidationService } from './ConsolidationService';
-import inquirer from 'inquirer'; // Import inquirer for the placeholder
-import {
-    Content,
-    Part,
-    Tool,
-    FunctionDeclaration,
-    GenerateContentRequest,
-    GenerateContentResult,
-    FunctionCallingMode,
-    FinishReason,
-    SchemaType, // *** Import SchemaType ***
-    Schema, // Import Schema too!
-    FunctionDeclarationSchemaProperty // Import FunctionDeclarationSchemaProperty as well!
-} from "@google/generative-ai";
-// --- Import for Git Check ---
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCb); // Promisify for async/await usage
-// --- End Import ---
 
-// Import the Review UI Manager and its types
-import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-
-// --- Interfaces for Consolidation (REMOVED - Now live in ConsolidationService) ---
-// interface ConsolidationAnalysis { ... }
-// interface FinalFileStates { ... }
-// --- End Consolidation Interfaces ---
-
-// --- Tool Definition (REMOVED - Now live in ConsolidationService) ---
-// const proposeCodeChangesDeclaration: FunctionDeclaration = { ... };
-// const proposeCodeChangesTool: Tool = { ... };
-// --- End Tool Definition ---
 
 class CodeProcessor {
     config: Config; // Use the Config class instance type
@@ -128,14 +96,12 @@ class CodeProcessor {
     }
     // --- End context building ---
 
-    // --- startConversation (Unchanged) ---
+    // --- startConversation (MODIFIED) ---
     async startConversation(conversationName: string, isNew: boolean): Promise<void> {
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
         let editorFilePath: string | null = null;
         let conversation: Conversation;
-
-        let isFirstRequestInLoop = true; // Track first request
 
         try {
             if (!isNew) {
@@ -176,21 +142,12 @@ class CodeProcessor {
                     // Use the ProjectContextBuilder instance
                     const { context: currentContextString } = await this.contextBuilder.build();
 
-                    const useFlash = !isFirstRequestInLoop;
-                    if (useFlash) {
-                        console.log(chalk.cyan(`Using subsequent model (Flash) for this request.`));
-                    } else {
-                        console.log(chalk.cyan(`Using initial model (Pro) for first request.`));
-                    }
-
                     await this.aiClient.getResponseFromAI(
                         conversation,
                         conversationFilePath,
                         currentContextString,
-                        useFlash // Pass the boolean flag
+                        false //useFlash // REMOVE isFirstRequestInLoop
                     );
-
-                    isFirstRequestInLoop = false;
 
                 } catch (aiError) {
                     console.error(chalk.red("Error during AI interaction:"), aiError);
