@@ -262,12 +262,6 @@ class CodeProcessor {
         }
     }
 
-    // --- analyzeConversationForChanges (REMOVED) ---
-    // --- generateFinalFileContents (REMOVED) ---
-    // --- prepareReviewData (REMOVED) ---
-    // --- presentChangesForReviewTUI (REMOVED - Was already moved to ConsolidationService conceptually) ---
-    // --- applyConsolidatedChanges (REMOVED) ---
-
     // --- TUI Mode (Unchanged) ---
     async startCodeChangeTUI(): Promise<void> {
         console.log("Initializing Code Change TUI...");
