@@ -5,7 +5,7 @@ import { AIClient, LogEntryData } from './AIClient';
 import { Config } from "./Config";
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import { toSnakeCase, countTokens } from './utils';
+import { toSnakeCase, countTokens } from './utils'; // countTokens might not be needed here anymore
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
 import { ConsolidationService } from './ConsolidationService';
@@ -13,9 +13,14 @@ import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCb); // Promisify for async/await usage
 
+// Interface for paths managed within the conversation
+interface ConversationPaths {
+    conversationFilePath: string;
+    editorFilePath: string;
+}
 
 class CodeProcessor {
-    config: Config; // Use the Config class instance type
+    config: Config;
     fs: FileSystem;
     aiClient: AIClient;
     ui: UserInterface;
@@ -24,161 +29,250 @@ class CodeProcessor {
     private contextBuilder: ProjectContextBuilder;
     private consolidationService: ConsolidationService;
 
-    constructor(config: Config) { // Accept Config class instance
+    constructor(config: Config) {
         this.config = config;
         this.fs = new FileSystem();
-        // AIClient constructor now handles creating both model instances
         this.aiClient = new AIClient(config);
         this.ui = new UserInterface(config);
         this.projectRoot = process.cwd();
-        this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config); // Add this line
-        // Instantiate ConsolidationService here, passing dependencies
+        this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config);
         this.consolidationService = new ConsolidationService(this.config, this.fs, this.aiClient, this.projectRoot);
     }
 
-    // --- buildContextString (Keep as is, used by both Conversation and ConsolidationService via CodeProcessor) ---
-    async buildContextString(): Promise<{ context: string, tokenCount: number }> {
-        console.log(chalk.blue('\nBuilding project context...'));
-        const filePaths = await this.fs.getProjectFiles(this.projectRoot);
-        const fileContents = await this.fs.readFileContents(filePaths);
-
-        let contextString = "Code Base Context:\n";
-        let currentTokenCount = countTokens(contextString);
-        const maxContextTokens = (this.config.gemini.max_prompt_tokens || 32000) * 0.6; // 60% safety margin
-        let includedFiles = 0;
-        let excludedFiles = 0;
-        const sortedFilePaths = Object.keys(fileContents).sort();
-        let estimatedTotalTokens = currentTokenCount;
-
-        for (const filePath of sortedFilePaths) {
-            const relativePath = path.relative(this.projectRoot, filePath);
-            let content = fileContents[filePath];
-            if (!content) {
-                console.log(chalk.gray(`  Skipping empty file: ${relativePath}`));
-                excludedFiles++;
-                continue;
-            }
-            content = this.optimizeWhitespace(content);
-            if (!content) {
-                console.log(chalk.gray(`  Skipping file with only whitespace: ${relativePath}`));
-                excludedFiles++;
-                continue;
-            }
-
-            const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
-            const fileFooter = "\n\`\`\`\n";
-            const fileBlock = fileHeader + content + fileFooter;
-            const fileTokens = countTokens(fileBlock);
-
-            contextString += fileBlock;
-            estimatedTotalTokens += fileTokens;
-            includedFiles++;
-            console.log(chalk.dim(`  Included ${relativePath} (${fileTokens} tokens). Current total: ${estimatedTotalTokens.toFixed(0)}`));
-        }
-        console.log(chalk.blue(`Context built with ${includedFiles} files (${estimatedTotalTokens.toFixed(0)} tokens estimated). ${excludedFiles} files excluded/skipped. Max context set to ${maxContextTokens.toFixed(0)} tokens.`));
-        const finalTokenCount = countTokens(contextString);
-        console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
-
-        // Add warning if context exceeds the overall max prompt token limit
-        if (finalTokenCount > (this.config.gemini.max_prompt_tokens || 32000)) {
-            console.warn(chalk.yellow(`Warning: Final context token count (${finalTokenCount}) exceeds configured max_prompt_tokens (${this.config.gemini.max_prompt_tokens}). Potential truncation by API.`));
-        }
-
-        return { context: contextString, tokenCount: finalTokenCount };
-    }
+    // --- REMOVED buildContextString method ---
+    // It's now handled entirely by ProjectContextBuilder instance
 
     optimizeWhitespace(code: string): string {
+        // Keep this utility if needed elsewhere, or move it if only used in the deleted buildContextString
         code = code.replace(/[ \t]+$/gm, '');
         code = code.replace(/\r\n/g, '\n');
         code = code.replace(/\n{3,}/g, '\n\n');
         code = code.trim();
         return code;
     }
-    // --- End context building ---
 
-    // --- startConversation (MODIFIED) ---
+    // --- Main Conversation Orchestration ---
     async startConversation(conversationName: string, isNew: boolean): Promise<void> {
-        const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-        const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-        let editorFilePath: string | null = null;
+        const paths = this._getConversationPaths(conversationName);
+        let editorFilePathForCleanup: string | null = null; // Separate variable for finally block
         let conversation: Conversation;
 
         try {
-            if (!isNew) {
-                const logData = await this.fs.readJsonlFile(conversationFilePath) as JsonlLogEntry[];
-                conversation = Conversation.fromJsonlData(logData);
-                console.log(`Loaded ${conversation.getMessages().length} messages for ${conversationName}.`);
-            } else {
-                conversation = new Conversation();
-                console.log(`Starting new conversation: ${conversationName}`);
-            }
+            conversation = await this._loadOrCreateConversation(conversationName, isNew, paths.conversationFilePath);
+            editorFilePathForCleanup = paths.editorFilePath; // Assign path for potential cleanup
 
-            while (true) {
-                const interactionResult = await this.ui.getPromptViaSublimeLoop(conversationName, conversation.getMessages());
-                editorFilePath = interactionResult.editorFilePath;
-                if (interactionResult.newPrompt === null) break;
-                const userPrompt = interactionResult.newPrompt;
+            // Start the main interaction loop
+            await this._handleUserInputLoop(conversationName, conversation, paths);
 
-                // Handle /consolidate command trigger (unchanged)
-                if (userPrompt.trim().toLowerCase() === this.CONSOLIDATE_COMMAND) {
-                    console.log(chalk.yellow(`🚀 Intercepted ${this.CONSOLIDATE_COMMAND}. Starting consolidation process...`));
-                    conversation.addMessage('user', userPrompt);
-                    try { await this.aiClient.logConversation(conversationFilePath, { type: 'request', role: 'user', content: userPrompt }); } catch (logErr) { console.error(chalk.red("Error logging consolidate command:"), logErr); }
-
-                    // Call the consolidation service. Context string built here.
-                    console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
-                    // Use buildContextString directly (it's still part of CodeProcessor)
-                    const { context: currentContextString } = await this.buildContextString();
-                    await this.consolidationService.process(conversationName, conversation, currentContextString, conversationFilePath);
-
-                    conversation.addMessage('system', `[Consolidation process triggered for '${conversationName}' has finished. See logs.]`);
-                    continue; // Skip normal AI call
-                }
-
-                // Add user message (unchanged)
-                conversation.addMessage('user', userPrompt);
-
-                try {
-                    // Use the ProjectContextBuilder instance
-                    const { context: currentContextString } = await this.contextBuilder.build();
-
-                    await this.aiClient.getResponseFromAI(
-                        conversation,
-                        conversationFilePath,
-                        currentContextString,
-                        false //useFlash // REMOVE isFirstRequestInLoop
-                    );
-
-                } catch (aiError) {
-                    console.error(chalk.red("Error during AI interaction:"), aiError);
-                    conversation.addMessage('system', `[Error occurred during AI request: ${(aiError as Error).message}. Please check logs. You can try again or exit.]`);
-                }
-            }
             console.log(`\nExiting conversation "${conversationName}".`);
-        } catch (error) { // Catch block unchanged
-            console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
-            if (conversationFilePath) {
-                try { await this.aiClient.logConversation(conversationFilePath, { type: 'error', error: `CodeProcessor loop error: ${(error as Error).message}` }); } catch (logErr) { console.error(chalk.red("Additionally failed to log CodeProcessor error:"), logErr); }
+
+        } catch (error) {
+            await this._handleConversationError(error, conversationName, paths.conversationFilePath);
+        } finally {
+            // Use the path stored specifically for cleanup
+            await this._cleanupEditorFile(editorFilePathForCleanup);
+        }
+    }
+
+    // --- Private Helper Methods ---
+
+    /** Generates the file paths related to a conversation. */
+    private _getConversationPaths(conversationName: string): ConversationPaths {
+        const snakeName = toSnakeCase(conversationName);
+        const conversationFileName = `${snakeName}.jsonl`;
+        const editorFileName = `${snakeName}_edit.txt`;
+        return {
+            conversationFilePath: path.join(this.config.chatsDir, conversationFileName),
+            editorFilePath: path.join(this.config.chatsDir, editorFileName),
+        };
+    }
+
+    /** Loads conversation from file or creates a new one. */
+    private async _loadOrCreateConversation(
+        conversationName: string,
+        isNew: boolean,
+        conversationFilePath: string
+    ): Promise<Conversation> {
+        if (!isNew) {
+            try {
+                const logData = await this.fs.readJsonlFile(conversationFilePath) as JsonlLogEntry[];
+                const conversation = Conversation.fromJsonlData(logData);
+                console.log(chalk.blue(`Loaded ${conversation.getMessages().length} messages for conversation: ${chalk.cyan(conversationName)}.`));
+                return conversation;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                    console.warn(chalk.yellow(`Warning: Conversation file not found for "${conversationName}". Starting a new conversation instead.`));
+                    // Fall through to create a new conversation
+                } else {
+                    throw error; // Rethrow unexpected errors
+                }
             }
-        } finally { // Finally block unchanged
-            if (editorFilePath) {
-                try {
-                    await this.fs.access(editorFilePath);
-                    await this.fs.deleteFile(editorFilePath);
-                    console.log(`Cleaned up editor file: ${editorFilePath}`);
-                } catch (cleanupError) {
-                    if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
-                        console.warn(chalk.yellow(`\nWarning: Failed to clean up editor file ${editorFilePath}:`), cleanupError);
-                    }
+        }
+        // Create new conversation if isNew is true or if loading failed with ENOENT
+        console.log(chalk.blue(`Starting new conversation: ${chalk.cyan(conversationName)}`));
+        return new Conversation();
+    }
+
+    /** Manages the main loop of interacting with the user via the editor. */
+    private async _handleUserInputLoop(
+        conversationName: string,
+        conversation: Conversation,
+        paths: ConversationPaths
+    ): Promise<void> {
+        while (true) {
+            const interactionResult = await this.ui.getPromptViaSublimeLoop(
+                conversationName,
+                conversation.getMessages(),
+                paths.editorFilePath // Pass editor path explicitly
+            );
+
+            // Editor file path might change if ui logic changes, update for cleanup
+            // editorFilePathForCleanup = interactionResult.editorFilePath;
+
+            if (interactionResult.newPrompt === null) {
+                break; // User exited editor or provided no prompt
+            }
+
+            await this._processLoopIteration(
+                conversation,
+                interactionResult.newPrompt,
+                paths.conversationFilePath
+            );
+        }
+    }
+
+    /** Processes a single iteration of the user input loop. */
+    private async _processLoopIteration(
+        conversation: Conversation,
+        userPrompt: string,
+        conversationFilePath: string
+    ): Promise<void> {
+        // Handle /consolidate command
+        if (userPrompt.trim().toLowerCase() === this.CONSOLIDATE_COMMAND) {
+            await this._handleConsolidateCommand(conversation, conversationFilePath);
+            // No 'continue' needed here as it's the last step in this iteration path
+        } else {
+            // Handle normal AI interaction
+            await this._callAIWithContext(conversation, userPrompt, conversationFilePath);
+        }
+    }
+
+    /** Handles the '/consolidate' command. */
+    private async _handleConsolidateCommand(
+        conversation: Conversation,
+        conversationFilePath: string
+    ): Promise<void> {
+        const conversationName = path.basename(conversationFilePath, '.jsonl'); // Extract name
+        console.log(chalk.yellow(`🚀 Intercepted ${this.CONSOLIDATE_COMMAND}. Starting consolidation process...`));
+        conversation.addMessage('user', this.CONSOLIDATE_COMMAND); // Add command itself
+        try {
+            await this.aiClient.logConversation(conversationFilePath, { type: 'request', role: 'user', content: this.CONSOLIDATE_COMMAND });
+        } catch (logErr) {
+            console.error(chalk.red("Error logging consolidate command:"), logErr);
+        }
+
+        try {
+            // Fetch fresh context using the builder
+            console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
+            const { context: currentContextString } = await this.contextBuilder.build(); // Use the builder
+
+            // Delegate to the consolidation service
+            await this.consolidationService.process(
+                conversationName,
+                conversation,
+                currentContextString,
+                conversationFilePath
+            );
+            conversation.addMessage('system', `[Consolidation process triggered for '${conversationName}' has finished. See logs.]`);
+        } catch (consolidationError) {
+            console.error(chalk.red(`Error during consolidation triggered by command:`), consolidationError);
+            const errorMsg = `[System Error during consolidation: ${(consolidationError as Error).message}]`;
+            conversation.addMessage('system', errorMsg);
+            try {
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+            } catch (logErr) {
+                console.error(chalk.red("Additionally failed to log consolidation command error:"), logErr);
+            }
+        }
+    }
+
+    /** Builds context and calls the AI for a standard user prompt. */
+    private async _callAIWithContext(
+        conversation: Conversation,
+        userPrompt: string,
+        conversationFilePath: string
+    ): Promise<void> {
+        conversation.addMessage('user', userPrompt); // Add user message first
+
+        try {
+            const { context: currentContextString } = await this.contextBuilder.build();
+
+            await this.aiClient.getResponseFromAI(
+                conversation,
+                conversationFilePath,
+                currentContextString,
+                false // TODO: Make 'useFlashModel' parameter configurable if needed
+            );
+
+        } catch (aiError) {
+            console.error(chalk.red("Error during AI interaction:"), aiError);
+            // Add specific error message to conversation for user feedback
+            const errorMessage = `[System Error during AI request: ${(aiError as Error).message}. You can try again or exit.]`;
+            conversation.addMessage('system', errorMessage);
+            // Log the detailed error to the file (handled by getResponseFromAI internally, but log system message too)
+            try {
+                await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: errorMessage });
+            } catch (logErr) {
+                console.error(chalk.red("Additionally failed to log AI error system message:"), logErr);
+            }
+            // Do not rethrow here, allow the loop to continue
+        }
+    }
+
+    /** Handles errors occurring during the main conversation loop. */
+    private async _handleConversationError(
+        error: unknown,
+        conversationName: string,
+        conversationFilePath: string | null // Can be null if error happens before path is set
+    ): Promise<void> {
+        console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
+        if (conversationFilePath && this.aiClient) { // Check aiClient exists
+            try {
+                const logPayload: LogEntryData = {
+                    type: 'error',
+                    role: 'system', // Indicate error is from the system processing
+                    error: `CodeProcessor loop error: ${(error as Error).message}`
+                };
+                await this.aiClient.logConversation(conversationFilePath, logPayload);
+            } catch (logErr) {
+                console.error(chalk.red("Additionally failed to log CodeProcessor error:"), logErr);
+            }
+        } else {
+            console.error(chalk.red("Could not log error to conversation file (path or AI client unavailable)."));
+        }
+    }
+
+    /** Cleans up the temporary editor file. */
+    private async _cleanupEditorFile(editorFilePath: string | null): Promise<void> {
+        if (editorFilePath) {
+            try {
+                await this.fs.access(editorFilePath); // Check if it exists
+                await this.fs.deleteFile(editorFilePath);
+                console.log(chalk.dim(`Cleaned up editor file: ${editorFilePath}`));
+            } catch (cleanupError) {
+                // Only log errors that aren't "file not found"
+                if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+                    console.warn(chalk.yellow(`\nWarning: Failed to clean up editor file ${editorFilePath}:`), cleanupError);
+                } else {
+                    console.log(chalk.dim(`Editor file already gone: ${editorFilePath}`));
                 }
             }
         }
     }
 
-    // --- Consolidation Orchestration Method ---
+    // --- Consolidation Orchestration Method (Unchanged from previous state) ---
     async processConsolidationRequest(conversationName: string): Promise<void> {
-        const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-        const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
+        const { conversationFilePath } = this._getConversationPaths(conversationName); // Use helper
         let conversation: Conversation;
 
         try {
@@ -190,10 +284,9 @@ class CodeProcessor {
                 return;
             }
 
-            // Build context string (as ConsolidationService expects it)
+            // Build context string using the builder
             console.log(chalk.cyan("Fetching fresh codebase context for consolidation..."));
-            // Use buildContextString directly
-            const { context: currentContextString } = await this.buildContextString();
+            const { context: currentContextString } = await this.contextBuilder.build();
 
             // Delegate *entirely* to the ConsolidationService
             await this.consolidationService.process(

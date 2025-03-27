@@ -142,19 +142,19 @@ class UserInterface {
     // --- getPromptViaSublimeLoop (Unchanged) ---
     async getPromptViaSublimeLoop(
         conversationName: string,
-        currentMessages: Message[]
+        currentMessages: Message[],
+        editorFilePath: string // <<< ADD this parameter
     ): Promise<{ newPrompt: string | null; conversationFilePath: string; editorFilePath: string }> {
-        // ... (keep existing implementation) ...
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-        const editorFileName = `${toSnakeCase(conversationName)}_edit.txt`;
-        const editorFilePath = path.join(this.config.chatsDir, editorFileName);
+        // const editorFileName = `${toSnakeCase(conversationName)}_edit.txt`; // <<< REMOVE or comment out
+        // const editorFilePath = path.join(this.config.chatsDir, editorFileName); // <<< REMOVE or comment out (now passed as argument)
 
-        // Pass empty array if no messages to ensure separator is added by formatHistoryForSublime
         const contentToWrite = this.formatHistoryForSublime(currentMessages || []);
         const initialHash = crypto.createHash('sha256').update(contentToWrite).digest('hex');
 
         try {
+            // Use the passed editorFilePath
             await this.fs.writeFile(editorFilePath, contentToWrite);
         } catch (writeError) {
             console.error(`Error writing temporary edit file ${editorFilePath}:`, writeError);
@@ -165,6 +165,7 @@ class UserInterface {
         console.log(`(Type your prompt above the '${HISTORY_SEPARATOR}', save, and close Sublime to send)`);
         console.log(`(Close without saving OR save without changes to exit conversation)`);
 
+        // Use the passed editorFilePath
         const sublProcess = spawn('subl', ['-w', editorFilePath], { stdio: 'inherit' });
 
         const exitCode = await new Promise<number | null>((resolve, reject) => {
@@ -180,45 +181,47 @@ class UserInterface {
             });
         });
 
-        // Check exit code before proceeding
-        if (exitCode !== 0) { // Check specifically for non-zero exit code
+        if (exitCode !== 0) {
             console.warn(chalk.yellow(`\nSublime Text process closed with non-zero code: ${exitCode}. Assuming exit.`));
+            // Return the passed editorFilePath
             return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
         let modifiedContent: string;
         try {
-            // Ensure file exists before reading
+            // Use the passed editorFilePath
             await fs.access(editorFilePath);
             modifiedContent = await this.fs.readFile(editorFilePath) || '';
         } catch (readError) {
             if ((readError as NodeJS.ErrnoException).code === 'ENOENT') {
                 console.warn(chalk.yellow(`\nEditor file ${editorFilePath} not found after closing Sublime. Assuming exit.`));
+                // Return the passed editorFilePath
                 return { newPrompt: null, conversationFilePath, editorFilePath };
             }
             console.error(chalk.red(`\nError reading editor file ${editorFilePath} after closing:`), readError);
-            throw readError; // Rethrow unexpected errors
+            throw readError;
         }
 
         const modifiedHash = crypto.createHash('sha256').update(modifiedContent).digest('hex');
 
         if (initialHash === modifiedHash) {
             console.log(chalk.blue("\nNo changes detected in Sublime Text. Exiting conversation."));
+            // Return the passed editorFilePath
             return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
         const newPrompt = this.extractNewPrompt(modifiedContent);
 
-        if (newPrompt === null) { // Check for null (meaning empty prompt area)
+        if (newPrompt === null) {
             console.log(chalk.blue("\nNo new prompt entered. Exiting conversation."));
+            // Return the passed editorFilePath
             return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
         console.log(chalk.green("\nPrompt received, processing with AI..."));
-        return { newPrompt: newPrompt, conversationFilePath, editorFilePath }; // Return trimmed prompt
-
+        // Return the passed editorFilePath
+        return { newPrompt: newPrompt, conversationFilePath, editorFilePath };
     }
-
     // --- getUserInteraction (MODIFIED) ---
     async getUserInteraction(): Promise<UserInteractionResult | null> {
         try {
