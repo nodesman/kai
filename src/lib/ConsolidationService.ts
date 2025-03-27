@@ -75,10 +75,38 @@ const proposeCodeChangesDeclaration: FunctionDeclaration = {
         required: ["changes"],
     },
 };
+// --- End Tool Definition ---
+
+const provideSingleFileContentDeclaration: FunctionDeclaration = {
+    name: "provide_single_file_content",
+    description: "Provides the complete, final content for a single specified file.",
+    parameters: {
+        type: SchemaType.OBJECT,
+        properties: {
+            filePath: {
+                type: SchemaType.STRING,
+                description: "The relative path of the file this content belongs to (e.g., 'src/utils.ts').",
+            },
+            content: {
+                type: SchemaType.STRING,
+                description: "The complete, final content for the specified file.",
+            },
+            // Optional: Add action if needed, but might complicate the instruction
+            // action: {
+            //     type: SchemaType.STRING,
+            //     enum: ["CREATE", "MODIFY"],
+            //     description: "Indicates if the file is being created or modified."
+            // }
+        },
+        required: ["filePath", "content"], // filePath and content are essential
+    },
+};
 const proposeCodeChangesTool: Tool = {
     functionDeclarations: [proposeCodeChangesDeclaration],
 };
-// --- End Tool Definition ---
+const provideSingleFileContentTool: Tool = {
+    functionDeclarations: [provideSingleFileContentDeclaration],
+};
 
 export class ConsolidationService {
     private config: Config;
@@ -165,6 +193,139 @@ export class ConsolidationService {
             }
             throw error; // Re-throw so main can catch it
         }
+    }
+
+    private async refineFileContentsWithFlash(
+        conversation: Conversation,
+        codeContext: string,
+        initialFinalStates: FinalFileStates, // Input from Step B
+        conversationFilePath: string,
+        modelName: string // Explicitly Flash model name
+    ): Promise<FinalFileStates> {
+        // Create a deep copy to modify; start with Step B's results
+        const refinedStates: FinalFileStates = JSON.parse(JSON.stringify(initialFinalStates));
+        const successfullyRefinedPaths = new Set<string>(); // Track which files Flash successfully provided content for
+
+        // 1. Identify files needing content generation (not DELETE) from Step B's output
+        const filesToRefine = Object.entries(initialFinalStates)
+            .filter(([_, state]) => state !== 'DELETE_CONFIRMED')
+            .map(([filePath, _]) => filePath); // Get just the paths
+
+        if (filesToRefine.length === 0) {
+            console.log(chalk.yellow("    (Step B.5) No files require content refinement. Skipping Flash call."));
+            return refinedStates; // Return the Step B states unchanged
+        }
+
+        console.log(chalk.cyan(`    (Step B.5) Requesting refinement for ${filesToRefine.length} files using ${modelName}: [${filesToRefine.join(', ')}]...`));
+
+        // 2. Construct Prompt for Flash, instructing multiple function calls
+        const refinementPrompt = `CONTEXT:\nYou are an expert AI assisting with code generation, refining content previously generated.\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY (for context):\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nGenerate the complete, final content for EACH of the following files. You MUST call the '${provideSingleFileContentDeclaration.name}' function **multiple times**, once for each file listed below. Provide the full content in the 'content' parameter for each call.\n\nFILES TO GENERATE CONTENT FOR:\n${filesToRefine.map(f => `- ${f}`).join('\n')}\n\nFor every file in the list above, invoke the '${provideSingleFileContentDeclaration.name}' function with its 'filePath' and its complete 'content'. Do NOT return an array; make separate function calls for each file. Ensure the 'filePath' in each function call exactly matches one from the list above.`;
+
+        // 3. Prepare API Request
+        const historyForRefinement: Content[] = conversation.getMessages()
+            .filter(m => m.role !== 'system')
+            .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+        if (historyForRefinement.length > 0 && historyForRefinement[historyForRefinement.length - 1].role === 'user') {
+            historyForRefinement.pop();
+        }
+
+        const request: GenerateContentRequest = {
+            contents: [
+                ...historyForRefinement,
+                { role: "user", parts: [{ text: refinementPrompt }] }
+            ],
+            tools: [provideSingleFileContentTool], // Use the NEW tool for single file content
+            toolConfig: {
+                // *** This is where it likely cut off ***
+                // Use ANY mode. We EXPECT function calls, but need to handle if the model just returns text.
+                functionCallingConfig: { mode: FunctionCallingMode.ANY }
+            }
+        };
+
+        // 4. Make API Call (useFlashModel = true)
+        let result: GenerateContentResult | null = null;
+        try {
+            // Force Flash model for refinement step
+            result = await this.aiClient.generateContent(request, true);
+        } catch (error) {
+            // If the refinement step fails entirely, log it and return the *original* states from Step B
+            const errorMsg = `AI refinement (Step B.5) API call failed (using ${modelName}). Error: ${(error as Error).message}. Falling back to initial generation results.`;
+            console.error(chalk.red(errorMsg));
+            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+            return initialFinalStates; // Fallback to Step B results
+        }
+
+        // 5. Process Response - Iterate through multiple function calls
+        const response = result?.response;
+        const candidate = response?.candidates?.[0];
+        // Get ALL parts that are function calls
+        const functionCallParts = candidate?.content?.parts?.filter(part => !!part.functionCall) ?? [];
+
+        if (functionCallParts.length > 0) {
+            console.log(chalk.green(`    (Step B.5) Received ${functionCallParts.length} function call(s) for refinement.`));
+
+            for (const part of functionCallParts) {
+                const functionCall = part.functionCall;
+                // Ensure it's the correct function name
+                if (functionCall && functionCall.name === provideSingleFileContentDeclaration.name) {
+                    const args = functionCall.args as { filePath?: string; content?: string }; // Type cast args
+
+                    // Validate arguments received
+                    if (!args || typeof args.filePath !== 'string' || typeof args.content !== 'string') {
+                        console.warn(chalk.yellow(`    (Step B.5) Skipping invalid function call: Missing or invalid filePath/content. Args: ${JSON.stringify(args)}`));
+                        continue;
+                    }
+
+                    const normalizedPath = path.normalize(args.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
+
+                    // Check if this path was actually requested for refinement
+                    if (filesToRefine.includes(normalizedPath)) {
+                        refinedStates[normalizedPath] = args.content; // Update the state with refined content
+                        successfullyRefinedPaths.add(normalizedPath); // Mark as successfully refined
+                        console.log(chalk.dim(`      (Step B.5) Refined content for ${normalizedPath} (Content length: ${args.content.length})`));
+                    } else {
+                        // Log if Flash returned a file we didn't ask for
+                        console.warn(chalk.yellow(`    (Step B.5) Received function call for unexpected file path: ${normalizedPath}. Ignoring.`));
+                    }
+                } else {
+                    // Log if a different function was called unexpectedly
+                    console.warn(chalk.yellow(`    (Step B.5) Received unexpected function call name: ${functionCall?.name}. Ignoring.`));
+                }
+            }
+
+            // Check for files that were requested but not returned by Flash
+            const missedFiles = filesToRefine.filter(f => !successfullyRefinedPaths.has(f));
+            if (missedFiles.length > 0) {
+                console.warn(chalk.yellow(`    (Step B.5) Warning: Flash model did not provide content for ${missedFiles.length} requested file(s): [${missedFiles.join(', ')}]. Keeping initial content from Step B for these files.`));
+                // No action needed here, as we started with initialFinalStates and only updated successful ones
+            }
+
+        } else {
+            // Handle case where Flash didn't call the function at all
+            const finishReason = candidate?.finishReason;
+            const textResponse = candidate?.content?.parts?.find(part => !!part.text)?.text;
+            let errorMsg = `AI refinement (Step B.5) failed: Model did not call the required function '${provideSingleFileContentDeclaration.name}'.`;
+            if (finishReason && finishReason !== FinishReason.STOP) {
+                errorMsg += ` Finish Reason: ${finishReason}.`;
+                if (finishReason === FinishReason.SAFETY && candidate?.safetyRatings) {
+                    errorMsg += ` Safety Ratings: ${JSON.stringify(candidate.safetyRatings)}`;
+                }
+            }
+
+            console.warn(chalk.yellow(errorMsg + " Falling back to initial generation results from Step B."));
+            if (textResponse) {
+                // Log the text response for debugging
+                console.warn(chalk.yellow(`(Step B.5) Model Response Text (instead of function calls):\n---\n${textResponse.substring(0, 500)}${textResponse.length > 500 ? '...' : ''}\n---`));
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: `${errorMsg} Fallback Text: ${textResponse.substring(0, 200)}...` });
+            } else {
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+            }
+            // --- CRITICAL: Fallback to Step B results if refinement fails ---
+            return initialFinalStates;
+        }
+
+        // Return the potentially updated map
+        return refinedStates;
     }
 
     // --- analyzeConversationForChanges (Unchanged) ---
@@ -372,61 +533,82 @@ export class ConsolidationService {
     // --- End UPDATED Method ---
 
     // --- prepareReviewData (Unchanged) ---
+// --- prepareReviewData (Handles CREATE/MODIFY/DELETE correctly) ---
     private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
         const reviewData: ReviewDataItem[] = [];
         for (const relativePath in finalStates) {
             const proposed = finalStates[relativePath];
             const absolutePath = path.resolve(this.projectRoot, relativePath);
             let current: string | null = null;
-            let action: ReviewAction = 'MODIFY'; // Default
-            try { current = await this.fs.readFile(absolutePath); }
-            catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } // Rethrow unexpected errors
+            let action: ReviewAction = 'MODIFY'; // Default action
+
+            try {
+                // Try to read the current file content
+                current = await this.fs.readFile(absolutePath);
+            } catch (error) {
+                // Only ignore "file not found" errors, rethrow others
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                    console.error(chalk.red(`Error reading current state of ${relativePath}:`), error);
+                    throw error;
+                }
+                // If file not found, current remains null
+            }
 
             let diffStr = '';
             let isMeaningful = false;
 
             if (proposed === 'DELETE_CONFIRMED') {
                 action = 'DELETE';
-                if (current !== null) { // Only create diff if file actually exists
+                if (current !== null) { // Only create diff if file actually exists to delete
                     diffStr = Diff.createPatch(relativePath, current, '', '', '', { context: 5 });
                     isMeaningful = true; // Deletion is always meaningful if file exists
                 } else {
+                    // File doesn't exist, so deletion is a no-op
                     console.log(chalk.gray(`  Skipping review for DELETE ${relativePath} - file already gone.`));
-                    continue; // Skip if file doesn't exist to delete
+                    continue; // Skip adding to review data
                 }
-            } else if (current === null) {
-                action = 'CREATE';
-                diffStr = Diff.createPatch(relativePath, '', proposed, '', '', { context: 5 });
-                // Creation is meaningful if content is not empty (diffStr checks this indirectly)
-                isMeaningful = proposed.trim().length > 0;
-            } else {
-                action = 'MODIFY';
-                if (current !== proposed) { // Only calculate diff if content differs
-                    diffStr = Diff.createPatch(relativePath, current, proposed, '', '', { context: 5 });
-                    // Check if the diff contains actual changes (+ or - lines beyond header)
-                    isMeaningful = diffStr.split('\n').slice(2).some(l => l.startsWith('+') || l.startsWith('-'));
+            } else { // Handle CREATE or MODIFY (proposed is the full content string)
+                const proposedContent = typeof proposed === 'string' ? proposed : ''; // Ensure it's a string
+
+                if (current === null) {
+                    // File does not exist currently, so it's a CREATE action
+                    action = 'CREATE';
+                    diffStr = Diff.createPatch(relativePath, '', proposedContent, '', '', { context: 5 });
+                    // Creation is meaningful if there's actual content being added
+                    isMeaningful = proposedContent.trim().length > 0;
                 } else {
-                    // Content is identical, skip
-                    isMeaningful = false;
+                    // File exists, so it's potentially a MODIFY action
+                    action = 'MODIFY';
+                    if (current !== proposedContent) { // Only generate diff if content actually changed
+                        diffStr = Diff.createPatch(relativePath, current, proposedContent, '', '', { context: 5 });
+                        // Check if the diff contains actual changes (+ or - lines beyond header)
+                        isMeaningful = diffStr.split('\n').slice(2).some(l => l.startsWith('+') || l.startsWith('-'));
+                    } else {
+                        // Content is identical, modification is not meaningful
+                        isMeaningful = false;
+                    }
                 }
             }
 
-            // Add to review only if the action is meaningful
+            // Add to review data only if the action is considered meaningful
             if (isMeaningful) {
                 reviewData.push({ filePath: relativePath, action, diff: diffStr });
             } else {
-                console.log(chalk.gray(`  Skipping review for ${relativePath} - no effective changes.`));
+                console.log(chalk.gray(`  Skipping review for ${relativePath} - no effective changes detected.`));
             }
         }
-        return reviewData;
+        return reviewData; // Return the array of items for review
     }
-
-    // --- presentChangesForReviewTUI (Unchanged) ---
+    // --- presentChangesForReviewTUI (Handles TUI or fallback) ---
     private async presentChangesForReviewTUI(reviewData: ReviewDataItem[]): Promise<boolean> {
+        if (reviewData.length === 0) {
+            console.log(chalk.yellow("No changes to review."));
+            return false; // No changes to apply
+        }
         console.log(chalk.yellow("\nInitializing Review UI..."));
         try {
             const reviewUI = new ReviewUIManager(reviewData);
-            return await reviewUI.run();
+            return await reviewUI.run(); // Returns true if Apply, false if Reject
         } catch (tuiError) {
             console.error(chalk.red("Error displaying Review TUI:"), tuiError);
             console.log(chalk.yellow("Falling back to simple CLI confirmation."));
@@ -434,76 +616,104 @@ export class ConsolidationService {
             const { confirm } = await inquirer.prompt([{
                 type: 'confirm',
                 name: 'confirm',
-                message: `Review UI failed. Apply ${reviewData.length} changes based on console summary?`,
-                default: false
+                message: `Review UI failed. Apply ${reviewData.length} file change(s) based on prior summary?`,
+                default: false // Default to not applying if UI fails
             }]);
             return confirm;
         }
     }
 
     // --- applyConsolidatedChanges (Unchanged) ---
+    // --- applyConsolidatedChanges (Applies changes after review, includes Git check) ---
     private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
         console.log(chalk.blue("Checking Git status..."));
         try {
+            // Check Git status before applying changes
             const { stdout, stderr } = await exec('git status --porcelain', { cwd: this.projectRoot });
-            if (stderr) console.warn(chalk.yellow("Git status stderr:"), stderr);
+            if (stderr) console.warn(chalk.yellow("Git status stderr:"), stderr); // Log stderr non-fatally
             const status = stdout.trim();
             if (status !== '') {
+                // Git working directory is not clean
                 console.error(chalk.red("\nError: Git working directory not clean:"));
                 console.error(chalk.red(status));
-                throw new Error('Git working directory not clean. Consolidation aborted.');
-            } else console.log(chalk.green("Git status clean. Proceeding with file operations..."));
+                throw new Error('Git working directory not clean. Consolidation apply aborted to prevent data loss. Please commit or stash changes.');
+            } else {
+                console.log(chalk.green("Git status clean. Proceeding with file operations..."));
+            }
         } catch (error: any) {
+            // Handle errors during Git check (e.g., Git not installed, not a repo)
             console.error(chalk.red("\nError checking Git status:"), error.message || error);
-            if (error.message?.includes('command not found') || error.code === 'ENOENT') throw new Error('Git command not found. Please ensure Git is installed and in your PATH.');
-            else if (error.stderr?.includes('not a git repository')) throw new Error('Project directory is not a Git repository. Please initialize Git (`git init`).');
+            if (error.message?.includes('command not found') || error.code === 'ENOENT') {
+                throw new Error('Git command not found. Please ensure Git is installed and in your system PATH.');
+            } else if (error.stderr?.includes('not a git repository')) {
+                throw new Error('Project directory is not a Git repository. Please initialize Git (`git init`).');
+            }
+            // Re-throw other Git errors
             throw new Error(`Failed to verify Git status. Error: ${error.message}`);
         }
 
+        // Proceed with applying changes if Git check passed
         let success = 0, failed = 0, skipped = 0;
-        const summary: string[] = [];
+        const summary: string[] = []; // To log results
+
         for (const relativePath in finalStates) {
             const absolutePath = path.resolve(this.projectRoot, relativePath);
             const contentOrAction = finalStates[relativePath];
+
             try {
                 if (contentOrAction === 'DELETE_CONFIRMED') {
                     try {
-                        await this.fs.access(absolutePath); // Check if exists before deleting
+                        // Check if file exists before trying to delete
+                        await this.fs.access(absolutePath);
                         await this.fs.deleteFile(absolutePath);
                         console.log(chalk.red(`  Deleted: ${relativePath}`));
-                        summary.push(`Deleted: ${relativePath}`); success++;
+                        summary.push(`Deleted: ${relativePath}`);
+                        success++;
                     } catch (accessError) {
+                        // If file doesn't exist, it's a skip, not an error
                         if ((accessError as NodeJS.ErrnoException).code === 'ENOENT') {
                             console.warn(chalk.yellow(`  Skipped delete (already gone): ${relativePath}`));
-                            summary.push(`Skipped delete (already gone): ${relativePath}`); skipped++;
-                        } else throw accessError; // Rethrow unexpected errors during access/delete
+                            summary.push(`Skipped delete (already gone): ${relativePath}`);
+                            skipped++;
+                        } else {
+                            // Rethrow unexpected errors during access/delete
+                            throw accessError;
+                        }
                     }
-                } else {
-                    // Ensure directory exists before writing
+                } else { // Handle CREATE or MODIFY
+                    // Ensure directory exists before writing the file
                     await this.fs.ensureDirExists(path.dirname(absolutePath));
+                    // Write the file content (handles both create and modify)
                     await this.fs.writeFile(absolutePath, contentOrAction);
                     console.log(chalk.green(`  Written: ${relativePath}`));
-                    summary.push(`Written: ${relativePath}`); success++;
+                    summary.push(`Written: ${relativePath}`);
+                    success++;
                 }
             } catch (error) {
-                console.error(chalk.red(`  Failed apply for ${relativePath}:`), error);
+                // Catch errors during individual file operations
+                console.error(chalk.red(`  Failed apply operation for ${relativePath}:`), error);
                 summary.push(`Failed ${contentOrAction === 'DELETE_CONFIRMED' ? 'delete' : 'write'}: ${relativePath} - ${(error as Error).message}`);
                 failed++;
             }
         }
 
+        // Log the summary of operations
         console.log(chalk.blue("\n--- Consolidation Apply Summary ---"));
         summary.forEach(l => console.log(l.startsWith("Failed") ? chalk.red(`- ${l}`) : l.startsWith("Skipped") ? chalk.yellow(`- ${l}`) : chalk.green(`- ${l}`)));
         console.log(chalk.blue(`---------------------------------`));
         console.log(chalk.blue(`Applied: ${success}, Skipped/No-op: ${skipped}, Failed: ${failed}.`));
+
+        // Log summary to conversation file
         try {
             const title = failed > 0 ? 'Consolidation Summary (with failures)' : 'Consolidation Summary';
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
-        } catch (logErr) { console.warn(chalk.yellow("Warning: Could not log apply summary."), logErr); }
+        } catch (logErr) {
+            console.warn(chalk.yellow("Warning: Could not log apply summary to conversation file."), logErr);
+        }
 
-        // Throw an error if any operations failed to signal overall failure
+        // Throw an error if any operations failed to signal overall failure of the apply step
         if (failed > 0) {
-            throw new Error(`Consolidation apply step completed with ${failed} failure(s).`);
+            throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors.`);
         }
     }
 }
