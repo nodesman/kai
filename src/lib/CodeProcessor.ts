@@ -9,7 +9,6 @@ import { Config } from "./Config";
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { toSnakeCase, countTokens } from './utils';
-import FullScreenUI from "./iterativeDiff/FullScreenUI"; // Keep for TUI mode
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
 import * as Diff from 'diff'; // Import the diff library
@@ -99,7 +98,7 @@ class CodeProcessor {
             }
 
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
-            const fileFooter = "\n```\n";
+            const fileFooter = "\n\`\`\`\n";
             const fileBlock = fileHeader + content + fileFooter;
             const fileTokens = countTokens(fileBlock);
 
@@ -158,8 +157,7 @@ class CodeProcessor {
                 if (userPrompt.trim().toLowerCase() === this.CONSOLIDATE_COMMAND) {
                     console.log(chalk.yellow(`🚀 Intercepted ${this.CONSOLIDATE_COMMAND}. Starting consolidation process...`));
                     conversation.addMessage('user', userPrompt);
-                    try { await this.aiClient.logConversation(conversationFilePath, { type: 'request', role: 'user', content: userPrompt }); }
-                    catch (logErr) { console.error(chalk.red("Error logging consolidate command:"), logErr); }
+                    try { await this.aiClient.logConversation(conversationFilePath, { type: 'request', role: 'user', content: userPrompt }); } catch (logErr) { console.error(chalk.red("Error logging consolidate command:"), logErr); }
 
                     // Call the consolidation service. Context string built here.
                     console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
@@ -203,8 +201,7 @@ class CodeProcessor {
         } catch (error) { // Catch block unchanged
             console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
             if (conversationFilePath) {
-                try { await this.aiClient.logConversation(conversationFilePath, { type: 'error', error: `CodeProcessor loop error: ${(error as Error).message}` }); }
-                catch (logErr) { console.error(chalk.red("Additionally failed to log CodeProcessor error:"), logErr); }
+                try { await this.aiClient.logConversation(conversationFilePath, { type: 'error', error: `CodeProcessor loop error: ${(error as Error).message}` }); } catch (logErr) { console.error(chalk.red("Additionally failed to log CodeProcessor error:"), logErr); }
             }
         } finally { // Finally block unchanged
             if (editorFilePath) {
@@ -256,21 +253,8 @@ class CodeProcessor {
             try {
                 const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
                 await this.aiClient.logConversation(conversationFilePath, logPayload);
-            } catch (logErr) {
-                console.error(chalk.red("Additionally failed to log consolidation setup error:"), logErr);
-            }
+            } catch (logErr) { console.error(chalk.red("Additionally failed to log consolidation setup error:"), logErr); }
         }
-    }
-
-    // --- TUI Mode (Unchanged) ---
-    async startCodeChangeTUI(): Promise<void> {
-        console.log("Initializing Code Change TUI...");
-        const fullScreenUI = new FullScreenUI(); // Assuming FullScreenUI exists
-        fullScreenUI.show();
-        // Keep TUI running until explicitly closed (e.g., by user action within TUI)
-        // This might require FullScreenUI to handle its own lifecycle or return a promise
-        // that resolves on exit. For now, this keeps the process alive.
-        return new Promise(() => {});
     }
 }
 

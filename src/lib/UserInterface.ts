@@ -140,7 +140,7 @@ class UserInterface {
             sublProcess.on('error', (error) => {
                 if ((error as any).code === 'ENOENT') {
                     console.error(chalk.red("\n❌ Error: 'subl' command not found. Make sure Sublime Text is installed and 'subl' is in your system's PATH."));
-                    reject(new Error("'subl' command not found."));
+                    reject(new Error("'subl' command not found.'"));
                 } else {
                     console.error(chalk.red("\n❌ Error spawning Sublime Text:"), error);
                     reject(error);
@@ -196,8 +196,7 @@ class UserInterface {
                     message: 'Select a mode:',
                     choices: [
                         'Start/Continue Conversation',
-                        'Consolidate Changes...',
-                        'Request Code Changes (TUI - Experimental)',
+                        'Consolidate Changes...',                        
                     ],
                 },
             ]);
@@ -234,8 +233,6 @@ class UserInterface {
                 return { mode, conversationName: conversationName, isNewConversation: isNewConversation, selectedModel: selectedModel };
             } else if (mode === 'Consolidate Changes...') {
                 return { mode, conversationName: conversationName, isNewConversation: false, selectedModel: selectedModel };
-            } else if (mode === 'Request Code Changes (TUI - Experimental)') {
-                return { mode, conversationName: "code_changes_tui", isNewConversation: true, selectedModel: selectedModel };
             } else {
                 console.warn(chalk.yellow(`Unhandled mode selection: ${mode}`));
                 return null;

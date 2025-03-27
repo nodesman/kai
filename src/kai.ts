@@ -6,7 +6,6 @@ import { Config } from './lib/Config';
 import { UserInterface } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
 import { AIClient } from './lib/AIClient'; // Keep for potential error logging
-import FullScreenUI from "./lib/iterativeDiff/FullScreenUI"; // Keep for TUI mode
 import chalk from 'chalk';
 import {toSnakeCase} from "./lib/utils"; // For logging
 
@@ -64,12 +63,6 @@ async function main() {
             }
             // The codeProcessor now has the config with the correct model name
             await codeProcessor.startConversation(conversationName, isNewConversation ?? false); // Pass isNewConversation
-
-        } else if (mode === 'Request Code Changes (TUI - Experimental)') {
-            // The codeProcessor now has the config with the correct model name
-            await codeProcessor.startCodeChangeTUI();
-            console.log(chalk.green("TUI Mode started (Press q or Ctrl+C in TUI to exit)."));
-            // Note: startCodeChangeTUI might need to return or handle its own exit loop
 
         } else if (mode === 'Consolidate Changes...') { // <-- New Consolidation Mode Handler
             if (!conversationName) { // Should always have a name here
