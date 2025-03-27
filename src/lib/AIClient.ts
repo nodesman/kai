@@ -20,7 +20,6 @@ import {
 } from "@google/generative-ai";
 // --- End Import ---
 
-
 // LogEntry Types (Defined and exported directly) - Unchanged
 interface LogEntryBase { type: string; timestamp: string; }
 interface RequestLogEntry extends LogEntryBase { type: 'request'; role: 'user'; content: string; }
@@ -61,8 +60,7 @@ class AIClient {
         conversationFilePath: string,
         contextString?: string,
         useFlashModel: boolean = false
-    ): Promise<void> {
-        // ... (Implementation remains the same as before) ...
+    ): Promise<string> { // Adjusted: This method ONLY returns string for chat
         const messages = conversation.getMessages();
         const lastMessage = messages[messages.length - 1];
 
@@ -87,7 +85,7 @@ class AIClient {
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
         const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
-        console.log(chalk.blue(`Selecting model instance: ${modelLogName}`));
+        console.log(chalk.blue(`Selecting model instance for chat: ${modelLogName}`));
 
         try {
             // Use the getResponseFromAI method of the model instance (designed for chat)
@@ -95,6 +93,7 @@ class AIClient {
 
             await this.logConversation(conversationFilePath, { type: 'response', role: 'assistant', content: responseText });
             conversation.addMessage('assistant', responseText);
+            return responseText; // Return the string
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -117,18 +116,18 @@ class AIClient {
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
         const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
-        console.log(chalk.blue(`Querying AI for intermediate step (using ${modelLogName})...`));
+        console.log(chalk.blue(`Querying AI for simple text (using ${modelLogName})...`));
 
         try {
             // This method in the model should still just return text
-            const responseText = await modelToCall.getResponseFromAI(messages);
+            const responseText = await modelToCall.getResponseFromAI(messages); // Use the chat-focused method
 
-            console.log(chalk.blue(`Received raw response (Length: ${responseText.length})`));
+            console.log(chalk.blue(`Received simple text response (Length: ${responseText.length})`));
             return responseText;
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(chalk.red(`Error getting raw response from AI model (${modelLogName}):`), errorMessage);
+            console.error(chalk.red(`Error getting simple text from AI model (${modelLogName}):`), errorMessage);
             throw error;
         }
     }
@@ -157,7 +156,8 @@ class AIClient {
                 const text = firstCandidate.content.parts[0].text;
                 console.log(chalk.blue(`Received text response (Length: ${text.length})`));
             } else {
-                console.log(chalk.yellow(`Received response with no function call or text.`));
+                const finishReason = firstCandidate?.finishReason;
+                console.log(chalk.yellow(`Received response with no function call or text. Finish Reason: ${finishReason}`));
                 // Consider logging the finishReason if available: response?.candidates?.[0]?.finishReason
             }
 
