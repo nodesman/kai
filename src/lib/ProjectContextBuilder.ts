@@ -55,17 +55,6 @@ export class ProjectContextBuilder {
             const fileBlock = fileHeader + content + fileFooter;
             const fileTokens = countTokens(fileBlock);
 
-            // Check if adding this file exceeds the limit (with a small buffer)
-            // If the context is already *huge*, we might stop sooner.
-            // This simple check adds files until the limit is potentially exceeded by the *next* file.
-            // A more complex strategy could prioritize smaller or more relevant files if the total exceeds the limit.
-            if (estimatedTotalTokens + fileTokens > maxContextTokens) {
-                console.log(chalk.yellow(`  Skipping ${relativePath} (${fileTokens} tokens) - Exceeds context limit (${estimatedTotalTokens.toFixed(0)} / ${maxContextTokens.toFixed(0)}).`));
-                excludedFiles++;
-                continue; // Skip this file and potentially others
-            }
-
-
             contextString += fileBlock;
             estimatedTotalTokens += fileTokens; // Update estimated total
             includedFiles++;

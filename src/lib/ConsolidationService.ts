@@ -1,43 +1,25 @@
-// lib/CodeProcessor.ts
+// src/lib/ConsolidationService.ts
 import path from 'path';
-import { FileSystem } from './FileSystem';
-// Use correct type import from AIClient
-import { AIClient, LogEntryData } from './AIClient';
-import { encode as gpt3Encode } from 'gpt-3-encoder';
-// Import Config class itself
-import { Config } from "./Config";
-import { UserInterface } from './UserInterface';
-import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import { toSnakeCase, countTokens } from './utils';
-import FullScreenUI from "./iterativeDiff/FullScreenUI"; // Keep for TUI mode
 import chalk from 'chalk';
-import { ProjectContextBuilder } from './ProjectContextBuilder';
-import * as Diff from 'diff'; // Import the diff library
-import { ConsolidationService } from './ConsolidationService';
-import inquirer from 'inquirer'; // Import inquirer for the placeholder
-import {
-    Content,
-    Part,
-    Tool,
-    FunctionDeclaration,
-    GenerateContentRequest,
-    GenerateContentResult,
-    FunctionCallingMode,
-    FinishReason,
-    SchemaType, // *** Import SchemaType ***
-    Schema, // Import Schema too!
-    FunctionDeclarationSchemaProperty // Import FunctionDeclarationSchemaProperty as well!
-} from "@google/generative-ai";
-// --- Import for Git Check ---
+import * as Diff from 'diff';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-const exec = promisify(execCb); // Promisify for async/await usage
-// --- End Import ---
-
-// Import the Review UI Manager and its types
+import inquirer from 'inquirer'; // Keep for fallback in review
+import { FileSystem } from './FileSystem';
+import { AIClient, LogEntryData } from './AIClient'; // Correct import
+import { Config } from './Config';
+import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
+import { countTokens } from './utils'; // Assuming countTokens is in utils
+import {
+    Content, Part, Tool, FunctionDeclaration, GenerateContentRequest,
+    GenerateContentResult, FunctionCallingMode, FinishReason, SchemaType, Schema,
+    FunctionDeclarationSchemaProperty
+} from "@google/generative-ai";
 
-// --- Interfaces for Consolidation ---
+const exec = promisify(execCb);
+
+// --- Interfaces (Copied/Moved from CodeProcessor) ---
 interface ConsolidationAnalysis {
     operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
     groups: string[][];
@@ -46,247 +28,83 @@ interface ConsolidationAnalysis {
 interface FinalFileStates {
     [filePath: string]: string | 'DELETE_CONFIRMED';
 }
-// --- End Consolidation Interfaces ---
+// --- End Interfaces ---
 
+// --- Tool Definition (Copied/Moved from CodeProcessor) ---
 const proposeCodeChangesDeclaration: FunctionDeclaration = {
     name: "propose_code_changes",
     description: "Submits a set of proposed changes to project files, including creation, modification, or deletion. Provide the full final content for created or modified files. Use relative paths.",
     parameters: {
-        // @ts-ignore
-        type: "object",
+        // @ts-ignore - Bypassing stricter schema checks for now
+        type: SchemaType.OBJECT,
         properties: {
             changes: {
-                // @ts-ignore
-                type: "array",
+                type: SchemaType.ARRAY,
                 description: "A list of proposed file changes.",
                 items: {
-                    // @ts-ignore
-                    type: "object",
-                    required: ["filePath", "action"], // filePath and action are mandatory
+                    type: SchemaType.OBJECT,
+                    required: ["filePath", "action"],
                     properties: {
                         filePath: {
                             description: "The relative path to the file from the project root (e.g., 'src/components/Button.js'). Use forward slashes '/' as separators.",
-                            // @ts-ignore
-                            type: "string"
+                            type: SchemaType.STRING
                         },
                         action: {
+                            type: SchemaType.STRING,
                             enum: ["CREATE", "MODIFY", "DELETE"],
                             description: "The operation to perform on the file.",
-                            // @ts-ignore
-                            type: "string"
                         },
                         content: {
                             description: "The *complete* final content of the file for CREATE or MODIFY actions. Omit for DELETE.",
-                            // @ts-ignore
-                            type: "string"
+                            type: SchemaType.STRING,
                         },
                     },
                 },
             },
         },
-        required: ["changes"], // The 'changes' array is mandatory
+        required: ["changes"],
     },
 };
-// The Tool object to pass to the API
 const proposeCodeChangesTool: Tool = {
     functionDeclarations: [proposeCodeChangesDeclaration],
 };
-class CodeProcessor {
-    config: Config; // Use the Config class instance type
-    fs: FileSystem;
-    aiClient: AIClient;
-    ui: UserInterface;
-    projectRoot: string;
-    private readonly CONSOLIDATE_COMMAND = '/consolidate';
-    private contextBuilder: ProjectContextBuilder;
-    private consolidationService: ConsolidationService;
+// --- End Tool Definition ---
 
-    constructor(config: Config) { // Accept Config class instance
+export class ConsolidationService {
+    private config: Config;
+    private fs: FileSystem;
+    private aiClient: AIClient;
+    private projectRoot: string;
+    // No direct access to contextBuilder needed if context is passed in
+    // No direct access to ui needed
+
+    constructor(config: Config, fileSystem: FileSystem, aiClient: AIClient, projectRoot: string) {
         this.config = config;
-        this.fs = new FileSystem();
-        // AIClient constructor now handles creating both model instances
-        this.aiClient = new AIClient(config);
-        this.ui = new UserInterface(config);
-        this.projectRoot = process.cwd();
-        this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config); // Add this line
-        this.consolidationService = new ConsolidationService(this.config, this.fs, this.aiClient, this.projectRoot);
+        this.fs = fileSystem;
+        this.aiClient = aiClient;
+        this.projectRoot = projectRoot;
     }
 
-
-
-    // --- buildContextString (Improved logging and token handling) ---
-    async buildContextString(): Promise<{ context: string, tokenCount: number }> {
-        console.log(chalk.blue('\nBuilding project context...'));
-        const filePaths = await this.fs.getProjectFiles(this.projectRoot);
-        const fileContents = await this.fs.readFileContents(filePaths);
-
-        let contextString = "Code Base Context:\n";
-        let currentTokenCount = countTokens(contextString);
-        // Use max_prompt_tokens from config, apply safety margin
-        const maxContextTokens = (this.config.gemini.max_prompt_tokens || 32000) * 0.6; // 60% safety margin
-        let includedFiles = 0;
-        let excludedFiles = 0;
-        const sortedFilePaths = Object.keys(fileContents).sort();
-        let estimatedTotalTokens = currentTokenCount; // Use a separate variable for estimated total
-
-        for (const filePath of sortedFilePaths) {
-            const relativePath = path.relative(this.projectRoot, filePath);
-            let content = fileContents[filePath];
-            if (!content) {
-                console.log(chalk.gray(`  Skipping empty file: ${relativePath}`));
-                excludedFiles++;
-                continue;
-            }
-            content = this.optimizeWhitespace(content);
-            if (!content) {
-                console.log(chalk.gray(`  Skipping file with only whitespace: ${relativePath}`));
-                excludedFiles++;
-                continue;
-            }
-
-            const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
-            const fileFooter = "\n```\n";
-            const fileBlock = fileHeader + content + fileFooter;
-            const fileTokens = countTokens(fileBlock);
-
-            contextString += fileBlock;
-            estimatedTotalTokens += fileTokens; // Update estimated total
-            includedFiles++;
-            console.log(chalk.dim(`  Included ${relativePath} (${fileTokens} tokens). Current total: ${estimatedTotalTokens.toFixed(0)}`));
-        }
-        console.log(chalk.blue(`Context built with ${includedFiles} files (${estimatedTotalTokens.toFixed(0)} tokens estimated). ${excludedFiles} files excluded/skipped. Max context set to ${maxContextTokens.toFixed(0)} tokens.`));
-        // Recalculate final token count just to be sure, though estimation should be close
-        const finalTokenCount = countTokens(contextString);
-        console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
-
-        return { context: contextString, tokenCount: finalTokenCount };
-    }
-
-
-    optimizeWhitespace(code: string): string {
-        code = code.replace(/[ \t]+$/gm, '');
-        code = code.replace(/\r\n/g, '\n');
-        code = code.replace(/\n{3,}/g, '\n\n');
-        code = code.trim();
-        return code;
-    }
-    // --- End context building ---
-
-    // --- startConversation (Unchanged) ---
-    async startConversation(conversationName: string, isNew: boolean): Promise<void> {
-        const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-        const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-        let editorFilePath: string | null = null;
-        let conversation: Conversation;
-
-        let isFirstRequestInLoop = true; // Track first request
-
-        try {
-            if (!isNew) {
-                const logData = await this.fs.readJsonlFile(conversationFilePath) as JsonlLogEntry[];
-                conversation = Conversation.fromJsonlData(logData);
-                console.log(`Loaded ${conversation.getMessages().length} messages for ${conversationName}.`);
-            } else {
-                conversation = new Conversation();
-                console.log(`Starting new conversation: ${conversationName}`);
-            }
-
-            while (true) {
-                const interactionResult = await this.ui.getPromptViaSublimeLoop(conversationName, conversation.getMessages());
-                editorFilePath = interactionResult.editorFilePath;
-                if (interactionResult.newPrompt === null) break;
-                const userPrompt = interactionResult.newPrompt;
-
-                // Handle /consolidate command trigger (unchanged)
-                if (userPrompt.trim().toLowerCase() === this.CONSOLIDATE_COMMAND) {
-                    console.log(chalk.yellow(`🚀 Intercepted ${this.CONSOLIDATE_COMMAND}. Starting consolidation process...`));
-                    conversation.addMessage('user', userPrompt);
-                    try { await this.aiClient.logConversation(conversationFilePath, { type: 'request', role: 'user', content: userPrompt }); }
-                    catch (logErr) { console.error(chalk.red("Error logging consolidate command:"), logErr); }
-
-                    // Call the consolidation service.  Context string can be passed as argument or can rebuild inside consolidationService
-                    const { context: currentContextString } = await this.contextBuilder.build();
-                    await this.consolidationService.process(conversationName, conversation, currentContextString, conversationFilePath);
-
-                    conversation.addMessage('system', `[Consolidation process triggered for '${conversationName}' has finished. See logs.]`);
-                    continue; // Skip normal AI call
-                }
-
-                // Add user message (unchanged)
-                conversation.addMessage('user', userPrompt);
-
-                try {
-                    const { context: currentContextString } = await this.contextBuilder.build();
-
-                    // --- *** MODIFIED: Determine FLAG for Flash model *** ---
-                    // Use Flash model if NOT the first request in the loop
-                    const useFlash = !isFirstRequestInLoop;
-                    // Log which model logic is triggering (optional)
-                    if (useFlash) {
-                        console.log(chalk.cyan(`Using subsequent model (Flash) for this request.`));
-                    } else {
-                        console.log(chalk.cyan(`Using initial model (Pro) for first request.`));
-                    }
-                    // --- End Model Determination ---
-
-                    // --- *** MODIFIED: Pass useFlash FLAG to AIClient *** ---
-                    await this.aiClient.getResponseFromAI(
-                        conversation,
-                        conversationFilePath,
-                        currentContextString,
-                        useFlash // Pass the boolean flag
-                    );
-                    // --- End Modification ---
-
-                    // Mark subsequent requests after the first *successful* call
-                    isFirstRequestInLoop = false;
-
-                } catch (aiError) {
-                    console.error(chalk.red("Error during AI interaction:"), aiError);
-                    conversation.addMessage('system', `[Error occurred during AI request: ${(aiError as Error).message}. Please check logs. You can try again or exit.]`);
-                }
-            }
-            console.log(`\nExiting conversation "${conversationName}".`);
-        } catch (error) { // Catch block unchanged
-            console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
-            if (conversationFilePath) {
-                try { await this.aiClient.logConversation(conversationFilePath, { type: 'error', error: `CodeProcessor loop error: ${(error as Error).message}` }); }
-                catch (logErr) { console.error(chalk.red("Additionally failed to log CodeProcessor error:"), logErr); }
-            }
-        } finally { // Finally block unchanged
-            if (editorFilePath) {
-                try {
-                    await this.fs.access(editorFilePath);
-                    await this.fs.deleteFile(editorFilePath);
-                    console.log(`Cleaned up editor file: ${editorFilePath}`);
-                } catch (cleanupError) {
-                    if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
-                        console.warn(chalk.yellow(`\nWarning: Failed to clean up editor file ${editorFilePath}:`), cleanupError);
-                    }
-                }
-            }
-        }
-    }
-    // --- Consolidation Orchestration Method (Unchanged structure) ---
-    async processConsolidationRequest(conversationName: string): Promise<void> {
-        const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-        const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-        let conversation: Conversation;
+    /**
+     * Orchestrates the entire consolidation process.
+     * @param conversationName The name of the conversation.
+     * @param conversation The Conversation object.
+     * @param currentContextString The current codebase context string.
+     * @param conversationFilePath The absolute path to the conversation log file.
+     */
+    async process(
+        conversationName: string,
+        conversation: Conversation,
+        currentContextString: string, // Receive context as argument
+        conversationFilePath: string
+    ): Promise<void> {
         const startMsg = `System: Starting AI-driven code consolidation for '${conversationName}'...`;
         console.log(chalk.blue(startMsg.replace('System: ', '')));
+        // Use the passed aiClient instance for logging
+        await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
 
         try {
-            // Load conversation and log start (unchanged)
-            const logData = await this.fs.readJsonlFile(conversationFilePath) as JsonlLogEntry[];
-            conversation = Conversation.fromJsonlData(logData);
-            if (conversation.getMessages().length === 0) { console.warn(chalk.yellow("Conversation is empty, cannot consolidate.")); return; }
-            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
-
-            console.log(chalk.cyan("  Fetching fresh codebase context..."));
-            const { context: currentContextString } = await this.buildContextString();
-
             // --- Determine model for consolidation steps ---
-            // Simple strategy: Use Pro for analysis (Step A), Flash for generation (Step B)
             const useFlashForAnalysis = false; // Use Pro for analysis
             const useFlashForGeneration = true; // Use Flash for generation
             const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
@@ -295,7 +113,7 @@ class CodeProcessor {
             // ---
 
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
-            const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, useFlashForAnalysis);
+            const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, conversationFilePath, useFlashForAnalysis, analysisModelName);
             if (!analysisResult || analysisResult.operations.length === 0) {
                 console.log(chalk.yellow("  Analysis complete: No file operations identified. Consolidation finished."));
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found no intended operations.` });
@@ -305,7 +123,7 @@ class CodeProcessor {
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops in ${analysisResult.groups.length} groups...` });
 
             console.log(chalk.cyan("\n  Step B: Generating final file states..."));
-            const finalStates = await this.generateFinalFileContents(conversation, currentContextString, analysisResult, useFlashForGeneration);
+            const finalStates = await this.generateFinalFileContents(conversation, currentContextString, analysisResult, conversationFilePath, useFlashForGeneration, generationModelName);
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
@@ -317,45 +135,46 @@ class CodeProcessor {
                 return;
             }
             console.log(chalk.green(`  Review preparation complete: ${reviewData.length} files with changes ready for review.`));
-            const reviewUI = new ReviewUIManager(reviewData);
-            const applyChanges = await reviewUI.run();
+            const applyChanges = await this.presentChangesForReviewTUI(reviewData); // Use the moved method
 
-            if (applyChanges) { // Step D unchanged
+            if (applyChanges) {
                 console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
                 await this.applyConsolidatedChanges(finalStates, conversationFilePath);
-            } else { // Rejection logging unchanged
+            } else {
                 const msg = `System: Consolidation aborted by user. No changes applied.`;
                 console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: msg });
             }
-        } catch (error) { // Error handling unchanged (uses 'error' property correctly)
+        } catch (error) {
             console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
             const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
             try {
-                // Ensure the payload matches LogEntryData
                 const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
                 await this.aiClient.logConversation(conversationFilePath, logPayload);
             } catch (logErr) {
                 console.error(chalk.red("Additionally failed to log consolidation error:"), logErr);
             }
+            // Re-throw or handle as appropriate for the caller (CodeProcessor/main)
+            throw error;
         }
     }
 
-    // --- Step A Implementation (Unchanged) ---
+    // --- Moved Private Helper Methods ---
+
     private async analyzeConversationForChanges(
         conversation: Conversation,
         codeContext: string,
-        useFlashModel: boolean = false // Use flag instead of name
+        conversationFilePath: string, // ADDED: Logging
+        useFlashModel: boolean,
+        modelName: string // ADDED: Logging
     ): Promise<ConsolidationAnalysis | null> {
-        const analysisPrompt = `CONTEXT:\nYou are an expert AI analyzing a software development conversation...\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map(m => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final intended operations (CREATE, MODIFY, DELETE) for each relevant file path (relative to the project root). Resolve contradictions based on conversational flow (later messages override earlier ones unless stated otherwise).\n\nAlso, group the files needing CREATE or MODIFY into logical sets for generating their final content. Aim to minimize subsequent requests. Files marked for DELETE do not need grouping.\n\nOUTPUT FORMAT:\nRespond *only* with a single JSON object matching this structure:\n\`\`\`json\n{\n  "operations": [\n    { "filePath": "path/relative/to/root.ext", "action": "CREATE" | "MODIFY" | "DELETE" }\n  ],\n  "groups": [\n    ["path/to/file1.ext", "path/to/file2.ext"],\n    ["path/to/another_file.ext"]\n  ]\n}\n\`\`\`\nIf no operations are intended, return \`{ "operations": [], "groups": [] }\`. Ensure filePaths are relative.`;
+        const analysisPrompt = `CONTEXT:\nYou are an expert AI analyzing a software development conversation...\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final intended operations (CREATE, MODIFY, DELETE) for each relevant file path (relative to the project root). Resolve contradictions based on conversational flow (later messages override earlier ones unless stated otherwise).\n\nAlso, group the files needing CREATE or MODIFY into logical sets for generating their final content. Aim to minimize subsequent requests. Files marked for DELETE do not need grouping.\n\nOUTPUT FORMAT:\nRespond *only* with a single JSON object matching this structure:\n\`\`\`json\n{\n  "operations": [\n    { "filePath": "path/relative/to/root.ext", "action": "CREATE" | "MODIFY" | "DELETE" }\n  ],\n  "groups": [\n    ["path/to/file1.ext", "path/to/file2.ext"],\n    ["path/to/another_file.ext"]\n  ]\n}\n\`\`\`\nIf no operations are intended, return \`{ "operations": [], "groups": [] }\`. Ensure filePaths are relative.`;
         try {
-            // --- *** MODIFIED: Pass useFlashModel flag to AIClient *** ---
             const responseText = await this.aiClient.getResponseTextFromAI(
                 [{ role: 'user', content: analysisPrompt }],
-                useFlashModel // Pass the boolean flag
+                useFlashModel
             );
-            // --- End Modification ---
-            // Parsing logic unchanged
+            // Parsing logic
             const jsonString = responseText.trim().replace(/^```json\s*/, '').replace(/```$/, '');
             const jsonResponse = JSON.parse(jsonString);
             if (jsonResponse && Array.isArray(jsonResponse.operations) && Array.isArray(jsonResponse.groups)) {
@@ -363,22 +182,28 @@ class CodeProcessor {
                 jsonResponse.groups.forEach((group: string[]) => { for (let i = 0; i < group.length; i++) group[i] = path.normalize(group[i]).replace(/^[\\\/]+|[\\\/]+$/g, ''); });
                 return jsonResponse as ConsolidationAnalysis;
             } else { throw new Error("Invalid JSON structure from analysis AI."); }
-        } catch (e) { throw new Error(`AI analysis step failed. Error: ${(e as Error).message}`); }
+        } catch (e) {
+            const errorMsg = `AI analysis step failed (using ${modelName}). Error: ${(e as Error).message}`;
+            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+            throw new Error(errorMsg); // Re-throw wrapped error
+        }
+
     }
 
-    // --- Step B Implementation (MODIFIED: Accept useFlashModel flag) ---
     private async generateFinalFileContents(
         conversation: Conversation,
         codeContext: string,
         analysisResult: ConsolidationAnalysis,
-        useFlashModel: boolean = false
+        conversationFilePath: string, // ADDED: Logging
+        useFlashModel: boolean,
+        modelName: string // ADDED: Logging
     ): Promise<FinalFileStates> {
         const allFinalStates: FinalFileStates = {};
 
         // --- Prepare the Prompt ---
         // Combine all files needing generation into a single list for the prompt.
         const filesToGenerate = analysisResult.groups.flat();
-        if (filesToGenerate.length === 0 && analysisResult.operations.some(op => op.action === 'DELETE')) {
+        if (filesToGenerate.length === 0 && analysisResult.operations.some((op: { action: string; }) => op.action === 'DELETE')) {
             // Only DELETE operations, no generation needed.
         } else if (filesToGenerate.length === 0) {
             console.log(chalk.yellow("    No files identified for CREATE or MODIFY in analysis. Skipping generation call."));
@@ -387,7 +212,7 @@ class CodeProcessor {
             console.log(chalk.cyan(`    Requesting generation for files: [${filesToGenerate.join(', ')}] via function call...`));
 
             // Adjust prompt to instruct the use of the function
-            const generationPrompt = `CONTEXT:\nYou are an expert AI assisting with code generation based on a conversation history and current codebase.\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map(m => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final state (content or deletion) for all relevant files.\n\nCall the 'propose_code_changes' function with an array of changes. For each file, provide:\n1.  'filePath': The relative path.\n2.  'action': Either 'CREATE', 'MODIFY', or 'DELETE'.\n3.  'content': The *complete, final file content* ONLY if the action is 'CREATE' or 'MODIFY'. Omit 'content' if the action is 'DELETE'.\n\nEnsure you include changes for ALL files that were modified, created, or deleted based on the conversation's final intent. Focus on these files specifically:\n${filesToGenerate.map(f => `- ${f}`).join('\n')}\n(Also include any other files whose final state is dictated by the conversation, even if not in the list above).`;
+            const generationPrompt = `CONTEXT:\nYou are an expert AI assisting with code generation based on a conversation history and current codebase.\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final state (content or deletion) for all relevant files.\n\nCall the 'propose_code_changes' function with an array of changes. For each file, provide:\n1.  'filePath': The relative path.\n2.  'action': Either 'CREATE', 'MODIFY', or 'DELETE'.\n3.  'content': The *complete, final file content* ONLY if the action is 'CREATE' or 'MODIFY'. Omit 'content' if the action is 'DELETE'.\n\nEnsure you include changes for ALL files that were modified, created, or deleted based on the conversation's final intent. Focus on these files specifically:\n${filesToGenerate.map((f: any) => `- ${f}`).join('\n')}\n(Also include any other files whose final state is dictated by the conversation, even if not in the list above).`;
 
             // --- Construct the API Request ---
             const historyForGeneration: Content[] = [
@@ -413,8 +238,9 @@ class CodeProcessor {
             try {
                 result = await this.aiClient.generateContent(request, useFlashModel);
             } catch (error) {
-                // Handle API call errors (network, rate limits, etc., thrown by AIClient)
-                throw new Error(`AI generation API call failed. Error: ${(error as Error).message}`);
+                const errorMsg = `AI generation API call failed (using ${modelName}). Error: ${(error as Error).message}`;
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+                throw new Error(errorMsg); // Re-throw wrapped error
             }
 
             // --- Process the Response ---
@@ -427,7 +253,9 @@ class CodeProcessor {
                 const args = functionCall.args as { changes: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE'; content?: string }> };
 
                 if (!args || !Array.isArray(args.changes)) {
-                    throw new Error(`Function call '${functionCall.name}' returned invalid or missing 'changes' argument.`);
+                    const errMsg = `Function call '${functionCall.name}' returned invalid or missing 'changes' argument.`;
+                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errMsg });
+                    throw new Error(errMsg);
                 }
 
                 // --- Populate finalStates from Function Call Arguments ---
@@ -484,7 +312,7 @@ class CodeProcessor {
         // --- Add DELETE confirmations from Analysis (Fallback/Sanity Check) ---
         // This ensures deletes identified in Step A are still marked, even if the LLM
         // forgets to include them in the function call (though ideally it shouldn't).
-        const deleteOps = analysisResult.operations.filter(op => op.action === 'DELETE');
+        const deleteOps = analysisResult.operations.filter((op: { action: string; }) => op.action === 'DELETE');
         for (const op of deleteOps) {
             const normalizedPath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
             if (!(normalizedPath in allFinalStates)) {
@@ -497,8 +325,10 @@ class CodeProcessor {
         }
         return allFinalStates;
     }
-    // --- Step C - Prepare Data (Unchanged) ---
+
     private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
+        // ... implementation moved from CodeProcessor ...
+        // Replace `this.fs` calls with `this.fs`
         const reviewData: ReviewDataItem[] = [];
         for (const relativePath in finalStates) {
             const proposed = finalStates[relativePath];
@@ -526,8 +356,8 @@ class CodeProcessor {
         return reviewData;
     }
 
-    // --- Step C - TUI/Review (Unchanged) ---
     private async presentChangesForReviewTUI(reviewData: ReviewDataItem[]): Promise<boolean> {
+        // ... implementation moved from CodeProcessor ...
         console.log(chalk.yellow("\nInitializing Review UI..."));
         try {
             const reviewUI = new ReviewUIManager(reviewData);
@@ -540,8 +370,9 @@ class CodeProcessor {
         }
     }
 
-    // --- Step D Implementation (Apply Changes with Git Check - Unchanged) ---
     private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
+        // ... implementation moved from CodeProcessor ...
+        // Replace `this.fs` and `this.aiClient` calls with `this.fs` and `this.aiClient`
         console.log(chalk.blue("Checking Git status..."));
         try {
             const { stdout, stderr } = await exec('git status --porcelain', { cwd: this.projectRoot });
@@ -601,14 +432,4 @@ class CodeProcessor {
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
         } catch (logErr) { console.warn(chalk.yellow("Warning: Could not log apply summary."), logErr); }
     }
-
-    // --- TUI Mode (Unchanged) ---
-    async startCodeChangeTUI(): Promise<void> {
-        console.log("Initializing Code Change TUI...");
-        const fullScreenUI = new FullScreenUI(); // Assuming FullScreenUI exists
-        fullScreenUI.show();
-        return new Promise(() => {});
-    }
 }
-
-export { CodeProcessor };
