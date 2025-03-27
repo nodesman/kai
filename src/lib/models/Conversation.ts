@@ -1,5 +1,5 @@
 // File: src/lib/models/Conversation.ts
-
+import { v4 as uuidv4 } from 'uuid';
 export interface Message {
     role: 'user' | 'assistant' | 'system';
     content: string;
@@ -79,7 +79,7 @@ export class Conversation {
                 console.warn("Could not parse log entry into a conversation message:", entry);
             }
         }
-        return new Conversation(messages);
+        return new Conversation(undefined, messages);
     }
 }
 
