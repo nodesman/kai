@@ -160,22 +160,37 @@ class ReviewUIManager {
     }
 
     private _setupKeybindings(): void {
-        // Apply changes
-        this.screen.key(['a'], () => this._handleApply());
+        // --- Bind Apply/Reject keys to the fileListWidget ---
+        this.fileListWidget.key(['a'], () => this._handleApply());
+        this.fileListWidget.key(['r', 'q', 'escape'], () => this._handleReject()); // Removed 'C-c' for now, let Blessed handle it for exit
 
-        // Reject changes
-        this.screen.key(['r', 'q', 'escape', 'C-c'], () => this._handleReject());
+        // Optional: Keep screen-level binding for Ctrl+C as a general exit mechanism
+        // If you keep this, ensure it also calls _handleReject or similar cleanup.
+        // If removed, Blessed's default Ctrl+C handling should kill the process.
+        this.screen.key(['C-c'], () => {
+            console.log(chalk.yellow("Ctrl+C detected, rejecting changes..."));
+            this._handleReject();
+            // Optional: Force exit if _handleReject doesn't kill the process quickly enough
+            // setTimeout(() => process.exit(1), 50);
+        });
 
-        // Allow focusing between panes (optional)
-        // this.screen.key(['tab'], () => {
-        //     if (this.screen.focused === this.fileListWidget) {
-        //         this.diffBoxWidget.focus();
-        //     } else {
-        //         this.fileListWidget.focus();
-        //     }
-        // });
+
+        // Allow focusing between panes (optional, but can be useful)
+        this.screen.key(['tab'], () => {
+            if (this.screen.focused === this.fileListWidget) {
+                this.diffBoxWidget.focus();
+            } else {
+                this.fileListWidget.focus();
+            }
+        });
+
+        // Explicitly handle scrolling within the diffBox when it's focused
+        this.diffBoxWidget.key(['up', 'k', 'pageup'], () => this.diffBoxWidget.scroll(-1));
+        this.diffBoxWidget.key(['down', 'j', 'pagedown'], () => this.diffBoxWidget.scroll(1));
+        this.diffBoxWidget.key(['home'], () => this.diffBoxWidget.setScrollPerc(0));
+        this.diffBoxWidget.key(['end'], () => this.diffBoxWidget.setScrollPerc(100));
+
     }
-
     private _updateDiffView(index: number): void {
         if (index < 0 || index >= this.reviewData.length) {
             this.diffBoxWidget.setContent('{red-fg}Error: Invalid selection index.{/red-fg}');
