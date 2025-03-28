@@ -1,112 +1,38 @@
 // src/lib/ConsolidationService.ts
 import path from 'path';
 import chalk from 'chalk';
-import * as Diff from 'diff';
+import * as Diff from 'diff'; // Still needed for prepareReviewData
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
-import inquirer from 'inquirer'; // Keep for fallback in review
+import inquirer from 'inquirer'; // Keep for fallback in review TUI failure
 import { FileSystem } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-import { countTokens } from './utils'; // Assuming countTokens is in utils
-import {
-    // --- Add necessary imports from @google/generative-ai ---
-    Content,
-    Part,
-    Tool,
-    FunctionDeclaration,
-    GenerateContentRequest,
-    GenerateContentResult,
-    FunctionCallingMode,
-    FinishReason,
-    Schema, // Keep Schema for potential future typing needs
-    SchemaType, // Import SchemaType
-    // FunctionDeclarationSchemaProperty is implicitly handled via the structure
-    // --- End imports ---
-} from "@google/generative-ai";
+// Removed imports related to Function Calling tools as they are no longer used here
+// e.g., Tool, FunctionDeclaration, GenerateContentRequest, FunctionCallingMode etc.
 
 const exec = promisify(execCb);
 
-// --- Interfaces ---
+// --- Interfaces (Unchanged) ---
 interface ConsolidationAnalysis {
     operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
+    // Groups are less critical now but kept in analysis output for potential future use
     groups: string[][];
 }
 
 interface FinalFileStates {
+    // Key is the relative file path
+    // Value is the FULL final content string OR 'DELETE_CONFIRMED'
     [filePath: string]: string | 'DELETE_CONFIRMED';
 }
 // --- End Interfaces ---
 
-// --- Tool Definition ---
-const proposeCodeChangesDeclaration: FunctionDeclaration = {
-    name: "propose_code_changes",
-    description: "Submits a set of proposed changes to project files, including creation, modification, or deletion. Provide the full final content for created or modified files. Use relative paths.",
-    parameters: {
-        // Using SchemaType enum for better type safety
-        type: SchemaType.OBJECT,
-        properties: {
-            changes: {
-                type: SchemaType.ARRAY,
-                description: "A list of proposed file changes.",
-                items: {
-                    type: SchemaType.OBJECT,
-                    required: ["filePath", "action"],
-                    properties: {
-                        filePath: {
-                            description: "The relative path to the file from the project root (e.g., 'src/components/Button.js'). Use forward slashes '/' as separators.",
-                            type: SchemaType.STRING
-                        },
-                        action: {
-                            type: SchemaType.STRING,
-                            enum: ["CREATE", "MODIFY", "DELETE"],
-                            description: "The operation to perform on the file.",
-                        },
-                        content: {
-                            description: "The *complete* final content of the file for CREATE or MODIFY actions. Omit for DELETE.",
-                            type: SchemaType.STRING,
-                        },
-                    },
-                },
-            },
-        },
-        required: ["changes"],
-    },
-};
-// --- End Tool Definition ---
-
-const provideSingleFileContentDeclaration: FunctionDeclaration = {
-    name: "provide_single_file_content",
-    description: "Provides the complete, final content for a single specified file.",
-    parameters: {
-        type: SchemaType.OBJECT,
-        properties: {
-            filePath: {
-                type: SchemaType.STRING,
-                description: "The relative path of the file this content belongs to (e.g., 'src/utils.ts').",
-            },
-            content: {
-                type: SchemaType.STRING,
-                description: "The complete, final content for the specified file.",
-            },
-            // Optional: Add action if needed, but might complicate the instruction
-            // action: {
-            //     type: SchemaType.STRING,
-            //     enum: ["CREATE", "MODIFY"],
-            //     description: "Indicates if the file is being created or modified."
-            // }
-        },
-        required: ["filePath", "content"], // filePath and content are essential
-    },
-};
-const proposeCodeChangesTool: Tool = {
-    functionDeclarations: [proposeCodeChangesDeclaration],
-};
-const provideSingleFileContentTool: Tool = {
-    functionDeclarations: [provideSingleFileContentDeclaration],
-};
+// --- REMOVED Tool Definitions ---
+// proposeCodeChangesDeclaration, proposeCodeChangesTool
+// provideSingleFileContentDeclaration, provideSingleFileContentTool
+// --- END REMOVED Tool Definitions ---
 
 export class ConsolidationService {
     private config: Config;
@@ -134,10 +60,10 @@ export class ConsolidationService {
         try {
             // --- Determine model for consolidation steps ---
             const useFlashForAnalysis = false; // Typically use Pro for accurate analysis
-            const useFlashForGeneration = false; // Use Pro for generation with function calling by default, as Flash might be less reliable with tools
+            const useFlashForIndividualGeneration = false; // Default to Pro for generating full file content
             const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
-            const generationModelName = useFlashForGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
-            console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for generation)`));
+            const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
+            console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
             // ---
 
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
@@ -147,20 +73,21 @@ export class ConsolidationService {
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found no intended operations.` });
                 return;
             }
-            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations across ${analysisResult.groups.length} generation group(s).`));
-            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops in ${analysisResult.groups.length} groups...` });
+            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`)); // Simplified log
+            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` }); // Simplified log
 
-            console.log(chalk.cyan("\n  Step B: Generating final file states using function calling..."));
-            // **** CALL THE UPDATED METHOD ****
-            const finalStates = await this.generateFinalFileContents(
+            // *** UPDATED Step B: Call the NEW generation method ***
+            console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
+            const finalStates = await this.generateIndividualFileContents(
                 conversation,
-                currentContextString,
+                currentContextString, // Pass context for individual prompts
                 analysisResult,
                 conversationFilePath,
-                useFlashForGeneration, // Pass the flag
+                useFlashForIndividualGeneration, // Pass the flag
                 generationModelName // Pass the model name for logging
             );
-            // **** END CALL ****
+            // *** END UPDATED Step B ***
+
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
@@ -195,140 +122,9 @@ export class ConsolidationService {
         }
     }
 
-    private async refineFileContentsWithFlash(
-        conversation: Conversation,
-        codeContext: string,
-        initialFinalStates: FinalFileStates, // Input from Step B
-        conversationFilePath: string,
-        modelName: string // Explicitly Flash model name
-    ): Promise<FinalFileStates> {
-        // Create a deep copy to modify; start with Step B's results
-        const refinedStates: FinalFileStates = JSON.parse(JSON.stringify(initialFinalStates));
-        const successfullyRefinedPaths = new Set<string>(); // Track which files Flash successfully provided content for
+    // --- REMOVED refineFileContentsWithFlash method ---
 
-        // 1. Identify files needing content generation (not DELETE) from Step B's output
-        const filesToRefine = Object.entries(initialFinalStates)
-            .filter(([_, state]) => state !== 'DELETE_CONFIRMED')
-            .map(([filePath, _]) => filePath); // Get just the paths
-
-        if (filesToRefine.length === 0) {
-            console.log(chalk.yellow("    (Step B.5) No files require content refinement. Skipping Flash call."));
-            return refinedStates; // Return the Step B states unchanged
-        }
-
-        console.log(chalk.cyan(`    (Step B.5) Requesting refinement for ${filesToRefine.length} files using ${modelName}: [${filesToRefine.join(', ')}]...`));
-
-        // 2. Construct Prompt for Flash, instructing multiple function calls
-        const refinementPrompt = `CONTEXT:\nYou are an expert AI assisting with code generation, refining content previously generated.\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY (for context):\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nGenerate the complete, final content for EACH of the following files. You MUST call the '${provideSingleFileContentDeclaration.name}' function **multiple times**, once for each file listed below. Provide the full content in the 'content' parameter for each call.\n\nFILES TO GENERATE CONTENT FOR:\n${filesToRefine.map(f => `- ${f}`).join('\n')}\n\nFor every file in the list above, invoke the '${provideSingleFileContentDeclaration.name}' function with its 'filePath' and its complete 'content'. Do NOT return an array; make separate function calls for each file. Ensure the 'filePath' in each function call exactly matches one from the list above.`;
-
-        // 3. Prepare API Request
-        const historyForRefinement: Content[] = conversation.getMessages()
-            .filter(m => m.role !== 'system')
-            .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
-        if (historyForRefinement.length > 0 && historyForRefinement[historyForRefinement.length - 1].role === 'user') {
-            historyForRefinement.pop();
-        }
-
-        const request: GenerateContentRequest = {
-            contents: [
-                ...historyForRefinement,
-                { role: "user", parts: [{ text: refinementPrompt }] }
-            ],
-            tools: [provideSingleFileContentTool], // Use the NEW tool for single file content
-            toolConfig: {
-                // *** This is where it likely cut off ***
-                // Use ANY mode. We EXPECT function calls, but need to handle if the model just returns text.
-                functionCallingConfig: { mode: FunctionCallingMode.ANY }
-            }
-        };
-
-        // 4. Make API Call (useFlashModel = true)
-        let result: GenerateContentResult | null = null;
-        try {
-            // Force Flash model for refinement step
-            result = await this.aiClient.generateContent(request, true);
-        } catch (error) {
-            // If the refinement step fails entirely, log it and return the *original* states from Step B
-            const errorMsg = `AI refinement (Step B.5) API call failed (using ${modelName}). Error: ${(error as Error).message}. Falling back to initial generation results.`;
-            console.error(chalk.red(errorMsg));
-            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            return initialFinalStates; // Fallback to Step B results
-        }
-
-        // 5. Process Response - Iterate through multiple function calls
-        const response = result?.response;
-        const candidate = response?.candidates?.[0];
-        // Get ALL parts that are function calls
-        const functionCallParts = candidate?.content?.parts?.filter(part => !!part.functionCall) ?? [];
-
-        if (functionCallParts.length > 0) {
-            console.log(chalk.green(`    (Step B.5) Received ${functionCallParts.length} function call(s) for refinement.`));
-
-            for (const part of functionCallParts) {
-                const functionCall = part.functionCall;
-                // Ensure it's the correct function name
-                if (functionCall && functionCall.name === provideSingleFileContentDeclaration.name) {
-                    const args = functionCall.args as { filePath?: string; content?: string }; // Type cast args
-
-                    // Validate arguments received
-                    if (!args || typeof args.filePath !== 'string' || typeof args.content !== 'string') {
-                        console.warn(chalk.yellow(`    (Step B.5) Skipping invalid function call: Missing or invalid filePath/content. Args: ${JSON.stringify(args)}`));
-                        continue;
-                    }
-
-                    const normalizedPath = path.normalize(args.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-
-                    // Check if this path was actually requested for refinement
-                    if (filesToRefine.includes(normalizedPath)) {
-                        refinedStates[normalizedPath] = args.content; // Update the state with refined content
-                        successfullyRefinedPaths.add(normalizedPath); // Mark as successfully refined
-                        console.log(chalk.dim(`      (Step B.5) Refined content for ${normalizedPath} (Content length: ${args.content.length})`));
-                    } else {
-                        // Log if Flash returned a file we didn't ask for
-                        console.warn(chalk.yellow(`    (Step B.5) Received function call for unexpected file path: ${normalizedPath}. Ignoring.`));
-                    }
-                } else {
-                    // Log if a different function was called unexpectedly
-                    console.warn(chalk.yellow(`    (Step B.5) Received unexpected function call name: ${functionCall?.name}. Ignoring.`));
-                }
-            }
-
-            // Check for files that were requested but not returned by Flash
-            const missedFiles = filesToRefine.filter(f => !successfullyRefinedPaths.has(f));
-            if (missedFiles.length > 0) {
-                console.warn(chalk.yellow(`    (Step B.5) Warning: Flash model did not provide content for ${missedFiles.length} requested file(s): [${missedFiles.join(', ')}]. Keeping initial content from Step B for these files.`));
-                // No action needed here, as we started with initialFinalStates and only updated successful ones
-            }
-
-        } else {
-            // Handle case where Flash didn't call the function at all
-            const finishReason = candidate?.finishReason;
-            const textResponse = candidate?.content?.parts?.find(part => !!part.text)?.text;
-            let errorMsg = `AI refinement (Step B.5) failed: Model did not call the required function '${provideSingleFileContentDeclaration.name}'.`;
-            if (finishReason && finishReason !== FinishReason.STOP) {
-                errorMsg += ` Finish Reason: ${finishReason}.`;
-                if (finishReason === FinishReason.SAFETY && candidate?.safetyRatings) {
-                    errorMsg += ` Safety Ratings: ${JSON.stringify(candidate.safetyRatings)}`;
-                }
-            }
-
-            console.warn(chalk.yellow(errorMsg + " Falling back to initial generation results from Step B."));
-            if (textResponse) {
-                // Log the text response for debugging
-                console.warn(chalk.yellow(`(Step B.5) Model Response Text (instead of function calls):\n---\n${textResponse.substring(0, 500)}${textResponse.length > 500 ? '...' : ''}\n---`));
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: `${errorMsg} Fallback Text: ${textResponse.substring(0, 200)}...` });
-            } else {
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            }
-            // --- CRITICAL: Fallback to Step B results if refinement fails ---
-            return initialFinalStates;
-        }
-
-        // Return the potentially updated map
-        return refinedStates;
-    }
-
-    // --- analyzeConversationForChanges (Unchanged) ---
+    // --- analyzeConversationForChanges (Unchanged - Relies on text generation) ---
     private async analyzeConversationForChanges(
         conversation: Conversation,
         codeContext: string,
@@ -336,204 +132,199 @@ export class ConsolidationService {
         useFlashModel: boolean,
         modelName: string
     ): Promise<ConsolidationAnalysis | null> {
-        const analysisPrompt = `CONTEXT:\nYou are an expert AI analyzing a software development conversation...\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final intended operations (CREATE, MODIFY, DELETE) for each relevant file path (relative to the project root). Resolve contradictions based on conversational flow (later messages override earlier ones unless stated otherwise).\n\nAlso, group the files needing CREATE or MODIFY into logical sets for generating their final content. Aim to minimize subsequent requests. Files marked for DELETE do not need grouping.\n\nOUTPUT FORMAT:\nRespond *only* with a single JSON object matching this structure:\n\`\`\`json\n{\n  "operations": [\n    { "filePath": "path/relative/to/root.ext", "action": "CREATE" | "MODIFY" | "DELETE" }\n  ],\n  "groups": [\n    ["path/to/file1.ext", "path/to/file2.ext"],\n    ["path/to/another_file.ext"]\n  ]\n}\n\`\`\`\nIf no operations are intended, return \`{ "operations": [], "groups": [] }\`. Ensure filePaths are relative.`;
+        const analysisPrompt = `CONTEXT:\nYou are an expert AI analyzing a software development conversation...\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final intended operations (CREATE, MODIFY, DELETE) for each relevant file path (relative to the project root). Resolve contradictions based on conversational flow (later messages override earlier ones unless stated otherwise).\n\nOUTPUT FORMAT:\nRespond *only* with a single JSON object matching this structure:\n\`\`\`json\n{\n  "operations": [\n    { "filePath": "path/relative/to/root.ext", "action": "CREATE" | "MODIFY" | "DELETE" }\n  ],\n  "groups": [] // Keep groups field for structure, but it's ignored in this milestone's generation step\n}\n\`\`\`\nIf no operations are intended, return \`{ "operations": [], "groups": [] }\`. Ensure filePaths are relative.`;
         try {
             const responseText = await this.aiClient.getResponseTextFromAI(
                 [{ role: 'user', content: analysisPrompt }],
-                useFlashModel
+                useFlashModel // Use the passed flag
             );
-            const jsonString = responseText.trim().replace(/^```json\s*/, '').replace(/```$/, '');
+            // Basic cleanup attempt for markdown fences
+            const jsonString = responseText.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
             const jsonResponse = JSON.parse(jsonString);
-            if (jsonResponse && Array.isArray(jsonResponse.operations) && Array.isArray(jsonResponse.groups)) {
+
+            // Validate the structure
+            if (jsonResponse && Array.isArray(jsonResponse.operations)) {
+                // Ensure groups array exists, even if empty
+                if (!Array.isArray(jsonResponse.groups)) {
+                    jsonResponse.groups = [];
+                }
                 // Normalize paths immediately after parsing
-                jsonResponse.operations.forEach((op: any) => { if (op.filePath) op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, ''); });
-                jsonResponse.groups.forEach((group: string[]) => { for (let i = 0; i < group.length; i++) group[i] = path.normalize(group[i]).replace(/^[\\\/]+|[\\\/]+$/g, ''); });
+                jsonResponse.operations.forEach((op: any) => {
+                    if (op.filePath && typeof op.filePath === 'string') {
+                        op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
+                    } else {
+                        // Throw error if filePath is missing or not a string
+                        throw new Error(`Invalid or missing 'filePath' in analysis operation: ${JSON.stringify(op)}`);
+                    }
+                    if (!op.action || !['CREATE', 'MODIFY', 'DELETE'].includes(op.action)) {
+                        throw new Error(`Invalid or missing 'action' in analysis operation: ${JSON.stringify(op)}`);
+                    }
+                });
+                // We don't need to normalize paths in groups as they are ignored now.
+
                 return jsonResponse as ConsolidationAnalysis;
-            } else { throw new Error("Invalid JSON structure from analysis AI."); }
+            } else {
+                throw new Error("Invalid JSON structure received from analysis AI.");
+            }
         } catch (e) {
-            const errorMsg = `AI analysis step failed (using ${modelName}). Error: ${(e as Error).message}`;
+            const errorMsg = `AI analysis step failed (using ${modelName}). Error parsing response or invalid structure: ${(e as Error).message}`;
             await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            throw new Error(errorMsg);
+            // Log the raw response for debugging if parsing failed
+            if (e instanceof SyntaxError) {
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: `Raw Analysis Response: ${e.message.substring(0, 500)}...` });
+            }
+            throw new Error(errorMsg); // Re-throw after logging
         }
     }
 
-    // --- *** UPDATED: generateFinalFileContents using Function Calling *** ---
-    private async generateFinalFileContents(
+    // --- *** NEW: generateIndividualFileContents *** ---
+    // Replaces the old generateFinalFileContents using function calling
+    private async generateIndividualFileContents(
         conversation: Conversation,
-        codeContext: string,
+        codeContext: string, // Pass full context, prompt will handle it
         analysisResult: ConsolidationAnalysis,
-        conversationFilePath: string, // For logging
-        useFlashModel: boolean,       // To select the model
-        modelName: string             // For logging
+        conversationFilePath: string,
+        useFlashModel: boolean,
+        modelName: string // For logging which model is used
     ): Promise<FinalFileStates> {
-        const allFinalStates: FinalFileStates = {};
+        const finalStates: FinalFileStates = {};
 
-        // Combine all files needing generation (CREATE/MODIFY) into a single list for the prompt.
-        // Note: We still rely on the analysis step to hint *which* files need attention,
-        // but the prompt asks the LLM to determine the final state for *all* relevant files.
-        const filesFromAnalysisGroups = analysisResult.groups.flat();
-        const filesToDeleteFromAnalysis = analysisResult.operations
-            .filter(op => op.action === 'DELETE')
-            .map(op => op.filePath);
+        // 1. Identify files needing generation (CREATE/MODIFY)
+        const filesToGenerate = analysisResult.operations
+            .filter(op => op.action === 'CREATE' || op.action === 'MODIFY')
+            .map(op => op.filePath); // Get just the paths
 
-        // Only call generation if there are files to create/modify
-        if (filesFromAnalysisGroups.length > 0) {
-            console.log(chalk.cyan(`    Requesting generation for files: [${filesFromAnalysisGroups.join(', ')}] via function call...`));
-
-            // Construct the prompt instructing the use of the function
-            const generationPrompt = `CONTEXT:\nYou are an expert AI assisting with code generation based on a conversation history and current codebase.\n\nCODEBASE CONTEXT:\n${codeContext}\n\n---\nCONVERSATION HISTORY:\n${conversation.getMessages().map((m: Message) => `${m.role}:\n${m.content}\n---\n`).join('')}\n---\nTASK:\nBased *only* on the conversation history and the provided codebase context, determine the final state (content or deletion) for all relevant files.\n\n**You MUST call the 'propose_code_changes' function** with an array of changes. For each file, provide:\n1.  'filePath': The relative path from the project root.\n2.  'action': Either 'CREATE', 'MODIFY', or 'DELETE'.\n3.  'content': The *complete, final file content* ONLY if the action is 'CREATE' or 'MODIFY'. Omit 'content' if the action is 'DELETE'.\n\nEnsure you include changes for ALL files whose final state is dictated by the conversation's intent, including:\n${filesFromAnalysisGroups.map(f => `- ${f} (from analysis)`).join('\n')}${filesToDeleteFromAnalysis.length > 0 ? '\n' + filesToDeleteFromAnalysis.map(f => `- ${f} (likely DELETE)`).join('\n') : ''}\n(Also include any other files whose final state is dictated by the conversation, even if not listed above).`;
-
-            // --- Prepare the Content for the API Request ---
-            // Convert conversation messages to Gemini's Content format, excluding system messages potentially
-            // Note: The full history is ALSO included in the user prompt above, which might be redundant but ensures context.
-            // You could refine this to only send a *subset* of history via the Content array if needed for token limits.
-            const historyForGeneration: Content[] = conversation.getMessages()
-                .filter(m => m.role !== 'system') // Often exclude system messages from direct history
-                .map(m => ({
-                    role: m.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: m.content }]
-                }));
-            // Replace the last 'user' message in history with the detailed prompt including context
-            if (historyForGeneration.length > 0 && historyForGeneration[historyForGeneration.length - 1].role === 'user') {
-                historyForGeneration.pop(); // Remove the last simple user message
-            }
-
-            const request: GenerateContentRequest = {
-                contents: [
-                    ...historyForGeneration, // Include prior conversation turns
-                    { role: "user", parts: [{ text: generationPrompt }] } // Add the main detailed prompt
-                ],
-                tools: [proposeCodeChangesTool], // Pass the defined tool
-                toolConfig: {
-                    // --- Force the model to call *our specific* function ---
-                    // Use REQUIRED to ensure it calls *a* function. The name check below ensures it's *our* function.
-                    // Alternatively, use ANY if you want to allow text responses as a fallback (less reliable).
-                    functionCallingConfig: { mode: FunctionCallingMode.ANY } // Use ANY to get fallback text if needed
-                }
-            };
-
-            // --- Make the API Call using aiClient.generateContent ---
-            let result: GenerateContentResult | null = null;
-            try {
-                result = await this.aiClient.generateContent(request, useFlashModel);
-            } catch (error) {
-                // Log and re-throw errors from the AI client
-                const errorMsg = `AI generation API call failed (using ${modelName}). Error: ${(error as Error).message}`;
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-                throw new Error(errorMsg); // Re-throw wrapped error
-            }
-
-            // --- Process the Response ---
-            const response = result?.response;
-            const candidate = response?.candidates?.[0];
-            // Find the function call part in the response
-            const functionCallPart = candidate?.content?.parts?.find(part => !!part.functionCall);
-            const functionCall = functionCallPart?.functionCall;
-
-            if (functionCall && functionCall.name === proposeCodeChangesDeclaration.name) {
-                console.log(chalk.green(`    Successfully received function call '${functionCall.name}'. Processing args...`));
-                // --- Type Check and Process Function Arguments ---
-                const args = functionCall.args as { changes?: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE'; content?: string }> };
-
-                if (!args || !Array.isArray(args.changes)) {
-                    const errMsg = `Function call '${functionCall.name}' returned invalid or missing 'changes' array. Args: ${JSON.stringify(args)}`;
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errMsg });
-                    throw new Error(errMsg);
-                }
-
-                // --- Populate finalStates from Function Call Arguments ---
-                for (const change of args.changes) {
-                    // Validate each change item
-                    if (!change.filePath || !change.action || !['CREATE', 'MODIFY', 'DELETE'].includes(change.action)) {
-                        console.warn(chalk.yellow(`    Skipping invalid change item from function call: Missing/invalid filePath or action. Item: ${JSON.stringify(change)}`));
-                        continue;
-                    }
-                    // Normalize path (remove leading/trailing slashes, use OS specific separators)
-                    const normalizedPath = path.normalize(change.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-
-                    if (change.action === 'CREATE' || change.action === 'MODIFY') {
-                        if (typeof change.content !== 'string') {
-                            // Content is mandatory for CREATE/MODIFY according to the function spec
-                            console.warn(chalk.yellow(`    Missing or invalid 'content' for ${change.action} action on ${normalizedPath}. Skipping this change.`));
-                            // Optionally, you could default to empty content: allFinalStates[normalizedPath] = "";
-                            continue; // Skip if content is crucial and missing
-                        }
-                        allFinalStates[normalizedPath] = change.content;
-                        console.log(chalk.dim(`      Processed ${change.action} for ${normalizedPath} (Content length: ${change.content.length})`));
-                    } else if (change.action === 'DELETE') {
-                        // Check if content was incorrectly provided for DELETE
-                        if (change.content !== undefined && change.content !== null) {
-                            console.warn(chalk.yellow(`    Note: 'content' was provided for DELETE action on ${normalizedPath}. Ignoring content.`));
-                        }
-                        allFinalStates[normalizedPath] = 'DELETE_CONFIRMED';
-                        console.log(chalk.dim(`      Processed DELETE for ${normalizedPath}`));
-                    }
-                    // No else needed as action validation happened above
-                }
-
-            } else {
-                // --- Handle cases where the function wasn't called ---
-                const finishReason = candidate?.finishReason;
-                const textResponse = candidate?.content?.parts?.find(part => !!part.text)?.text;
-
-                // Construct the specific error message the user encountered
-                let errorMsg = `AI generation step failed: Model did not call the required function '${proposeCodeChangesDeclaration.name}'.`;
-
-                if (functionCallPart && functionCallPart.functionCall?.name) {
-                    // Model called *a* function, but the wrong one
-                    errorMsg = `AI generation step failed: Model called function '${functionCallPart.functionCall.name}' instead of the required '${proposeCodeChangesDeclaration.name}'.`;
-                } else if (finishReason && finishReason !== FinishReason.STOP) {
-                    // Function not called due to finish reason
-                    errorMsg += ` Finish Reason: ${finishReason}.`;
-                    if (finishReason === FinishReason.SAFETY && candidate?.safetyRatings) {
-                        errorMsg += ` Safety Ratings: ${JSON.stringify(candidate.safetyRatings)}`;
-                    }
-                }
-
-                if (textResponse) {
-                    errorMsg += ` No text fallback response provided either.`; // Match user's error EXACTLY
-                    console.error(chalk.red(errorMsg)); // Log the specific error
-                    console.error(chalk.red(`Model Response Text (instead of function call):\n---\n${textResponse.substring(0, 1000)}${textResponse.length > 1000 ? '...' : ''}\n---`));
-                    // Log this unexpected text response
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: `${errorMsg}\nFallback Text: ${textResponse.substring(0, 200)}...` });
-                    // Throw the specific error to halt consolidation as per original report
-                    throw new Error(errorMsg.replace(' No text fallback response provided either.','')); // Throw matching the user's exact error structure for clarity
-                } else {
-                    // Function not called, no finish reason, no text - unexpected state
-                    errorMsg += ` No text fallback response provided either.`; // Match user's error EXACTLY
-                    console.error(chalk.red(errorMsg));
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-                    throw new Error(errorMsg.replace(' No text fallback response provided either.','')); // Throw matching the user's exact error structure
-                }
-                // --- End Function Call Failure Handling ---
-            }
+        if (filesToGenerate.length === 0) {
+            console.log(chalk.yellow("    No files require content generation based on analysis."));
+            // Proceed to handle only DELETES from analysis
         } else {
-            console.log(chalk.yellow("    No files needed CREATE or MODIFY based on analysis. Skipping generation call."));
+            console.log(chalk.cyan(`    Generating content for ${filesToGenerate.length} file(s) individually using ${modelName}...`));
+
+            // 2. Loop and generate content for each file
+            for (const filePath of filesToGenerate) {
+                const normalizedPath = path.normalize(filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
+                console.log(chalk.cyan(`      Generating content for: ${normalizedPath}`));
+
+                try {
+                    // Optional: Read current content for context (handle ENOENT for CREATE)
+                    let currentContent: string | null = null;
+                    try {
+                        currentContent = await this.fs.readFile(path.resolve(this.projectRoot, normalizedPath));
+                    } catch (e) {
+                        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+                    }
+
+                    // Construct the focused prompt for THIS file
+                    const individualPrompt = this._constructIndividualFileGenerationPrompt(
+                        conversation,
+                        codeContext, // Pass full context, let model use what's relevant
+                        normalizedPath,
+                        currentContent
+                    );
+
+                    // Call AI using getResponseTextFromAI
+                    const responseTextRaw = await this.aiClient.getResponseTextFromAI(
+                        [{ role: 'user', content: individualPrompt }],
+                        useFlashModel
+                    );
+
+                    // Attempt to clean up markdown fences, if the model adds them unexpectedly
+                    let responseTextClean = responseTextRaw.trim();
+                    const startsWithFence = responseTextClean.match(/^```(?:[\w-]+)?\s*\n/); // Match ```, optional language, newline
+                    const endsWithFence = responseTextClean.endsWith('\n```');
+
+                    if (startsWithFence && endsWithFence) {
+                        console.warn(chalk.yellow(`      Note: Removing markdown fences from AI response for ${normalizedPath}`));
+                        responseTextClean = responseTextClean.substring(startsWithFence[0].length, responseTextClean.length - 4).trim();
+                    } else if (startsWithFence || endsWithFence) {
+                        // Only one fence found, could be risky to strip, log a warning
+                        console.warn(chalk.yellow(`      Warning: Found partial markdown fence in AI response for ${normalizedPath}. Using content as is.`));
+                    }
+
+                    // Check for DELETE instruction
+                    if (responseTextClean === "DELETE_FILE") {
+                        finalStates[normalizedPath] = 'DELETE_CONFIRMED';
+                        console.log(chalk.yellow(`      AI suggested DELETE for ${normalizedPath}. Marked for deletion.`));
+                        await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: AI suggested DELETE for ${normalizedPath} during individual generation.` });
+
+                    } else {
+                        // Store the full generated content
+                        finalStates[normalizedPath] = responseTextClean;
+                        console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (Length: ${responseTextClean.length})`));
+                    }
+
+                } catch (error) {
+                    const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName}. Error: ${(error as Error).message}`;
+                    console.error(chalk.red(`      ${errorMsg}`));
+                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+                    // Decide how to handle: skip file, add error state? Skipping for now.
+                    // You could add: finalStates[normalizedPath] = `ERROR: Generation failed - ${(error as Error).message}`;
+                }
+            }
         }
 
-        // --- Add DELETE confirmations from Analysis (Important Fallback) ---
-        // This ensures deletes identified in Step A are still marked, even if the LLM
-        // forgets to include them in the function call (which it ideally shouldn't).
+        // 3. Add DELETE confirmations from Analysis (Important Fallback/Primary)
+        // This ensures deletes identified in Step A are always marked, even if generation wasn't run or AI suggested differently.
         for (const op of analysisResult.operations) {
             if (op.action === 'DELETE') {
                 const normalizedPath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-                if (!(normalizedPath in allFinalStates)) {
-                    // Only add if not already processed (e.g., by the function call)
-                    console.warn(chalk.yellow(`    Note: Adding DELETE for ${normalizedPath} based on earlier analysis (was missing from function call response or generation was skipped).`));
-                    allFinalStates[normalizedPath] = 'DELETE_CONFIRMED';
-                } else if (allFinalStates[normalizedPath] !== 'DELETE_CONFIRMED') {
-                    // Log conflict but prioritize the function call's decision if it provided content/modify
-                    console.warn(chalk.yellow(`    Warning: ${normalizedPath} was marked DELETE in analysis, but generation step provided different action/content. Prioritizing generation step result.`));
+                if (!(normalizedPath in finalStates)) {
+                    // Add if not already processed (e.g., by AI suggesting delete)
+                    console.log(chalk.dim(`      Marking DELETE for ${normalizedPath} based on analysis.`));
+                    finalStates[normalizedPath] = 'DELETE_CONFIRMED';
+                } else if (finalStates[normalizedPath] !== 'DELETE_CONFIRMED') {
+                    // Log conflict but prioritize analysis for DELETE actions in this case
+                    console.warn(chalk.yellow(`      Warning: ${normalizedPath} was marked DELETE in analysis, but generation step provided content. Prioritizing DELETE based on analysis.`));
+                    finalStates[normalizedPath] = 'DELETE_CONFIRMED'; // Override generation result
+                    await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Overriding generated content for ${normalizedPath} with DELETE based on analysis.` });
                 }
             }
         }
 
-        return allFinalStates;
+        return finalStates;
     }
-    // --- End UPDATED Method ---
 
-    // --- prepareReviewData (Unchanged) ---
-// --- prepareReviewData (Handles CREATE/MODIFY/DELETE correctly) ---
+    // Helper to construct the prompt for individual file generation
+    private _constructIndividualFileGenerationPrompt(
+        conversation: Conversation,
+        codeContext: string,
+        filePath: string,
+        currentContent: string | null
+    ): string {
+        // Limit context string size if necessary, although passing full might be fine for powerful models
+        // Re-evaluate if context size becomes an issue for individual calls
+        // const maxContextChars = 30000;
+        // const truncatedContext = codeContext.length > maxContextChars
+        //     ? codeContext.substring(0, maxContextChars) + "\n... (Context Truncated)"
+        //     : codeContext;
+
+        const historyString = conversation.getMessages()
+            .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
+            .join('');
+
+        return `CONTEXT:
+You are an expert AI assisting with code generation based on a conversation.
+CODEBASE CONTEXT:
+${codeContext}
+---
+CONVERSATION HISTORY:
+${historyString}
+---
+CURRENT FILE CONTENT for '${filePath}' (if it exists):
+${currentContent === null ? '(File does not exist - generate content for creation)' : `\`\`\`\n${currentContent}\n\`\`\``}
+---
+TASK:
+Based *only* on the conversation history and provided context/current content, generate the **complete and final content** for the single file specified below:
+File Path: '${filePath}'
+
+Respond ONLY with the raw file content for '${filePath}'.
+Do NOT include explanations, markdown code fences (\`\`\`), file path headers, or any other text outside the file content itself.
+If the conversation implies this file ('${filePath}') should ultimately be deleted, respond ONLY with the exact text "DELETE_FILE".`;
+    }
+    // --- END NEW Method and Helper ---
+
+
+    // --- prepareReviewData (Unchanged - Still generates diffs for display) ---
     private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
         const reviewData: ReviewDataItem[] = [];
         for (const relativePath in finalStates) {
@@ -599,7 +390,8 @@ export class ConsolidationService {
         }
         return reviewData; // Return the array of items for review
     }
-    // --- presentChangesForReviewTUI (Handles TUI or fallback) ---
+
+    // --- presentChangesForReviewTUI (Unchanged) ---
     private async presentChangesForReviewTUI(reviewData: ReviewDataItem[]): Promise<boolean> {
         if (reviewData.length === 0) {
             console.log(chalk.yellow("No changes to review."));
@@ -623,8 +415,7 @@ export class ConsolidationService {
         }
     }
 
-    // --- applyConsolidatedChanges (Unchanged) ---
-    // --- applyConsolidatedChanges (Applies changes after review, includes Git check) ---
+    // --- applyConsolidatedChanges (Unchanged - This method already handles writing full content or deleting) ---
     private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
         console.log(chalk.blue("Checking Git status..."));
         try {
@@ -680,7 +471,7 @@ export class ConsolidationService {
                             throw accessError;
                         }
                     }
-                } else { // Handle CREATE or MODIFY
+                } else { // Handle CREATE or MODIFY (contentOrAction is the full string content)
                     // Ensure directory exists before writing the file
                     await this.fs.ensureDirExists(path.dirname(absolutePath));
                     // Write the file content (handles both create and modify)
