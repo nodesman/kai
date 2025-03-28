@@ -95,6 +95,7 @@ export class ProjectContextBuilder {
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
             const fileBlock = fileHeader + content + fileFooter;
+            const fileTokens = countTokens(fileBlock);
 
             // Add the file block to the context string
             contextString += fileBlock;
