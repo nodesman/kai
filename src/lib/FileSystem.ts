@@ -43,7 +43,7 @@ class FileSystem {
             const gitignoreContent = await this.readFile(gitignorePath);
             if (gitignoreContent) {
                 // Add default ignores and project-specific ones
-                ig.add(['.git', 'node_modules', '.gitignore']); // Add common defaults
+                ig.add(['.git', 'node_modules', '.gitignore', '.kaichats']); // Add common defaults
                 ig.add(gitignoreContent);
             }
         } catch (error) {
