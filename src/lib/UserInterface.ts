@@ -8,13 +8,9 @@ import { toSnakeCase } from './utils'; // Import the utility function
 import { Config } from './Config'; // Import Config
 import { Message } from './models/Conversation'; // Import Conversation types (just Message needed now)
 import chalk from 'chalk'; // Import chalk for logging
-// --- Import Extracted UI Classes ---
 import { ScopeUIManager } from './ui/ScopeUIManager';
 import { SublimeEditorInteraction, EditorInteractionResult } from './ui/SublimeEditorInteraction';
-// --- End Import Extracted UI Classes ---
-// --- Keep ScopeManager import for instantiation ---
 import { ScopeManager, Scope } from './ScopeManager';
-// --- End Keep ScopeManager import ---
 
 // Define the expected return type for modes needing conversation context
 interface UserInteractionResult {
@@ -240,14 +236,6 @@ class UserInterface {
             return null; // Exit on any error during interaction
         }
     }
-
-    // --- handleManageScopes (REMOVED - Logic moved to ScopeUIManager) ---
-    // --- _displayScopes (REMOVED - Logic moved to ScopeUIManager) ---
-    // --- _promptAddScope (REMOVED - Logic moved to ScopeUIManager) ---
-    // --- _promptModifyScope (REMOVED - Logic moved to ScopeUIManager) ---
-    // --- _promptRemoveScope (REMOVED - Logic moved to ScopeUIManager) ---
-    // --- handleSuggestScopes (REMOVED - Logic moved to ScopeUIManager) ---
-
 }
 
 // Export necessary types along with the class
