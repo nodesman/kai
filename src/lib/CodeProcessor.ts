@@ -3,7 +3,10 @@ import path from 'path';
 import { FileSystem } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient';
 import { Config } from "./Config";
-import { UserInterface } from './UserInterface';
+// --- MODIFICATION: Remove UserInterface import if no longer needed for other methods ---
+// import { UserInterface } from './UserInterface';
+// --- MODIFICATION: Import SublimeEditorInteraction ---
+import { SublimeEditorInteraction } from './ui/SublimeEditorInteraction';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { toSnakeCase, countTokens } from './utils'; // countTokens might not be needed here anymore
 import chalk from 'chalk';
@@ -13,17 +16,20 @@ import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCb); // Promisify for async/await usage
 
-// Interface for paths managed within the conversation
-interface ConversationPaths {
-    conversationFilePath: string;
-    editorFilePath: string;
-}
+// --- MODIFICATION: Remove ConversationPaths interface if editorFilePath is no longer needed here ---
+// interface ConversationPaths {
+//     conversationFilePath: string;
+//     editorFilePath: string; // <-- This part is removed
+// }
 
 class CodeProcessor {
     config: Config;
     fs: FileSystem;
     aiClient: AIClient;
-    ui: UserInterface;
+    // --- MODIFICATION: Remove ui instance if fully replaced by specific interactions ---
+    // ui: UserInterface;
+    // --- MODIFICATION: Add sublimeInteraction instance ---
+    sublimeInteraction: SublimeEditorInteraction;
     projectRoot: string;
     private readonly CONSOLIDATE_COMMAND = '/consolidate';
     private contextBuilder: ProjectContextBuilder;
@@ -33,7 +39,10 @@ class CodeProcessor {
         this.config = config;
         this.fs = new FileSystem();
         this.aiClient = new AIClient(config);
-        this.ui = new UserInterface(config);
+        // --- MODIFICATION: Instantiate SublimeEditorInteraction ---
+        // Pass fs and config as dependencies
+        this.sublimeInteraction = new SublimeEditorInteraction(this.fs, this.config);
+        // this.ui = new UserInterface(config); // <-- Remove if not used elsewhere
         this.projectRoot = process.cwd();
         this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config);
         this.consolidationService = new ConsolidationService(this.config, this.fs, this.aiClient, this.projectRoot);
@@ -43,7 +52,7 @@ class CodeProcessor {
     // It's now handled entirely by ProjectContextBuilder instance
 
     optimizeWhitespace(code: string): string {
-        // Keep this utility if needed elsewhere, or move it if only used in the deleted buildContextString
+        // Keep this utility if needed elsewhere
         code = code.replace(/[ \t]+$/gm, '');
         code = code.replace(/\r\n/g, '\n');
         code = code.replace(/\n{3,}/g, '\n\n');
@@ -53,41 +62,41 @@ class CodeProcessor {
 
     // --- Main Conversation Orchestration ---
     async startConversation(conversationName: string, isNew: boolean): Promise<void> {
-        const paths = this._getConversationPaths(conversationName);
-        let editorFilePathForCleanup: string | null = null; // Separate variable for finally block
+        // --- MODIFICATION: Only need conversation file path ---
+        const conversationFilePath = this._getConversationFilePath(conversationName);
+        // let editorFilePathForCleanup: string | null = null; // <-- REMOVED
         let conversation: Conversation;
 
         try {
-            conversation = await this._loadOrCreateConversation(conversationName, isNew, paths.conversationFilePath);
-            editorFilePathForCleanup = paths.editorFilePath; // Assign path for potential cleanup
+            conversation = await this._loadOrCreateConversation(conversationName, isNew, conversationFilePath);
+            // editorFilePathForCleanup = paths.editorFilePath; // <-- REMOVED
 
             // Start the main interaction loop
-            await this._handleUserInputLoop(conversationName, conversation, paths);
+            // --- MODIFICATION: Pass only necessary arguments ---
+            await this._handleUserInputLoop(conversationName, conversation, conversationFilePath);
 
             console.log(`\nExiting conversation "${conversationName}".`);
 
         } catch (error) {
-            await this._handleConversationError(error, conversationName, paths.conversationFilePath);
+            // --- MODIFICATION: Pass conversationFilePath directly ---
+            await this._handleConversationError(error, conversationName, conversationFilePath);
         } finally {
-            // Use the path stored specifically for cleanup
-            await this._cleanupEditorFile(editorFilePathForCleanup);
+            // --- MODIFICATION: Cleanup is handled by SublimeEditorInteraction ---
+            // await this._cleanupEditorFile(editorFilePathForCleanup); // <-- REMOVED
+            console.log(chalk.dim(`Editor file cleanup handled internally by SublimeEditorInteraction.`));
         }
     }
 
     // --- Private Helper Methods ---
 
-    /** Generates the file paths related to a conversation. */
-    private _getConversationPaths(conversationName: string): ConversationPaths {
+    /** Generates ONLY the conversation file path. */
+    private _getConversationFilePath(conversationName: string): string {
         const snakeName = toSnakeCase(conversationName);
         const conversationFileName = `${snakeName}.jsonl`;
-        const editorFileName = `${snakeName}_edit.txt`;
-        return {
-            conversationFilePath: path.join(this.config.chatsDir, conversationFileName),
-            editorFilePath: path.join(this.config.chatsDir, editorFileName),
-        };
+        return path.join(this.config.chatsDir, conversationFileName);
     }
 
-    /** Loads conversation from file or creates a new one. */
+    /** Loads conversation from file or creates a new one. (Unchanged) */
     private async _loadOrCreateConversation(
         conversationName: string,
         isNew: boolean,
@@ -113,21 +122,21 @@ class CodeProcessor {
         return new Conversation();
     }
 
-    /** Manages the main loop of interacting with the user via the editor. */
+    /** Manages the main loop of interacting with the user via the Sublime editor. */
     private async _handleUserInputLoop(
         conversationName: string,
         conversation: Conversation,
-        paths: ConversationPaths
+        // --- MODIFICATION: No longer needs `paths` - just the conversation file path ---
+        conversationFilePath: string
     ): Promise<void> {
         while (true) {
-            const interactionResult = await this.ui.getPromptViaSublimeLoop(
+            // --- MODIFICATION: Use SublimeEditorInteraction ---
+            const interactionResult = await this.sublimeInteraction.getPrompt(
                 conversationName,
-                conversation.getMessages(),
-                paths.editorFilePath // Pass editor path explicitly
+                conversation.getMessages()
+                // No editorFilePath needed here, it's managed internally now
             );
-
-            // Editor file path might change if ui logic changes, update for cleanup
-            // editorFilePathForCleanup = interactionResult.editorFilePath;
+            // --- END MODIFICATION ---
 
             if (interactionResult.newPrompt === null) {
                 break; // User exited editor or provided no prompt
@@ -136,12 +145,12 @@ class CodeProcessor {
             await this._processLoopIteration(
                 conversation,
                 interactionResult.newPrompt,
-                paths.conversationFilePath
+                conversationFilePath // Pass conversation file path
             );
         }
     }
 
-    /** Processes a single iteration of the user input loop. */
+    /** Processes a single iteration of the user input loop. (Unchanged) */
     private async _processLoopIteration(
         conversation: Conversation,
         userPrompt: string,
@@ -157,7 +166,7 @@ class CodeProcessor {
         }
     }
 
-    /** Handles the '/consolidate' command. */
+    /** Handles the '/consolidate' command. (Unchanged) */
     private async _handleConsolidateCommand(
         conversation: Conversation,
         conversationFilePath: string
@@ -196,7 +205,7 @@ class CodeProcessor {
         }
     }
 
-    /** Builds context and calls the AI for a standard user prompt. */
+    /** Builds context and calls the AI for a standard user prompt. (Unchanged) */
     private async _callAIWithContext(
         conversation: Conversation,
         userPrompt: string,
@@ -229,7 +238,7 @@ class CodeProcessor {
         }
     }
 
-    /** Handles errors occurring during the main conversation loop. */
+    /** Handles errors occurring during the main conversation loop. (Unchanged) */
     private async _handleConversationError(
         error: unknown,
         conversationName: string,
@@ -252,27 +261,13 @@ class CodeProcessor {
         }
     }
 
-    /** Cleans up the temporary editor file. */
-    private async _cleanupEditorFile(editorFilePath: string | null): Promise<void> {
-        if (editorFilePath) {
-            try {
-                await this.fs.access(editorFilePath); // Check if it exists
-                await this.fs.deleteFile(editorFilePath);
-                console.log(chalk.dim(`Cleaned up editor file: ${editorFilePath}`));
-            } catch (cleanupError) {
-                // Only log errors that aren't "file not found"
-                if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
-                    console.warn(chalk.yellow(`\nWarning: Failed to clean up editor file ${editorFilePath}:`), cleanupError);
-                } else {
-                    console.log(chalk.dim(`Editor file already gone: ${editorFilePath}`));
-                }
-            }
-        }
-    }
+    // --- MODIFICATION: Remove _cleanupEditorFile as it's handled by SublimeEditorInteraction ---
+    // private async _cleanupEditorFile(editorFilePath: string | null): Promise<void> { ... }
 
     // --- Consolidation Orchestration Method (Unchanged from previous state) ---
     async processConsolidationRequest(conversationName: string): Promise<void> {
-        const { conversationFilePath } = this._getConversationPaths(conversationName); // Use helper
+        // --- MODIFICATION: Use updated path helper ---
+        const conversationFilePath = this._getConversationFilePath(conversationName);
         let conversation: Conversation;
 
         try {
