@@ -95,15 +95,6 @@ export class ProjectContextBuilder {
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
             const fileBlock = fileHeader + content + fileFooter;
-            const fileTokens = countTokens(fileBlock);
-
-            // Check token limit BEFORE adding the current file block
-            if (currentTokenCount + fileTokens > maxContextTokens) {
-                console.warn(chalk.yellow(`  Skipping file ${relativePath} (${fileTokens} tokens) - Exceeds max context token limit (${maxContextTokens.toFixed(0)})`));
-                excludedFiles++; // Count as excluded due to size limit
-                continue; // Skip this file and move to the next
-                // Consider adding a flag to break the loop entirely if the limit is hit aggressively
-            }
 
             // Add the file block to the context string
             contextString += fileBlock;

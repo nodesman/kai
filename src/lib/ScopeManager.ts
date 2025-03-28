@@ -382,6 +382,3 @@ export class ScopeManager {
         return finalFiles; // Return the final filtered list of absolute paths
     }
 }
-
-// Export Scope type along with the manager
-export type { Scope };

@@ -1,0 +1,21 @@
+# Define scopes for the kai tool here.
+# Each scope is a set of files identified by glob patterns, used to limit
+# the context sent to the AI. If this list is empty, kai defaults to
+# including ALL non-ignored project files (like .gitignore).
+#
+# Run 'kai' and select 'Suggest Scopes' to get suggestions based on your project.
+# Run 'kai' and select 'Manage Scopes' to add/edit/remove scopes interactively.
+#
+# Example Scope:
+# - name: backend_logic
+#   description: Core Node.js service files
+#   include_patterns:
+#     - "src/services/**/*.ts"
+#     - "src/routes/**/*.ts"
+#   exclude_patterns:
+#     - "**/*.test.ts"
+#   tags:
+#     - backend
+#     - node
+
+scopes: [] # Start with an empty list. The tool defaults to 'all files' when this is empty.
