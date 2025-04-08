@@ -9,9 +9,8 @@ import { toSnakeCase, countTokens } from './utils'; // countTokens might not be 
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
 import { ConsolidationService } from './ConsolidationService';
-import { exec as execCb } from 'child_process';
-import { promisify } from 'util';
-const exec = promisify(execCb); // Promisify for async/await usage
+import { ShellExecutor } from './ShellExecutor'; // Import ShellExecutor
+import { GitService } from './GitService'; // Import GitService
 
 // Interface for paths managed within the conversation
 interface ConversationPaths {
@@ -25,18 +24,34 @@ class CodeProcessor {
     aiClient: AIClient;
     ui: UserInterface;
     projectRoot: string;
+    shellExecutor: ShellExecutor; // Add ShellExecutor instance
+    gitService: GitService;       // Add GitService instance
     private readonly CONSOLIDATE_COMMAND = '/consolidate';
     private contextBuilder: ProjectContextBuilder;
     private consolidationService: ConsolidationService;
 
     constructor(config: Config) {
+        // Instantiate shared services first
+        this.shellExecutor = new ShellExecutor();
+        this.gitService = new GitService(this.shellExecutor, process.cwd());
+
         this.config = config;
         this.fs = new FileSystem();
         this.aiClient = new AIClient(config);
         this.ui = new UserInterface(config);
         this.projectRoot = process.cwd();
         this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config);
-        this.consolidationService = new ConsolidationService(this.config, this.fs, this.aiClient, this.projectRoot);
+        // Pass the shared services to ConsolidationService
+        this.consolidationService = new ConsolidationService(
+            this.config,
+            this.fs,
+            this.aiClient,
+            this.projectRoot,
+            this.gitService // Pass GitService
+        );
+        // Note: UserInterface currently creates its own ShellExecutor.
+        // For full consistency, you could modify UserInterface to accept ShellExecutor
+        // in its constructor and pass `this.shellExecutor` to it. Let's keep UI simpler for now.
     }
 
     // --- REMOVED buildContextString method ---

@@ -1,6 +1,5 @@
 // File: src/lib/UserInterface.ts
 import inquirer from 'inquirer';
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises'; // Use fs.promises for async operations
 import crypto from 'crypto'; // For checking file changes
@@ -9,6 +8,7 @@ import { toSnakeCase } from './utils'; // Import the utility function
 import { Config } from './Config'; // Import Config
 import Conversation, { Message } from './models/Conversation'; // Import Conversation types
 import chalk from 'chalk'; // Import chalk for logging
+import { ShellExecutor } from './ShellExecutor'; // Import ShellExecutor
 
 const HISTORY_SEPARATOR = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
 
@@ -23,10 +23,13 @@ interface UserInteractionResult {
 class UserInterface {
     fs: FileSystem;
     config: Config; // Add config
+    shellExecutor: ShellExecutor; // Add ShellExecutor
 
     constructor(config: Config) { // Accept config
         this.fs = new FileSystem();
         this.config = config; // Store config
+        // Instantiate ShellExecutor here, assuming no specific config needed for it
+        this.shellExecutor = new ShellExecutor();
     }
 
     // --- selectOrCreateConversation (MODIFIED) ---
@@ -154,7 +157,7 @@ class UserInterface {
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
         // const editorFileName = `${toSnakeCase(conversationName)}_edit.txt`; // <<< REMOVE or comment out
-        // const editorFilePath = path.join(this.config.chatsDir, editorFileName); // <<< REMOVE or comment out (now passed as argument)
+        // const editorFilePath = path.join(this.config.chatsDir, editorFilePath); // <<< REMOVE or comment out (now passed as argument)
 
         const contentToWrite = this.formatHistoryForSublime(currentMessages || []);
         const initialHash = crypto.createHash('sha256').update(contentToWrite).digest('hex');
@@ -172,20 +175,19 @@ class UserInterface {
         console.log(`(Close without saving OR save without changes to exit conversation)`);
 
         // Use the passed editorFilePath
-        const sublProcess = spawn('subl', ['-w', editorFilePath], { stdio: 'inherit' });
-
-        const exitCode = await new Promise<number | null>((resolve, reject) => {
-            sublProcess.on('close', (code) => resolve(code));
-            sublProcess.on('error', (error) => {
-                if ((error as any).code === 'ENOENT') {
-                    console.error(chalk.red("\n❌ Error: 'subl' command not found. Make sure Sublime Text is installed and 'subl' is in your system's PATH."));
-                    reject(new Error("'subl' command not found.'"));
-                } else {
-                    console.error(chalk.red("\n❌ Error spawning Sublime Text:"), error);
-                    reject(error);
-                }
-            });
-        });
+        let exitCode: number | null;
+        try {
+            exitCode = await this.shellExecutor.spawnAndWait('subl', ['-w', editorFilePath], { stdio: 'inherit', cwd: process.cwd() });
+        } catch (error: any) {
+            // Handle specific errors from spawnAndWait (e.g., command not found)
+            if (error.message?.includes('Command not found')) {
+                 console.error(chalk.red("\n❌ Error: 'subl' command not found. Make sure Sublime Text is installed and 'subl' is in your system's PATH."));
+            } else {
+                 console.error(chalk.red("\n❌ Error spawning Sublime Text:"), error);
+            }
+            // Re-throw or handle as appropriate for your application flow
+            throw error; // Rethrow to stop the process here
+        }
 
         if (exitCode !== 0) {
             console.warn(chalk.yellow(`\nSublime Text process closed with non-zero code: ${exitCode}. Assuming exit.`));
