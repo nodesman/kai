@@ -29,13 +29,18 @@ class UserInterface {
         this.config = config; // Store config
     }
 
-    // --- selectOrCreateConversation (Unchanged) ---
+    // --- selectOrCreateConversation (MODIFIED) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
-        // ... (keep existing implementation) ...
         await this.fs.ensureDirExists(this.config.chatsDir); // Ensure dir exists
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
-        const choices = [...existingConversations, new inquirer.Separator(), '<< Create New Conversation >>'];
+        // --- MODIFICATION START: Put "Create New" at the top ---
+        const choices = [
+            '<< Create New Conversation >>', // Moved to the top
+            new inquirer.Separator(),      // Separator after "Create New"
+            ...existingConversations       // Spread existing conversations below
+        ];
+        // --- MODIFICATION END ---
 
         const { selected } = await inquirer.prompt([
             {
@@ -44,6 +49,7 @@ class UserInterface {
                 message: 'Select a conversation or create a new one:',
                 choices: choices,
                 loop: false, // Prevent looping within this prompt
+                pageSize: 15 // Optional: Increase page size if list is long
             },
         ]);
 
