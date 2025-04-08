@@ -245,7 +245,7 @@ class UserInterface {
             ]);
 
             // Model selection is only relevant for conversation/consolidation
-            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-exp-03-25"; // Default
+            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25"; // Default
             if (mode === 'Start/Continue Conversation' || mode === 'Consolidate Changes...') {
                 const { modelChoice } = await inquirer.prompt([
                     {
@@ -253,7 +253,7 @@ class UserInterface {
                         name: 'modelChoice',
                         message: 'Select the AI model to use for this operation:',
                         choices: [
-                            { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' },
+                            { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-preview-03-25' },
                             { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
                         ],
                         default: this.config.gemini.model_name,
