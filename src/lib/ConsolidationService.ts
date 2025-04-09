@@ -2,18 +2,18 @@
 import path from 'path';
 import chalk from 'chalk';
 import * as Diff from 'diff'; // Still needed for prepareReviewData
+import { exec as execCb } from 'child_process';
+import { promisify } from 'util';
 import inquirer from 'inquirer'; // Keep for fallback in review TUI failure
 import { FileSystem } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-// --- Import New Services ---
-import { GitService, GitStatusError } from './GitService'; // Import GitService and error type
-import { ProjectContextBuilder } from './ProjectContextBuilder'; // Import ProjectContextBuilder
-
 // Removed imports related to Function Calling tools as they are no longer used here
 // e.g., Tool, FunctionDeclaration, GenerateContentRequest, FunctionCallingMode etc.
+
+const exec = promisify(execCb);
 
 // --- Interfaces (Unchanged) ---
 interface ConsolidationAnalysis {
@@ -34,32 +34,18 @@ export class ConsolidationService {
     private fs: FileSystem;
     private aiClient: AIClient;
     private projectRoot: string;
-    private contextBuilder: ProjectContextBuilder; // Add context builder
-    // --- Add GitService ---
-    private gitService: GitService;
-    // ---
 
-    // --- MODIFIED Constructor Signature ---
-    constructor(
-        config: Config,
-        fileSystem: FileSystem,
-        aiClient: AIClient,
-        projectRoot: string,
-        gitService: GitService // Accept GitService instance
-    ) {
-    // ---
+    constructor(config: Config, fileSystem: FileSystem, aiClient: AIClient, projectRoot: string) {
         this.config = config;
         this.fs = fileSystem;
         this.aiClient = aiClient;
-        this.gitService = gitService; // Use injected GitService
-        this.contextBuilder = new ProjectContextBuilder(this.fs, projectRoot, this.config); // Instantiate context builder
         this.projectRoot = projectRoot;
     }
 
     async process(
         conversationName: string,
         conversation: Conversation,
-        // currentContextString: string, // Removed from signature - fetch inside
+        currentContextString: string,
         conversationFilePath: string
     ): Promise<void> {
         const startMsg = `System: Starting AI-driven code consolidation for '${conversationName}'...`;
@@ -70,25 +56,27 @@ export class ConsolidationService {
             // --- *** MOVED GIT CHECK TO THE BEGINNING *** ---
             console.log(chalk.blue("\n  Step 0: Checking Git status..."));
             try {
-                const isClean = await this.gitService.isWorkingDirectoryClean();
-                if (!isClean) {
-                    // Fetch the status again to display it (isWorkingDirectoryClean only returns boolean)
-                    // This is slightly inefficient but avoids changing the GitService API for now
-                    // Assuming GitService constructor already has ShellExecutor
-                    const statusResult = await this.gitService['shellExecutor'].execute('git status --porcelain', { cwd: this.projectRoot }); // Access shellExecutor if needed, slightly hacky access
+                const { stdout, stderr } = await exec('git status --porcelain', { cwd: this.projectRoot });
+                if (stderr) console.warn(chalk.yellow("Git status stderr:"), stderr);
+                const status = stdout.trim();
+                if (status !== '') {
                     console.error(chalk.red("\nError: Git working directory not clean:"));
-                    console.error(chalk.red(statusResult.stdout || "No specific changes reported, but directory is dirty.")); // Display status output
+                    console.error(chalk.red(status));
                     const dirtyErrorMsg = 'Git working directory not clean. Consolidation aborted. Please commit or stash changes before consolidating.';
+                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: dirtyErrorMsg });
                     throw new Error(dirtyErrorMsg); // Throw to abort the process
                 } else {
                     console.log(chalk.green("  Git status clean. Proceeding with consolidation..."));
                 }
-            } catch (error) {
-                // Catch errors from GitService (already formatted)
-                const gitCheckErrorMsg = error instanceof Error ? error.message : String(error);
-                console.error(chalk.red("\nError checking Git status:"), gitCheckErrorMsg);
-
-                // Log error *before* re-throwing
+            } catch (error: any) {
+                // Handle errors during Git check (e.g., Git not installed, not a repo)
+                console.error(chalk.red("\nError checking Git status:"), error.message || error);
+                let gitCheckErrorMsg = `Failed to verify Git status. Error: ${error.message}`;
+                if (error.message?.includes('command not found') || error.code === 'ENOENT') {
+                    gitCheckErrorMsg = 'Git command not found. Please ensure Git is installed and in your system PATH.';
+                } else if (error.stderr?.includes('not a git repository')) {
+                    gitCheckErrorMsg = 'Project directory is not a Git repository. Please initialize Git (`git init`).';
+                }
                 await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitCheckErrorMsg });
                 throw new Error(gitCheckErrorMsg); // Re-throw to abort
             }
@@ -102,10 +90,6 @@ export class ConsolidationService {
             console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
 
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
-            // Fetch context *before* analysis
-            console.log(chalk.cyan("    Fetching current codebase context..."));
-            const { context: currentContextString } = await this.contextBuilder.build();
-
             // --- *** CALL TO THE NOW-RESTORED METHOD *** ---
             const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, conversationFilePath, useFlashForAnalysis, analysisModelName);
             // --- *** END CALL *** ---
