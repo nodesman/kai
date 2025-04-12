@@ -9,6 +9,7 @@ import {ConversationManager} from '../ConversationManager';
 import RelevantFileFinder from "./RelevantFileFinder";
 import PromptBuilder from "./PromptBuilder";
 import path from "path";
+import { WebSocketPrompts } from '../prompts'; // <-- ADD THIS IMPORT
 
 
 interface AIResponse {
@@ -44,7 +45,8 @@ class CodeProcessor {
         const updatedConversation = await this.buildPromptString(userPrompt, conversation);
         console.log(`[CodeProcessor] askQuestion: Built prompt string. Conversation ID: ${updatedConversation.getId()}`);
 
-        let aiResponseString = await this.aiClient.getResponseFromAI(updatedConversation);
+        // TODO: Pass conversationFilePath and useFlashModel based on context
+        let aiResponseString = await this.aiClient.getResponseFromAI(updatedConversation /*, conversationFilePath, contextString, useFlashModel */);
         updatedConversation.addMessage('assistant', aiResponseString); //add it to conversation
         console.log(`[CodeProcessor] askQuestion: Received response from AI.  Response length: ${aiResponseString.length}`);
 
@@ -83,18 +85,10 @@ class CodeProcessor {
         conversation.addMessage("system", this.filePrefix + fileContextString);
         console.log(`[CodeProcessor] buildPromptString: Added file context to conversation.`);
 
-        // 5. Add user prompt
-        const instructedPrompt = `
-          ${userPrompt}
-
-        Give a concise answer with code changes ONLY, in a SINGLE response:
-            - Do NOT provide multiple options or alternatives.
-            - Focus on the most sustainable and maintainable solution.
-            - Include file creation, deletion, or moves in the diff if necessary.
-            - Use the unified diff format and do not hallucinate filenames, only use file names that I have provided in the file context.
-            - If the changes required are extensive, omit the explanation and include ONLY the diff.
-            - The changes you suggest MUST be comprehensive. Do not suggest partial code snippets that will not run.
-        `;
+        // --- Use imported prompt function ---
+        // Construct the prompt using the user's input and the standard instructions
+        const instructedPrompt = WebSocketPrompts.instructedPrompt(userPrompt);
+        // --- End modification ---
 
         conversation.addMessage("user", instructedPrompt);
         console.log(`[CodeProcessor] buildPromptString: Added user prompt to conversation.`);
@@ -113,24 +107,15 @@ class CodeProcessor {
     private async processAIResponse(aiResponseString: string, isDiffPrompt: boolean): Promise<AIResponse> {
         console.log(`[CodeProcessor] processAIResponse: Processing AI response using AI.`);
 
+        // --- Use imported prompt function ---
         // Use GPT-4o-mini to analyze the Gemini response.
-        const analysisPrompt = `Analyze the following response from the AI. Determine if it contains only a unified diff, or if it also contains explanatory text. Extract all mentioned filenames.  Return a JSON object in the following format:
-    {
-      "containsDiff": boolean, // true if the response contains a diff, false otherwise
-      "containsExplanation": boolean,  // true if there's explanatory text, false otherwise
-      "files": string[], // An array of filenames extracted from the diff (if present)
-      "explanation": string | null, // The explanation text, or null if no explanation.
-      "message": string // main message
-    }
-    Ensure that the JSON object is valid. Do not wrap the JSON with markdown code blocks.
-
-    AI Response:
-    ${aiResponseString}
-    `;
+        const analysisPrompt = WebSocketPrompts.responseAnalysisPrompt(aiResponseString);
+        // --- End modification ---
 
         const conversation = new Conversation();
         conversation.addMessage('user', analysisPrompt);
-        const analysisResponse = await this.aiClient.getResponseFromAI(conversation, "gpt-4o-mini");
+        // TODO: Pass useFlashModel based on context/config if necessary for analysis
+        const analysisResponse = await this.aiClient.getResponseTextFromAI(conversation.getMessages(), true); // Use text generation, potentially flash
         console.log(`[CodeProcessor] processAIResponse: AI analysis response:`, analysisResponse);
 
         // Remove markdown code block delimiters if present
@@ -170,27 +155,23 @@ class CodeProcessor {
             diffFiles = [];
             for (const filePath of parsedResponse.files) {  // Iterate through *all* extracted file paths
 
-                const diffContentRegex = new RegExp(/--- a\/.+?\n\+\+\+ b\/.*/s);
-                let extractedDiffContent;
-                try {
-                    extractedDiffContent = analysisResponse.match(diffContentRegex)?.[0] || null;
-                } catch (e) {
-                    console.log(e)
-                }
-                diffFiles.push({path: filePath, content: aiResponseString}) //This is wrong
-
-                /*
                const diff = extractDiffForFile(aiResponseString, filePath); // Implement extractDiffForFile
                if (diff) {
                    diffFiles.push({ path: filePath, content: diff });
                } else {
                    console.warn(`[CodeProcessor] processAIResponse: No diff found for file ${filePath}`);
                    //Should handle missing diff content. For now, skip the file
+                   // TODO: Revisit this - maybe the AI analysis should provide the diff content directly?
+                   // Pushing the full aiResponseString is incorrect.
+                   // diffFiles.push({path: filePath, content: aiResponseString}) // This is wrong
                    continue;
-               } */
+               }
             }
-
-            this.setCurrentDiff(diffFiles); //save the file.
+            if (diffFiles.length > 0) {
+                this.setCurrentDiff(diffFiles); //save the file.
+            } else {
+                diffFiles = null; // Ensure it's null if no valid diffs were extracted
+            }
         }
 
         return {
@@ -204,13 +185,13 @@ class CodeProcessor {
     // Helper method to check if a prompt is likely a diff request (using GPT-4o-mini)
     private async isDiffPrompt(prompt: string): Promise<boolean> {
         console.log(`[CodeProcessor] isDiffPrompt: Checking if prompt is a diff request. Prompt: ${prompt}`);
-        const checkPrompt = `Does the following user prompt request changes to existing files in the codebase, including modifications or additions to existing files?
-        The prompt may be a generic question about the code base or not at all. Or a qeustion about how things are currenlty working. Or a question about how to achieve
-        something in the code base. I am looking for the case where the user is asking how to get this code to work a certain way or what a certain outcome entail in terms of
-        code changes. Respond with "true" or "false".\n\n${prompt}`;
+        // --- Use imported prompt function ---
+        const checkPrompt = WebSocketPrompts.diffCheckPrompt(prompt);
+        // --- End modification ---
         const conversation = new Conversation("", [{role: 'user', content: checkPrompt}]);
         try {
-            const response = await this.aiClient.getResponseFromAI(conversation, "gpt-4o-mini");  // Use AIClient, specify model
+            // TODO: Pass useFlashModel based on context/config
+            const response = await this.aiClient.getResponseTextFromAI(conversation.getMessages(), true); // Use text generation, potentially flash
             const isDiff = response.toLowerCase().includes("true");
             console.log(`[CodeProcessor] isDiffPrompt: AI response: ${response}, isDiff: ${isDiff}`);
             return isDiff;
@@ -236,32 +217,60 @@ class CodeProcessor {
 
         const applyPromises = this.currentDiff.map(async (diffFile) => {
             const fullPath = path.join(this.projectRoot, diffFile.path);
+             // Ensure the file path exists before applying changes (except for creation)
+             if (!diffFile.content.startsWith("+++")) { // Don't check for existence if creating
+                try {
+                    await this.fs.access(fullPath);
+                } catch (error) {
+                    // If it's a regular diff or deletion but file doesn't exist, skip or error
+                    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                        console.warn(`[CodeProcessor] applyDiff: File not found, skipping operation for ${diffFile.path}`);
+                        return; // Skip this file
+                    } else {
+                        console.error(`[CodeProcessor] applyDiff: Error accessing file ${diffFile.path}:`, error);
+                        throw error; // Rethrow other access errors
+                    }
+                }
+            }
 
-            if (diffFile.content.startsWith("---")) {
-                //It is a regular diff.
+
+            if (diffFile.content.startsWith("---") && diffFile.content.includes("+++")) { // Regular diff (modify)
                 console.log(`[CodeProcessor] applyDiff: Applying diff to file: ${fullPath}`);
                 try {
-                    await this.fs.applyDiffToFile(diffFile.path, diffFile.content, this.projectRoot); //apply diff
+                    // TODO: FileSystem needs an applyDiffToFile method
+                    // await this.fs.applyDiffToFile(diffFile.path, diffFile.content, this.projectRoot); //apply diff
+                     console.warn(`[CodeProcessor] applyDiff: applyDiffToFile not implemented in FileSystem. Skipping ${diffFile.path}`);
+
                 } catch (error) {
                     console.error(`[CodeProcessor] applyDiff: Error applying diff to ${diffFile.path}:`, error);
                     throw error; // Re-throw after logging
                 }
 
-            } else if (diffFile.content.startsWith("+++")) {  // creating files
-                //Creating a file
+            } else if (diffFile.content.startsWith("+++")) {  // Creating files
                 console.log(`[CodeProcessor] applyDiff: Creating file: ${fullPath}`);
+                // Extract content after '+++ b/...' line
                 const lines = diffFile.content.split('\n');
-                if (lines.length > 1) {
-                    const content = lines.slice(1).join('\n');
-                    await this.fs.writeFile(fullPath, content);
-                } else {
-                    // Handle edge case: empty file
-                    await this.fs.writeFile(fullPath, ""); // Create an empty file
-                }
+                let contentStartIndex = lines.findIndex(line => line.startsWith('+') && !line.startsWith('+++')); // Find first actual content line
+                if (contentStartIndex === -1) contentStartIndex = 1; // Fallback if no '+' lines (empty file creation?)
+                const content = lines.slice(contentStartIndex).map(l => l.startsWith('+') ? l.substring(1) : l).join('\n'); // Remove leading '+'
 
-            } else if (diffFile.content.startsWith("---")) { //deleting files.
+                 // Ensure directory exists
+                 await this.fs.ensureDirExists(path.dirname(fullPath));
+                 await this.fs.writeFile(fullPath, content);
+
+
+            } else if (diffFile.content.startsWith("---") && !diffFile.content.includes("+++")) { // Deleting files (only --- lines)
                 console.log(`[CodeProcessor] applyDiff: Deleting file: ${fullPath}`);
-                await this.fs.deleteFile(fullPath);
+                try {
+                    await this.fs.deleteFile(fullPath);
+                } catch (error) {
+                     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { // Don't error if already deleted
+                        console.error(`[CodeProcessor] applyDiff: Error deleting file ${diffFile.path}:`, error);
+                        throw error;
+                     } else {
+                        console.log(`[CodeProcessor] applyDiff: File already deleted: ${fullPath}`);
+                     }
+                }
 
             } else {
                 console.error(`[CodeProcessor] applyDiff: Unrecognized diff format for file: ${diffFile.path}`);
@@ -270,16 +279,24 @@ class CodeProcessor {
         });
         await Promise.all(applyPromises); // Apply all diffs in parallel
         console.log(`[CodeProcessor] applyDiff: Finished applying diff.`);
+        this.currentDiff = null; // Clear diff after applying
     }
 
     //For checking the type of response that came back from Gemini
-    public async checkResponse(prompt: string): Promise<string> {
-        console.log(`[CodeProcessor] checkResponse: Checking response for prompt: ${prompt}`);
+    public async checkResponse(prompt: string): Promise<string> { // NOTE: Parameter name 'prompt' might be misleading here, it's the AI response text
+        const aiResponseText = prompt; // Rename for clarity inside the function
+        console.log(`[CodeProcessor] checkResponse: Checking response: ${aiResponseText.substring(0, 100)}...`); // Log start of text
         let conversation = this.conversationManager.createConversation();
-        conversation.conversation.addMessage("user", prompt)
+
+        // --- Use imported prompt function ---
+        const commentCheckPrompt = WebSocketPrompts.commentCheckPrompt(aiResponseText);
+        // --- End modification ---
+
+        conversation.conversation.addMessage("user", commentCheckPrompt); // Use the generated prompt
         try {
-            const aiResponse = await this.aiClient.getResponseFromAI(conversation.conversation, "gpt-4o-mini"); // Use AI Client
-            console.log(`[CodeProcessor] checkResponse: Received response from AI. Length: ${aiResponse.length}`);
+             // TODO: Pass useFlashModel based on context/config
+            const aiResponse = await this.aiClient.getResponseTextFromAI(conversation.conversation.getMessages(), true); // Use text generation, potentially flash
+            console.log(`[CodeProcessor] checkResponse: Received check result from AI. Length: ${aiResponse.length}`);
             return aiResponse;
         } catch (error) {
             console.error(`[CodeProcessor] checkResponse: Error checking response:`, error);
@@ -291,21 +308,43 @@ class CodeProcessor {
 
 // Helper function to extract the diff for a specific file
 function extractDiffForFile(aiResponseString: string, filePath: string): string | null {
-    // Implement logic to extract only the diff relevant to the specific file.
-    // This might involve regular expressions or other parsing techniques.
-    //It also is not clear what `extractDiffForFile` does or what an example might be.
-    // This is a stub implementation.  Adapt this based on the AI's response structure.
-    const diffStart = aiResponseString.indexOf(`--- a/${filePath}`);
-    if (diffStart === -1) {
-        return null;
+    // This regex attempts to find a standard diff block for the specified file.
+    // It looks for `--- a/filepath` followed by `+++ b/filepath` and captures everything until the next `--- a/` or the end of the string.
+    // Handles potential variations in paths (e.g., leading ./ or just the path)
+    const safeFilePath = filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape regex special chars in filepath
+    const diffRegex = new RegExp(
+        `^--- (?:a\\/)?${safeFilePath}\\r?\\n\\+\\+\\+ (?:b\\/)?${safeFilePath}\\r?\\n((?:.|\\r?\\n)*?)(?=\\r?\\n--- (?:a\\/)|$)`,
+        'm' // Multiline mode
+    );
+
+    const match = aiResponseString.match(diffRegex);
+
+    if (match && match[0]) {
+        // Return the full matched diff block including headers
+        return match[0].trim();
+    } else {
+        // Fallback or alternative regex patterns could be added here if needed.
+        // Check for simple creation/deletion markers if the main regex fails
+        // (This part needs careful design based on expected AI output formats)
+
+        // Example: Check for a block starting with +++ b/filepath and nothing else complex
+        const creationRegex = new RegExp(`^\\+\\+\\+ (?:b\\/)?${safeFilePath}\\r?\\n((?:.|\\r?\\n)*?)(?=\\r?\\n--- (?:a\\/)|$)`, 'm');
+        const creationMatch = aiResponseString.match(creationRegex);
+        if (creationMatch && creationMatch[0] && !aiResponseString.includes(`--- a/${filePath}`)) {
+             return creationMatch[0].trim(); // Likely file creation
+        }
+
+         // Example: Check for --- a/filepath with no following +++ b/filepath before next file
+         const deletionRegex = new RegExp(`^--- (?:a\\/)?${safeFilePath}\\r?\\n(?!(?:.|\\r?\\n)*^\\+\\+\\+ (?:b\\/)?${safeFilePath}\\r?\\n)((?:.|\\r?\\n)*?)(?=\\r?\\n--- (?:a\\/)|$)`, 'm');
+         const deletionMatch = aiResponseString.match(deletionRegex);
+         if (deletionMatch && deletionMatch[0]) {
+             return deletionMatch[0].trim(); // Likely file deletion marker
+         }
+
     }
 
-    const diffEnd = aiResponseString.indexOf("```", diffStart); // Find the end of the code block.
 
-    if (diffEnd === -1) {
-        return aiResponseString.substring(diffStart); // Assume rest of the message
-    }
-    return aiResponseString.substring(diffStart, diffEnd); //return all.
+    return null; // No diff found for this file
 }
 
 export {CodeProcessor};

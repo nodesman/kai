@@ -12,6 +12,7 @@ import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
 import { GitService } from './GitService'; // <-- Keep GitService import
+import { ConsolidationPrompts } from './prompts'; // <-- ADD THIS IMPORT
 
 // REMOVE exec if no longer needed
 // const exec = promisify(execCb);
@@ -155,41 +156,9 @@ export class ConsolidationService {
             .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
             .join('');
 
-        const analysisPrompt = `CONTEXT:
-You are an expert AI analyzing a coding conversation to determine the necessary file changes.
-CODEBASE CONTEXT:
-${codeContext}
----
-CONVERSATION HISTORY:
-${historyString}
----
-TASK:
-Analyze the CONVERSATION HISTORY in the context of the CODEBASE CONTEXT. Identify all files that need to be created, modified, or deleted to fulfill the user's requests throughout the conversation.
-
-Respond ONLY with a JSON object containing a single key "operations".
-The "operations" key should be an array of objects, where each object has:
-1.  "filePath": The relative path of the file from the project root (e.g., "src/lib/utils.ts").
-2.  "action": A string, either "CREATE", "MODIFY", or "DELETE".
-
-Example Response:
-\`\`\`json
-{
-  "operations": [
-    { "filePath": "src/newFeature.js", "action": "CREATE" },
-    { "filePath": "README.md", "action": "MODIFY" },
-    { "filePath": "old_scripts/cleanup.sh", "action": "DELETE" }
-  ]
-}
-\`\`\`
-
-If no file changes are implied by the conversation, respond with an empty "operations" array:
-\`\`\`json
-{
-  "operations": []
-}
-\`\`\`
-
-Do NOT include explanations, comments, or any other text outside the JSON object. Ensure the JSON is valid.`;
+        // --- Use imported prompt function ---
+        const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
+        // --- End modification ---
 
         try {
             const responseTextRaw = await this.aiClient.getResponseTextFromAI(
@@ -310,6 +279,12 @@ Do NOT include explanations, comments, or any other text outside the JSON object
     ): Promise<FinalFileStates> {
         const finalStates: FinalFileStates = {};
 
+        // --- Get history string once ---
+        const historyString = conversation.getMessages()
+            .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
+            .join('');
+        // ---
+
         const filesToGenerate = analysisResult.operations
             .filter(op => op.action === 'CREATE' || op.action === 'MODIFY')
             .map(op => op.filePath);
@@ -332,12 +307,14 @@ Do NOT include explanations, comments, or any other text outside the JSON object
                         if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
                     }
 
-                    const individualPrompt = this._constructIndividualFileGenerationPrompt(
-                        conversation,
+                    // --- Use imported prompt function directly ---
+                    const individualPrompt = ConsolidationPrompts.individualFileGenerationPrompt(
                         codeContext,
+                        historyString,
                         normalizedPath,
                         currentContent
                     );
+                    // --- End modification ---
 
                      // --- ADD RETRY LOGIC HERE (as an example, using simple loop) ---
                      let responseTextRaw = '';
@@ -418,36 +395,7 @@ Do NOT include explanations, comments, or any other text outside the JSON object
         return finalStates;
     }
 
-    // --- _constructIndividualFileGenerationPrompt method ---
-    private _constructIndividualFileGenerationPrompt(
-        conversation: Conversation,
-        codeContext: string,
-        filePath: string,
-        currentContent: string | null
-    ): string {
-        const historyString = conversation.getMessages()
-            .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
-            .join('');
-
-        return `CONTEXT:
-You are an expert AI assisting with code generation based on a conversation.
-CODEBASE CONTEXT:
-${codeContext}
----
-CONVERSATION HISTORY:
-${historyString}
----
-CURRENT FILE CONTENT for '${filePath}' (if it exists):
-${currentContent === null ? '(File does not exist - generate content for creation)' : `\`\`\`\n${currentContent}\n\`\`\``}
----
-TASK:
-Based *only* on the conversation history and provided context/current content, generate the **complete and final content** for the single file specified below:
-File Path: '${filePath}'
-
-Respond ONLY with the raw file content for '${filePath}'.
-Do NOT include explanations, markdown code fences (\`\`\`), file path headers, or any other text outside the file content itself.
-If the conversation implies this file ('${filePath}') should ultimately be deleted, respond ONLY with the exact text "DELETE_FILE".`;
-    }
+    // --- REMOVED _constructIndividualFileGenerationPrompt method ---
 
     // --- prepareReviewData method ---
     private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
