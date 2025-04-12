@@ -10,15 +10,16 @@ import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 // REMOVED: import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
 import { GitService } from './GitService';
 import { ConsolidationPrompts } from './prompts';
-import { ConsolidationReviewer } from './ConsolidationReviewer'; // <-- ADDED THIS IMPORT
+import { ConsolidationReviewer } from './ConsolidationReviewer';
+import { ConsolidationGenerator } from './ConsolidationGenerator'; // <-- ADD THIS IMPORT
 
-// Define FinalFileStates interface here
+// Define FinalFileStates interface here (keep export)
 export interface FinalFileStates {
     [filePath: string]: string | 'DELETE_CONFIRMED';
 }
 
-// Keep ConsolidationAnalysis interface
-interface ConsolidationAnalysis {
+// Keep ConsolidationAnalysis interface (keep export)
+export interface ConsolidationAnalysis {
     operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
     groups?: string[][];
 }
@@ -29,7 +30,8 @@ export class ConsolidationService {
     private aiClient: AIClient;
     private projectRoot: string;
     private gitService: GitService;
-    private consolidationReviewer: ConsolidationReviewer; // <-- ADDED THIS
+    private consolidationReviewer: ConsolidationReviewer;
+    private consolidationGenerator: ConsolidationGenerator; // <-- ADD THIS
 
     constructor(
         config: Config,
@@ -43,7 +45,14 @@ export class ConsolidationService {
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
         this.gitService = gitService;
-        this.consolidationReviewer = new ConsolidationReviewer(this.fs); // <-- INSTANTIATED HERE
+        this.consolidationReviewer = new ConsolidationReviewer(this.fs);
+        // <-- INSTANTIATE ConsolidationGenerator HERE -->
+        this.consolidationGenerator = new ConsolidationGenerator(
+            this.config,
+            this.fs, // Pass the FileSystem instance
+            this.aiClient,
+            this.projectRoot
+        );
     }
 
     async process(
@@ -69,7 +78,7 @@ export class ConsolidationService {
 
             // Determine models
             const useFlashForAnalysis = false;
-            const useFlashForIndividualGeneration = false;
+            const useFlashForIndividualGeneration = false; // Keep this decision here
             const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
@@ -87,9 +96,10 @@ export class ConsolidationService {
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
 
-            // Step B: Generation
+            // Step B: Generation (Delegated to ConsolidationGenerator)
             console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
-            const finalStates = await this.generateIndividualFileContents(
+            // <-- CALL THE NEW GENERATOR SERVICE -->
+            const finalStates = await this.consolidationGenerator.generate(
                 conversation,
                 currentContextString,
                 analysisResult,
@@ -97,13 +107,13 @@ export class ConsolidationService {
                 useFlashForIndividualGeneration,
                 generationModelName
             );
+            // <-- END CALL -->
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
 
-            // --- Step C: Review Changes (Delegated) ---
+            // Step C: Review Changes (Delegated)
             const applyChanges = await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
-            // --- END DELEGATION ---
 
 
             // Step D: Apply Changes
@@ -117,7 +127,7 @@ export class ConsolidationService {
             }
 
         } catch (error) {
-            // Error Handling
+            // Error Handling remains the same
             console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
             const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
             try {
@@ -131,7 +141,7 @@ export class ConsolidationService {
         }
     }
 
-    // --- analyzeConversationForChanges (Unchanged logic) ---
+    // --- analyzeConversationForChanges (Remains Unchanged) ---
     private async analyzeConversationForChanges(
         conversation: Conversation,
         codeContext: string,
@@ -185,134 +195,9 @@ export class ConsolidationService {
         }
     }
 
-    // --- generateIndividualFileContents (Complete and Unchanged logic) ---
-    private async generateIndividualFileContents(
-        conversation: Conversation,
-        codeContext: string,
-        analysisResult: ConsolidationAnalysis,
-        conversationFilePath: string,
-        useFlashModel: boolean,
-        modelName: string
-    ): Promise<FinalFileStates> {
-        const finalStates: FinalFileStates = {};
-        const historyString = conversation.getMessages()
-            .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
-            .join('');
+    // --- REMOVE generateIndividualFileContents method ---
 
-        const filesToGenerate = analysisResult.operations
-            .filter(op => op.action === 'CREATE' || op.action === 'MODIFY')
-            .map(op => op.filePath);
-
-        if (filesToGenerate.length === 0) {
-            console.log(chalk.yellow("    No files require content generation based on analysis."));
-        } else {
-            console.log(chalk.cyan(`    Generating content for ${filesToGenerate.length} file(s) individually using ${modelName}...`));
-
-            let attempt = 0; // Define attempt here to use it in catch block below
-            for (const filePath of filesToGenerate) {
-                const normalizedPath = path.normalize(filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-                console.log(chalk.cyan(`      Generating content for: ${normalizedPath}`));
-
-                try {
-                    let currentContent: string | null = null;
-                    try {
-                        currentContent = await this.fs.readFile(path.resolve(this.projectRoot, normalizedPath));
-                    } catch (e) {
-                        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-                    }
-
-                    const individualPrompt = ConsolidationPrompts.individualFileGenerationPrompt(
-                        codeContext,
-                        historyString,
-                        normalizedPath,
-                        currentContent
-                    );
-
-                     // --- RETRY LOGIC ---
-                     let responseTextRaw = '';
-                     attempt = 0; // Reset attempt count for each file
-                     const maxAttempts = this.config.gemini.generation_max_retries ?? 3; // Use config value
-                     const baseDelay = this.config.gemini.generation_retry_base_delay_ms ?? 2000; // Use config value
-
-                     while (attempt <= maxAttempts) {
-                         try {
-                              console.log(chalk.dim(`        (Attempt ${attempt + 1}/${maxAttempts + 1}) Calling AI for ${normalizedPath}...`));
-                             responseTextRaw = await this.aiClient.getResponseTextFromAI(
-                                 [{ role: 'user', content: individualPrompt }],
-                                 useFlashModel
-                             );
-                             break; // Success, exit loop
-                         } catch (aiError: any) {
-                             // Check if the error is potentially retryable (e.g., rate limit, server error)
-                             // This is a simplified check; more robust checking might be needed based on AIClient errors
-                             const isRetryable = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'NETWORK_ERROR', 'NO_RESPONSE'].includes(aiError.code) ||
-                                                 aiError.message?.includes('500') || aiError.message?.includes('503') || aiError.message?.toLowerCase().includes('rate limit') || aiError.message?.toLowerCase().includes('retry');
-
-                             if (isRetryable && attempt < maxAttempts) {
-                                 attempt++;
-                                 const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
-                                 console.warn(chalk.yellow(`        AI Error for ${normalizedPath} (Attempt ${attempt}/${maxAttempts}): ${aiError.message}. Retrying in ${delay / 1000}s...`));
-                                 await new Promise(resolve => setTimeout(resolve, delay));
-                             } else {
-                                 console.error(chalk.red(`        Failed AI call for ${normalizedPath} after ${attempt + 1} attempts.`));
-                                 throw aiError; // Non-retryable or max attempts reached, re-throw
-                             }
-                         }
-                     }
-                     // --- END RETRY LOGIC ---
-
-                    let responseTextClean = responseTextRaw.trim();
-                    const startsWithFence = responseTextClean.match(/^```(?:[\w-]+)?\s*\n/);
-                    const endsWithFence = responseTextClean.endsWith('\n```');
-
-                    if (startsWithFence && endsWithFence) {
-                        console.warn(chalk.yellow(`      Note: Removing markdown fences from AI response for ${normalizedPath}`));
-                        responseTextClean = responseTextClean.substring(startsWithFence[0].length, responseTextClean.length - 4).trim();
-                    } else if (startsWithFence || endsWithFence) {
-                        console.warn(chalk.yellow(`      Warning: Found partial markdown fence in AI response for ${normalizedPath}. Using content as is.`));
-                    }
-
-                    if (responseTextClean === "DELETE_FILE") {
-                        finalStates[normalizedPath] = 'DELETE_CONFIRMED';
-                        console.log(chalk.yellow(`      AI suggested DELETE for ${normalizedPath}. Marked for deletion.`));
-                        await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: AI suggested DELETE for ${normalizedPath} during individual generation.` });
-                    } else {
-                        finalStates[normalizedPath] = responseTextClean;
-                        console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (Length: ${responseTextClean.length})`));
-                    }
-
-                } catch (error) { // Catch errors from the retry block or non-retryable ones
-                    const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName} after ${attempt + 1} attempts. Error: ${(error as Error).message}`;
-                    console.error(chalk.red(`      ${errorMsg}`));
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-                    // Decide how to handle: stop the whole process, or skip this file? Skipping for now.
-                    // Maybe add a placeholder or error state to finalStates?
-                    // finalStates[normalizedPath] = `/* ERROR: Generation failed: ${(error as Error).message} */`;
-                }
-            }
-        }
-
-        // Handle DELETE actions from analysis that weren't generated (or overridden by generation)
-        for (const op of analysisResult.operations) {
-            if (op.action === 'DELETE') {
-                const normalizedPath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-                if (!(normalizedPath in finalStates)) {
-                    // If the file wasn't generated (correct), mark it for deletion based on analysis
-                    console.log(chalk.dim(`      Marking DELETE for ${normalizedPath} based on analysis.`));
-                    finalStates[normalizedPath] = 'DELETE_CONFIRMED';
-                } else if (finalStates[normalizedPath] !== 'DELETE_CONFIRMED') {
-                    // If generation *did* produce content but analysis says DELETE, prioritize DELETE
-                    console.warn(chalk.yellow(`      Warning: ${normalizedPath} was marked DELETE in analysis, but generation step provided content. Prioritizing DELETE based on analysis.`));
-                    finalStates[normalizedPath] = 'DELETE_CONFIRMED';
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Overriding generated content for ${normalizedPath} with DELETE based on analysis.` });
-                }
-            }
-        }
-
-        return finalStates;
-    }
-
-    // --- applyConsolidatedChanges (Unchanged logic) ---
+    // --- applyConsolidatedChanges (Remains Unchanged) ---
     private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
         console.log(chalk.blue("Proceeding with file operations..."));
 
@@ -370,7 +255,4 @@ export class ConsolidationService {
             throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors.`);
         }
     }
-
-    // --- REMOVED prepareReviewData method ---
-    // --- REMOVED presentChangesForReviewTUI method ---
 }
