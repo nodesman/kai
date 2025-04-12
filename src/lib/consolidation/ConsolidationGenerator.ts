@@ -1,12 +1,12 @@
-// File: src/lib/ConsolidationGenerator.ts
+// File: src/lib/consolidation/ConsolidationGenerator.ts
 import path from 'path';
 import chalk from 'chalk';
-import { FileSystem } from './FileSystem';
-import { AIClient, LogEntryData } from './AIClient'; // Correct import
-import { Config } from './Config';
-import Conversation, { Message } from './models/Conversation';
-import { ConsolidationPrompts } from './prompts';
-import { FinalFileStates, ConsolidationAnalysis } from './ConsolidationService'; // Import types
+import { FileSystem } from '../FileSystem'; // Adjusted path
+import { AIClient, LogEntryData } from '../AIClient'; // Adjusted path
+import { Config } from '../Config'; // Adjusted path
+import Conversation, { Message } from '../models/Conversation'; // Adjusted path
+import { ConsolidationPrompts } from './prompts'; // Adjusted path
+import { FinalFileStates, ConsolidationAnalysis } from './types'; // Adjusted path
 
 export class ConsolidationGenerator {
     private config: Config;

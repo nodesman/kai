@@ -1,27 +1,17 @@
-// File: src/lib/ConsolidationService.ts
+// File: src/lib/consolidation/ConsolidationService.ts
 import path from 'path';
 import chalk from 'chalk';
-import { FileSystem } from './FileSystem';
-import { AIClient, LogEntryData } from './AIClient'; // Correct import
-import { Config } from './Config';
-import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import { GitService } from './GitService';
-// Removed ConsolidationPrompts import as it's now used by ConsolidationAnalyzer
-import { ConsolidationReviewer } from './ConsolidationReviewer';
-import { ConsolidationGenerator } from './ConsolidationGenerator';
-import { ConsolidationApplier } from './ConsolidationApplier';
-import { ConsolidationAnalyzer } from './ConsolidationAnalyzer'; // <-- ADD THIS IMPORT
-
-// Define FinalFileStates interface here (keep export)
-export interface FinalFileStates {
-    [filePath: string]: string | 'DELETE_CONFIRMED';
-}
-
-// Keep ConsolidationAnalysis interface export (or move definition)
-export interface ConsolidationAnalysis {
-    operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
-    groups?: string[][];
-}
+import { FileSystem } from '../FileSystem';
+import { AIClient, LogEntryData } from '../AIClient'; // Correct import path
+import { Config } from '../Config'; // Correct import path
+import Conversation, { Message, JsonlLogEntry } from '../models/Conversation'; // Correct import path
+import { GitService } from '../GitService'; // Correct import path
+// Removed ConsolidationPrompts import as it's now used by ConsolidationAnalyzer in this directory
+import { ConsolidationReviewer } from './ConsolidationReviewer'; // Use relative path
+import { ConsolidationGenerator } from './ConsolidationGenerator'; // Use relative path
+import { ConsolidationApplier } from './ConsolidationApplier'; // Use relative path
+import { ConsolidationAnalyzer } from './ConsolidationAnalyzer'; // Use relative path
+import { FinalFileStates, ConsolidationAnalysis } from './types'; // Import types from local types file
 
 export class ConsolidationService {
     private config: Config;
@@ -32,7 +22,7 @@ export class ConsolidationService {
     private consolidationReviewer: ConsolidationReviewer;
     private consolidationGenerator: ConsolidationGenerator;
     private consolidationApplier: ConsolidationApplier;
-    private consolidationAnalyzer: ConsolidationAnalyzer; // <-- ADD THIS INSTANCE VARIABLE
+    private consolidationAnalyzer: ConsolidationAnalyzer;
 
     constructor(
         config: Config,
@@ -46,6 +36,7 @@ export class ConsolidationService {
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
         this.gitService = gitService;
+        // Instantiate components from the same directory
         this.consolidationReviewer = new ConsolidationReviewer(this.fs);
         this.consolidationGenerator = new ConsolidationGenerator(
             this.config,
@@ -54,7 +45,7 @@ export class ConsolidationService {
             this.projectRoot
         );
         this.consolidationApplier = new ConsolidationApplier(this.fs);
-        this.consolidationAnalyzer = new ConsolidationAnalyzer(this.aiClient); // <-- INSTANTIATE HERE
+        this.consolidationAnalyzer = new ConsolidationAnalyzer(this.aiClient);
     }
 
     async process(
@@ -87,7 +78,6 @@ export class ConsolidationService {
 
             // Step A: Analysis (Delegated to ConsolidationAnalyzer)
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
-            // <-- CALL THE NEW ANALYZER SERVICE -->
             const analysisResult = await this.consolidationAnalyzer.analyze(
                 conversation,
                 currentContextString,
@@ -95,7 +85,6 @@ export class ConsolidationService {
                 useFlashForAnalysis,
                 analysisModelName
             );
-            // <-- END CALL -->
 
              if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
                 console.log(chalk.yellow("  Analysis did not identify any specific file operations. Consolidation might be incomplete or unnecessary."));
@@ -167,6 +156,4 @@ export class ConsolidationService {
             }
         }
     }
-
-    // --- REMOVED analyzeConversationForChanges METHOD ---
 }

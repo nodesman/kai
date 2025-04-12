@@ -1,11 +1,11 @@
-// File: src/lib/ConsolidationReviewer.ts
+// File: src/lib/consolidation/ConsolidationReviewer.ts
 import path from 'path';
 import chalk from 'chalk';
 import * as Diff from 'diff';
 import inquirer from 'inquirer';
-import { FileSystem } from './FileSystem';
-import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager'; // Adjust path if needed
-import { FinalFileStates } from './ConsolidationService'; // Import the type - Adjust path if needed
+import { FileSystem } from '../FileSystem'; // Path relative to src/lib/
+import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager'; // Path relative to src/lib/consolidation/
+import { FinalFileStates } from './types'; // Path relative to src/lib/consolidation/
 
 export class ConsolidationReviewer {
     private fs: FileSystem;
@@ -32,8 +32,7 @@ export class ConsolidationReviewer {
         return await this._presentChangesForReviewTUI(reviewData);
     }
 
-
-    // --- Private Methods (Moved from ConsolidationService) ---
+    // --- Private Methods ---
 
     /**
      * Generates diffs and prepares data suitable for the ReviewUIManager.

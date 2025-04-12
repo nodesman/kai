@@ -1,8 +1,8 @@
-// File: src/lib/ConsolidationApplier.ts
+// File: src/lib/consolidation/ConsolidationApplier.ts
 import path from 'path';
 import chalk from 'chalk';
-import { FileSystem } from './FileSystem';
-import { FinalFileStates } from './ConsolidationService'; // Import the type definition
+import { FileSystem } from '../FileSystem';
+import { FinalFileStates } from './types'; // Updated import path
 
 export class ConsolidationApplier {
     private fs: FileSystem;

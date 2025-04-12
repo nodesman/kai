@@ -1,8 +1,13 @@
-// File: src/lib/ReviewUIManager.ts
+// File: src/lib/consolidation/ReviewUIManager.ts
 import blessed from 'blessed';
 import chalk from 'chalk'; // Optional: for logging within the UI manager if needed
 
+// --- MODIFIED IMPORT: Point to the new types file within the same directory ---
+import { FinalFileStates } from './types'; // Import the type from the new types file
+// --- END MODIFICATION ---
+
 // --- Interface Definition (Exported directly here) ---
+// Kept within this file as it's tightly coupled to the UI Manager's data structure
 export type ReviewAction = 'CREATE' | 'MODIFY' | 'DELETE';
 export interface ReviewDataItem {
     filePath: string;
@@ -173,7 +178,6 @@ class ReviewUIManager {
             // Optional: Force exit if _handleReject doesn't kill the process quickly enough
             // setTimeout(() => process.exit(1), 50);
         });
-
 
         // Allow focusing between panes (optional, but can be useful)
         this.screen.key(['tab'], () => {

@@ -1,10 +1,10 @@
-// File: src/lib/ConsolidationAnalyzer.ts
+// File: src/lib/consolidation/ConsolidationAnalyzer.ts
 import path from 'path';
 import chalk from 'chalk';
-import { AIClient, LogEntryData } from './AIClient'; // Correct import
-import Conversation, { Message } from './models/Conversation';
-import { ConsolidationPrompts } from './prompts';
-import { ConsolidationAnalysis } from './ConsolidationService'; // Import type from ConsolidationService (or move definition here/to types.ts)
+import { AIClient, LogEntryData } from '../AIClient'; // Path changed from './AIClient'
+import Conversation, { Message } from '../models/Conversation'; // Path changed from './models/Conversation'
+import { ConsolidationPrompts } from './prompts'; // Path changed from './prompts'
+import { ConsolidationAnalysis } from './types'; // Path changed from './ConsolidationService'
 
 export class ConsolidationAnalyzer {
     private aiClient: AIClient;

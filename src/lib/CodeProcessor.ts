@@ -5,10 +5,12 @@ import { AIClient, LogEntryData } from './AIClient';
 import { Config } from "./Config";
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import { toSnakeCase, countTokens } from './utils'; // countTokens might not be needed here anymore
+import { toSnakeCase } from './utils'; // countTokens might not be needed here anymore
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
-import { ConsolidationService } from './ConsolidationService';
+// --- MODIFICATION: Update import path for ConsolidationService ---
+import { ConsolidationService } from './consolidation/ConsolidationService';
+// --- END MODIFICATION ---
 // REMOVE child_process imports as CommandService handles execution
 // import { exec as execCb } from 'child_process';
 // import { promisify } from 'util';
