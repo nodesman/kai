@@ -6,17 +6,18 @@ import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { GitService } from './GitService';
-import { ConsolidationPrompts } from './prompts';
+// Removed ConsolidationPrompts import as it's now used by ConsolidationAnalyzer
 import { ConsolidationReviewer } from './ConsolidationReviewer';
 import { ConsolidationGenerator } from './ConsolidationGenerator';
-import { ConsolidationApplier } from './ConsolidationApplier'; // <-- ADD THIS IMPORT
+import { ConsolidationApplier } from './ConsolidationApplier';
+import { ConsolidationAnalyzer } from './ConsolidationAnalyzer'; // <-- ADD THIS IMPORT
 
 // Define FinalFileStates interface here (keep export)
 export interface FinalFileStates {
     [filePath: string]: string | 'DELETE_CONFIRMED';
 }
 
-// Keep ConsolidationAnalysis interface (keep export)
+// Keep ConsolidationAnalysis interface export (or move definition)
 export interface ConsolidationAnalysis {
     operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
     groups?: string[][];
@@ -30,7 +31,8 @@ export class ConsolidationService {
     private gitService: GitService;
     private consolidationReviewer: ConsolidationReviewer;
     private consolidationGenerator: ConsolidationGenerator;
-    private consolidationApplier: ConsolidationApplier; // <-- ADD THIS INSTANCE VARIABLE
+    private consolidationApplier: ConsolidationApplier;
+    private consolidationAnalyzer: ConsolidationAnalyzer; // <-- ADD THIS INSTANCE VARIABLE
 
     constructor(
         config: Config,
@@ -51,8 +53,8 @@ export class ConsolidationService {
             this.aiClient,
             this.projectRoot
         );
-        // <-- INSTANTIATE ConsolidationApplier HERE -->
-        this.consolidationApplier = new ConsolidationApplier(this.fs); // Pass FileSystem
+        this.consolidationApplier = new ConsolidationApplier(this.fs);
+        this.consolidationAnalyzer = new ConsolidationAnalyzer(this.aiClient); // <-- INSTANTIATE HERE
     }
 
     async process(
@@ -66,7 +68,7 @@ export class ConsolidationService {
         await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
 
         try {
-            // Step 0: Git Check
+            // Step 0: Git Check (Unchanged)
             console.log(chalk.blue("\n  Step 0: Checking Git status..."));
             try {
                 await this.gitService.checkCleanStatus(this.projectRoot);
@@ -76,16 +78,25 @@ export class ConsolidationService {
                 throw gitError;
             }
 
-            // Determine models
+            // Determine models (Unchanged)
             const useFlashForAnalysis = false;
             const useFlashForIndividualGeneration = false;
             const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
 
-            // Step A: Analysis
+            // Step A: Analysis (Delegated to ConsolidationAnalyzer)
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
-            const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, conversationFilePath, useFlashForAnalysis, analysisModelName);
+            // <-- CALL THE NEW ANALYZER SERVICE -->
+            const analysisResult = await this.consolidationAnalyzer.analyze(
+                conversation,
+                currentContextString,
+                conversationFilePath,
+                useFlashForAnalysis,
+                analysisModelName
+            );
+            // <-- END CALL -->
+
              if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
                 console.log(chalk.yellow("  Analysis did not identify any specific file operations. Consolidation might be incomplete or unnecessary."));
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found 0 ops. Aborting consolidation.` });
@@ -94,7 +105,7 @@ export class ConsolidationService {
             console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
-            // Step B: Generation (Delegated to ConsolidationGenerator)
+            // Step B: Generation (Unchanged - Delegated to ConsolidationGenerator)
             console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
             const finalStates = await this.consolidationGenerator.generate(
                 conversation,
@@ -107,21 +118,17 @@ export class ConsolidationService {
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
-            // Step C: Review Changes (Delegated)
+            // Step C: Review Changes (Unchanged - Delegated to ConsolidationReviewer)
             const applyChanges = await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
 
-            // Step D: Apply Changes (Delegated to ConsolidationApplier)
+            // Step D: Apply Changes (Unchanged - Delegated to ConsolidationApplier)
              if (applyChanges) {
                 console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
-                // <-- CALL THE NEW APPLIER SERVICE -->
                 const { success, failed, skipped, summary } = await this.consolidationApplier.apply(
                     finalStates,
                     this.projectRoot
-                    // No need to pass conversationFilePath here if logging is handled outside
                 );
-                // <-- END CALL -->
 
-                // Log the summary to the conversation file
                 try {
                     const title = failed > 0 ? 'Consolidation Apply Summary (with failures)' : 'Consolidation Apply Summary';
                     await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
@@ -129,7 +136,6 @@ export class ConsolidationService {
                     console.warn(chalk.yellow("Warning: Could not log apply summary to conversation file."), logErr);
                 }
 
-                // Throw an error if the apply step had failures
                 if (failed > 0) {
                     throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above.`);
                 }
@@ -140,18 +146,18 @@ export class ConsolidationService {
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: msg });
             }
 
-        } catch (error) {
-            // Log the error that bubbles up from any step (including apply step)
+        } catch (error) { // Error handling remains largely the same
             console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
             const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
             try {
-                // Avoid duplicate logging for known, handled errors like Git status or the final apply summary error
+                // Avoid duplicate logging for known, handled errors
                 if (!(error instanceof Error && (
                     error.message.includes('Git working directory not clean') ||
                     error.message.includes('Failed to verify Git status') ||
                     error.message.includes('Git command not found') ||
                     error.message.includes('not a Git repository') ||
-                    error.message.includes('Consolidation apply step completed with') // Avoid logging the final summary error message again
+                    error.message.includes('Consolidation apply step completed with') ||
+                    error.message.includes('Failed to analyze conversation using') // Avoid logging analysis error twice
                     ))) {
                     const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
                     await this.aiClient.logConversation(conversationFilePath, logPayload);
@@ -162,67 +168,5 @@ export class ConsolidationService {
         }
     }
 
-    // --- analyzeConversationForChanges (Remains Unchanged) ---
-    private async analyzeConversationForChanges(
-        conversation: Conversation,
-        codeContext: string,
-        conversationFilePath: string,
-        useFlashModel: boolean,
-        modelName: string
-    ): Promise<ConsolidationAnalysis> {
-        console.log(chalk.cyan(`    Requesting analysis from ${modelName}...`));
-        const historyString = conversation.getMessages()
-            .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
-            .join('');
-
-        const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
-
-        try {
-            const responseTextRaw = await this.aiClient.getResponseTextFromAI(
-                [{ role: 'user', content: analysisPrompt }],
-                useFlashModel
-            );
-
-            let responseTextClean = responseTextRaw.trim();
-            const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-            if (jsonMatch && jsonMatch[1]) {
-                responseTextClean = jsonMatch[1].trim();
-            } else if (responseTextClean.startsWith('{') && responseTextClean.endsWith('}')) {
-                // Assume raw JSON
-            } else {
-                throw new Error(`Analysis response from ${modelName} was not in the expected JSON format. Raw: ${responseTextRaw}`);
-            }
-
-            const analysis: ConsolidationAnalysis = JSON.parse(responseTextClean);
-
-            if (!analysis || !Array.isArray(analysis.operations)) {
-                throw new Error(`Invalid JSON structure received from ${modelName}. Expected { "operations": [...] }. Received: ${responseTextClean}`);
-            }
-            for (const op of analysis.operations) {
-                 if (!op.filePath || !op.action || !['CREATE', 'MODIFY', 'DELETE'].includes(op.action)) {
-                    console.warn(chalk.yellow(`  Warning: Invalid operation structure found in analysis: filePath=${op.filePath}, action=${op.action}. Skipping operation.`));
-                    // Consider filtering out invalid ops here instead of letting them proceed
-                 }
-                // Ensure filePath is normalized relative path
-                op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-            }
-
-             // Filter out operations with missing filePaths after normalization/warning
-             const validOperations = analysis.operations.filter(op => op.filePath);
-             if(validOperations.length !== analysis.operations.length){
-                 console.warn(chalk.yellow(`  Warning: Filtered out ${analysis.operations.length - validOperations.length} invalid operations from analysis.`));
-             }
-             analysis.operations = validOperations;
-
-
-            console.log(chalk.cyan(`    Analysis received from ${modelName}. Found ${analysis.operations.length} valid operations.`));
-            return analysis;
-
-        } catch (error) {
-            const errorMsg = `Failed to analyze conversation using ${modelName}. Error: ${(error as Error).message}`;
-            console.error(chalk.red(`    ${errorMsg}`));
-            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            throw new Error(errorMsg); // Rethrow to stop consolidation
-        }
-    }
+    // --- REMOVED analyzeConversationForChanges METHOD ---
 }
