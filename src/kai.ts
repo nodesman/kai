@@ -13,10 +13,11 @@ import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
 
 async function main() {
+    const startupSound = 'Submarine'; // Default to submarine sound
     // --- Play startup sound on macOS ---
     if (process.platform === 'darwin') {
-        const soundPath = '/System/Library/Sounds/Tink.aiff'; // A common "ting" sound
-        exec(`afplay "${soundPath}"`, (error) => {
+        const soundPath = `/System/Library/Sounds/${startupSound}.aiff`; // A less annoying sound
+        exec(`afplay "${soundPath}"`, (error) => { // Play submarine sound
             if (error) {
                 // Log warning, but don't crash the app if sound fails
                 console.warn(chalk.yellow(`[Startup Sound] Could not play sound (${soundPath}): ${error.message}`));
