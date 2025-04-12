@@ -225,7 +225,4 @@ export class ConsolidationService {
             throw new Error(errorMsg); // Rethrow to stop consolidation
         }
     }
-
-    // --- REMOVE applyConsolidatedChanges method ---
-    // private async applyConsolidatedChanges(...) { ... } // DELETE THIS ENTIRE METHOD
 }
