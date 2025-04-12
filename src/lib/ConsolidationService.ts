@@ -1,19 +1,20 @@
 // src/lib/ConsolidationService.ts
 import path from 'path';
 import chalk from 'chalk';
-import * as Diff from 'diff'; // Still needed for prepareReviewData
-import { exec as execCb } from 'child_process';
-import { promisify } from 'util';
-import inquirer from 'inquirer'; // Keep for fallback in review TUI failure
+import * as Diff from 'diff';
+// REMOVE child_process and promisify if no longer needed elsewhere in this file
+// import { exec as execCb } from 'child_process';
+// import { promisify } from 'util';
+import inquirer from 'inquirer';
 import { FileSystem } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-// Removed imports related to Function Calling tools as they are no longer used here
-// e.g., Tool, FunctionDeclaration, GenerateContentRequest, FunctionCallingMode etc.
+import { GitService } from './GitService'; // <-- Import GitService
 
-const exec = promisify(execCb);
+// REMOVE exec if no longer needed
+// const exec = promisify(execCb);
 
 // --- Interfaces (Unchanged) ---
 interface ConsolidationAnalysis {
@@ -34,12 +35,14 @@ export class ConsolidationService {
     private fs: FileSystem;
     private aiClient: AIClient;
     private projectRoot: string;
+    private gitService: GitService; // <-- Add GitService instance variable
 
     constructor(config: Config, fileSystem: FileSystem, aiClient: AIClient, projectRoot: string) {
         this.config = config;
         this.fs = fileSystem;
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
+        this.gitService = new GitService(); // <-- Instantiate GitService
     }
 
     async process(
@@ -53,34 +56,18 @@ export class ConsolidationService {
         await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
 
         try {
-            // --- *** MOVED GIT CHECK TO THE BEGINNING *** ---
+            // --- *** USE GitService TO CHECK STATUS *** ---
             console.log(chalk.blue("\n  Step 0: Checking Git status..."));
             try {
-                const { stdout, stderr } = await exec('git status --porcelain', { cwd: this.projectRoot });
-                if (stderr) console.warn(chalk.yellow("Git status stderr:"), stderr);
-                const status = stdout.trim();
-                if (status !== '') {
-                    console.error(chalk.red("\nError: Git working directory not clean:"));
-                    console.error(chalk.red(status));
-                    const dirtyErrorMsg = 'Git working directory not clean. Consolidation aborted. Please commit or stash changes before consolidating.';
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: dirtyErrorMsg });
-                    throw new Error(dirtyErrorMsg); // Throw to abort the process
-                } else {
-                    console.log(chalk.green("  Git status clean. Proceeding with consolidation..."));
-                }
-            } catch (error: any) {
-                // Handle errors during Git check (e.g., Git not installed, not a repo)
-                console.error(chalk.red("\nError checking Git status:"), error.message || error);
-                let gitCheckErrorMsg = `Failed to verify Git status. Error: ${error.message}`;
-                if (error.message?.includes('command not found') || error.code === 'ENOENT') {
-                    gitCheckErrorMsg = 'Git command not found. Please ensure Git is installed and in your system PATH.';
-                } else if (error.stderr?.includes('not a git repository')) {
-                    gitCheckErrorMsg = 'Project directory is not a Git repository. Please initialize Git (`git init`).';
-                }
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitCheckErrorMsg });
-                throw new Error(gitCheckErrorMsg); // Re-throw to abort
+                await this.gitService.checkCleanStatus(this.projectRoot); // <-- Call the service method
+                console.log(chalk.green("  Proceeding with consolidation...")); // Moved success message here
+            } catch (gitError: any) {
+                // Log the error from the GitService to the conversation file
+                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitError.message });
+                // Re-throw the specific error from the service to halt the process
+                throw gitError;
             }
-            // --- *** END MOVED GIT CHECK *** ---
+            // --- *** END GIT CHECK REFACTOR *** ---
 
             // --- Determine model for consolidation steps ---
             const useFlashForAnalysis = false;
@@ -89,19 +76,19 @@ export class ConsolidationService {
             const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
 
+            // --- Step A: Analyzing conversation ---
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
-            // --- *** CALL TO THE NOW-RESTORED METHOD *** ---
             const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, conversationFilePath, useFlashForAnalysis, analysisModelName);
-            // --- *** END CALL *** ---
-
-            if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
+             if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
                 console.log(chalk.yellow("  Analysis did not identify any specific file operations. Consolidation might be incomplete or unnecessary."));
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found 0 ops. Aborting consolidation.` });
-                return; // Stop if no operations found
+                return;
             }
             console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
+
+            // --- Step B: Generating final file states ---
             console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
             const finalStates = await this.generateIndividualFileContents(
                 conversation,
@@ -114,37 +101,44 @@ export class ConsolidationService {
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
+
+            // --- Step C: Preparing changes for review ---
             console.log(chalk.cyan("\n  Step C: Preparing changes for review..."));
             const reviewData = await this.prepareReviewData(finalStates);
             console.log(chalk.green(`  Review preparation complete: ${reviewData.length} files with changes ready for review.`));
             const applyChanges = await this.presentChangesForReviewTUI(reviewData);
 
-            if (applyChanges) {
+
+            // --- Step D: Applying approved changes ---
+             if (applyChanges) {
                 console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
-                // --- *** CALL TO THE SINGLE, CORRECT applyConsolidatedChanges METHOD *** ---
                 await this.applyConsolidatedChanges(finalStates, conversationFilePath);
-                // --- *** END CALL *** ---
             } else {
                 const msg = `System: Consolidation aborted by user. No changes applied.`;
                 console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: msg });
             }
+
         } catch (error) {
-            // Error logging remains the same
+            // --- Updated error handling ---
             console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
+            // Log specific Git errors if they weren't caught and logged above (should be caught now)
+            // The generic logging remains useful for other error types.
             const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
             try {
-                if (!(error as Error).message.includes('Git working directory not clean') && !(error as Error).message.includes('Failed to verify Git status')) {
+                // Avoid double-logging Git check errors that were already logged
+                if (!(error instanceof Error && (error.message.includes('Git working directory not clean') || error.message.includes('Failed to verify Git status') || error.message.includes('Git command not found') || error.message.includes('not a Git repository')))) {
                     const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
                     await this.aiClient.logConversation(conversationFilePath, logPayload);
                 }
             } catch (logErr) {
                 console.error(chalk.red("Additionally failed to log consolidation error:"), logErr);
             }
+            // --- End Updated error handling ---
         }
     }
 
-    // --- *** RESTORED: analyzeConversationForChanges *** ---
+    // --- analyzeConversationForChanges method ---
     private async analyzeConversationForChanges(
         conversation: Conversation,
         codeContext: string,
@@ -226,7 +220,6 @@ Do NOT include explanations, comments, or any other text outside the JSON object
                 op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
             }
 
-
             console.log(chalk.cyan(`    Analysis received from ${modelName}. Found ${analysis.operations.length} operations.`));
             return analysis;
 
@@ -238,12 +231,10 @@ Do NOT include explanations, comments, or any other text outside the JSON object
             throw new Error(errorMsg);
         }
     }
-    // --- *** END RESTORED METHOD *** ---
 
-
-    // --- applyConsolidatedChanges (REMOVED Git Check, SINGLE IMPLEMENTATION) ---
+    // --- applyConsolidatedChanges method ---
     private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
-        // --- Git status check was moved to the start of `process` ---
+         // --- Git status check was moved to the start of `process` ---
         console.log(chalk.blue("Proceeding with file operations..."));
 
         let success = 0, failed = 0, skipped = 0;
@@ -303,10 +294,8 @@ Do NOT include explanations, comments, or any other text outside the JSON object
             throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors.`);
         }
     }
-    // --- *** END applyConsolidatedChanges *** ---
 
-
-    // --- *** generateIndividualFileContents (Unchanged from previous correct state) *** ---
+    // --- generateIndividualFileContents method ---
     private async generateIndividualFileContents(
         conversation: Conversation,
         codeContext: string,
@@ -374,6 +363,7 @@ Do NOT include explanations, comments, or any other text outside the JSON object
                     const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName}. Error: ${(error as Error).message}`;
                     console.error(chalk.red(`      ${errorMsg}`));
                     await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+                    // Consider adding a retry mechanism here or letting the user know generation failed for this file
                 }
             }
         }
@@ -394,9 +384,8 @@ Do NOT include explanations, comments, or any other text outside the JSON object
 
         return finalStates;
     }
-    // --- END generateIndividualFileContents ---
 
-    // --- _constructIndividualFileGenerationPrompt (Unchanged) ---
+    // --- _constructIndividualFileGenerationPrompt method ---
     private _constructIndividualFileGenerationPrompt(
         conversation: Conversation,
         codeContext: string,
@@ -427,7 +416,7 @@ Do NOT include explanations, markdown code fences (\`\`\`), file path headers, o
 If the conversation implies this file ('${filePath}') should ultimately be deleted, respond ONLY with the exact text "DELETE_FILE".`;
     }
 
-    // --- prepareReviewData (Unchanged) ---
+    // --- prepareReviewData method ---
     private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
         const reviewData: ReviewDataItem[] = [];
         for (const relativePath in finalStates) {
@@ -443,6 +432,7 @@ If the conversation implies this file ('${filePath}') should ultimately be delet
                     console.error(chalk.red(`Error reading current state of ${relativePath}:`), error);
                     throw error;
                 }
+                // If ENOENT, current remains null, indicating creation
             }
 
             let diffStr = '';
@@ -451,30 +441,40 @@ If the conversation implies this file ('${filePath}') should ultimately be delet
             if (proposed === 'DELETE_CONFIRMED') {
                 action = 'DELETE';
                 if (current !== null) {
+                    // Generate diff from current state to empty state
                     diffStr = Diff.createPatch(relativePath, current, '', '', '', { context: 5 });
-                    isMeaningful = true;
+                    isMeaningful = true; // Deleting an existing file is meaningful
                 } else {
+                    // File was marked for delete but doesn't exist, skip review
                     console.log(chalk.gray(`  Skipping review for DELETE ${relativePath} - file already gone.`));
-                    continue;
+                    continue; // Move to the next file
                 }
             } else {
+                // Ensure proposed is a string (handle potential type issues)
                 const proposedContent = typeof proposed === 'string' ? proposed : '';
 
                 if (current === null) {
                     action = 'CREATE';
+                    // Generate diff from empty state to proposed content
                     diffStr = Diff.createPatch(relativePath, '', proposedContent, '', '', { context: 5 });
+                    // Creation is meaningful only if content is not just whitespace
                     isMeaningful = proposedContent.trim().length > 0;
                 } else {
                     action = 'MODIFY';
                     if (current !== proposedContent) {
+                        // Generate diff between current and proposed content
                         diffStr = Diff.createPatch(relativePath, current, proposedContent, '', '', { context: 5 });
+                        // Check if the diff introduces actual changes beyond headers/whitespace
+                        // A simple check: does the diff contain '+' or '-' lines (excluding file headers)?
                         isMeaningful = diffStr.split('\n').slice(2).some(l => l.startsWith('+') || l.startsWith('-'));
                     } else {
+                        // Current and proposed content are identical
                         isMeaningful = false;
                     }
                 }
             }
 
+            // Add to review data only if the change is meaningful
             if (isMeaningful) {
                 reviewData.push({ filePath: relativePath, action, diff: diffStr });
             } else {
@@ -484,29 +484,37 @@ If the conversation implies this file ('${filePath}') should ultimately be delet
         return reviewData;
     }
 
-    // --- presentChangesForReviewTUI (Unchanged) ---
+    // --- presentChangesForReviewTUI method ---
     private async presentChangesForReviewTUI(reviewData: ReviewDataItem[]): Promise<boolean> {
         if (reviewData.length === 0) {
             console.log(chalk.yellow("No changes to review."));
-            return false;
+            return false; // No changes means don't apply anything
         }
+
         console.log(chalk.yellow("\nInitializing Review UI..."));
         try {
+            // Instantiate and run the TUI
             const reviewUI = new ReviewUIManager(reviewData);
-            return await reviewUI.run();
+            const userDecision = await reviewUI.run(); // This promise resolves with true (Apply) or false (Reject)
+            return userDecision;
+
         } catch (tuiError) {
+            // Fallback to simple CLI confirmation if TUI fails
             console.error(chalk.red("Error displaying Review TUI:"), tuiError);
             console.log(chalk.yellow("Falling back to simple CLI confirmation."));
-            const { confirm } = await inquirer.prompt([{
+
+            // Summarize changes for the fallback prompt
+            const changeSummary = reviewData.map(item => `  ${item.action.padEnd(6)}: ${item.filePath}`).join('\n');
+            console.log(chalk.cyan("\nProposed changes:"));
+            console.log(changeSummary);
+
+            const { confirm } = await inquirer.prompt<{ confirm: boolean }>([{
                 type: 'confirm',
                 name: 'confirm',
-                message: `Review UI failed. Apply ${reviewData.length} file change(s) based on prior summary?`,
-                default: false
+                message: `Review UI failed. Apply the ${reviewData.length} file change(s) listed above?`,
+                default: false // Default to not applying changes for safety
             }]);
             return confirm;
         }
     }
-
-    // --- *** REMOVED DUPLICATE applyConsolidatedChanges METHOD *** ---
-    // The second implementation starting around the original line 454 has been deleted.
 }
