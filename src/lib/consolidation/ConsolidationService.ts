@@ -2,16 +2,22 @@
 import path from 'path';
 import chalk from 'chalk';
 import { FileSystem } from '../FileSystem';
-import { AIClient, LogEntryData } from '../AIClient'; // Correct import path
-import { Config } from '../Config'; // Correct import path
-import Conversation, { Message, JsonlLogEntry } from '../models/Conversation'; // Correct import path
-import { GitService } from '../GitService'; // Correct import path
-// Removed ConsolidationPrompts import as it's now used by ConsolidationAnalyzer in this directory
-import { ConsolidationReviewer } from './ConsolidationReviewer'; // Use relative path
-import { ConsolidationGenerator } from './ConsolidationGenerator'; // Use relative path
-import { ConsolidationApplier } from './ConsolidationApplier'; // Use relative path
-import { ConsolidationAnalyzer } from './ConsolidationAnalyzer'; // Use relative path
-import { FinalFileStates, ConsolidationAnalysis } from './types'; // Import types from local types file
+import { AIClient, LogEntryData } from '../AIClient';
+import { Config } from '../Config';
+import Conversation, { Message, JsonlLogEntry } from '../models/Conversation';
+import { GitService } from '../GitService';
+import { ConsolidationReviewer } from './ConsolidationReviewer';
+import { ConsolidationGenerator } from './ConsolidationGenerator';
+import { ConsolidationApplier } from './ConsolidationApplier';
+import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
+import { FinalFileStates, ConsolidationAnalysis } from './types';
+
+interface ModelSelection {
+    analysisModelName: string;
+    generationModelName: string;
+    useFlashForAnalysis: boolean;
+    useFlashForGeneration: boolean;
+}
 
 export class ConsolidationService {
     private config: Config;
@@ -36,124 +42,242 @@ export class ConsolidationService {
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
         this.gitService = gitService;
-        // Instantiate components from the same directory
         this.consolidationReviewer = new ConsolidationReviewer(this.fs);
         this.consolidationGenerator = new ConsolidationGenerator(
-            this.config,
-            this.fs,
-            this.aiClient,
-            this.projectRoot
+            this.config, this.fs, this.aiClient, this.projectRoot
         );
         this.consolidationApplier = new ConsolidationApplier(this.fs);
         this.consolidationAnalyzer = new ConsolidationAnalyzer(this.aiClient);
     }
 
+    /**
+     * Orchestrates the entire consolidation process.
+     */
     async process(
         conversationName: string,
         conversation: Conversation,
         currentContextString: string,
         conversationFilePath: string
     ): Promise<void> {
-        const startMsg = `System: Starting AI-driven code consolidation for '${conversationName}'...`;
-        console.log(chalk.blue(startMsg.replace('System: ', '')));
-        await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
+        await this._logStart(conversationName, conversationFilePath);
 
         try {
-            // Step 0: Git Check (Unchanged)
-            console.log(chalk.blue("\n  Step 0: Checking Git status..."));
-            try {
-                await this.gitService.checkCleanStatus(this.projectRoot);
-                console.log(chalk.green("  Proceeding with consolidation..."));
-            } catch (gitError: any) {
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitError.message });
-                throw gitError;
-            }
+            // Step 0: Git Check
+            await this._performGitCheck(conversationFilePath);
 
-            // Determine models (Unchanged)
-            const useFlashForAnalysis = false;
-            const useFlashForIndividualGeneration = false;
-            const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
-            const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
-            console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
+            // Determine Models
+            const models = this._determineModels();
 
-            // Step A: Analysis (Delegated to ConsolidationAnalyzer)
-            console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
+            // Step A: Analyze
+            const analysisResult = await this._runAnalysisStep(
+                conversation, currentContextString, conversationFilePath, models
+            );
+            if (!analysisResult) return; // Analysis found nothing or failed critically
+
+            // Step B: Generate
+            const finalStates = await this._runGenerationStep(
+                conversation, currentContextString, analysisResult, conversationFilePath, models
+            );
+
+            // Step C: Review
+            const userApproved = await this._runReviewStep(finalStates);
+
+            // Step D: Apply (if approved)
+            await this._runApplyStep(userApproved, finalStates, conversationFilePath);
+
+        } catch (error) {
+            await this._handleConsolidationError(error, conversationName, conversationFilePath);
+        }
+    }
+
+    // --- Private Step Helper Methods ---
+
+    /** Logs the start of the consolidation process. */
+    private async _logStart(conversationName: string, conversationFilePath: string): Promise<void> {
+        const startMsg = `System: Starting AI-driven code consolidation for '${conversationName}'...`;
+        console.log(chalk.blue(startMsg.replace('System: ', '')));
+        await this._logSystemMessage(conversationFilePath, startMsg);
+    }
+
+    /** Performs the Git working directory cleanliness check. */
+    private async _performGitCheck(conversationFilePath: string): Promise<void> {
+        console.log(chalk.blue("\n  Step 0: Checking Git status..."));
+        try {
+            await this.gitService.checkCleanStatus(this.projectRoot);
+            console.log(chalk.green("  Git status clean. Proceeding..."));
+        } catch (gitError: any) {
+            // Log specific error to conversation before re-throwing
+            await this._logError(conversationFilePath, `Git Check Failed: ${gitError.message}`);
+            throw gitError; // Re-throw to stop the process
+        }
+    }
+
+    /** Determines which AI models to use for analysis and generation. */
+    private _determineModels(): ModelSelection {
+        // TODO: Make these flags configurable if needed
+        const useFlashForAnalysis = false;
+        const useFlashForGeneration = false;
+
+        const analysisModelName = useFlashForAnalysis
+            ? (this.config.gemini.subsequent_chat_model_name || 'Flash')
+            : (this.config.gemini.model_name || 'Pro');
+        const generationModelName = useFlashForGeneration
+            ? (this.config.gemini.subsequent_chat_model_name || 'Flash')
+            : (this.config.gemini.model_name || 'Pro');
+
+        console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for generation)`));
+
+        return {
+            analysisModelName,
+            generationModelName,
+            useFlashForAnalysis,
+            useFlashForGeneration: useFlashForGeneration
+        };
+    }
+
+    /** Runs the analysis step using ConsolidationAnalyzer. */
+    private async _runAnalysisStep(
+        conversation: Conversation,
+        currentContextString: string,
+        conversationFilePath: string,
+        models: ModelSelection
+    ): Promise<ConsolidationAnalysis | null> {
+        console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
+        try {
             const analysisResult = await this.consolidationAnalyzer.analyze(
                 conversation,
                 currentContextString,
                 conversationFilePath,
-                useFlashForAnalysis,
-                analysisModelName
+                models.useFlashForAnalysis,
+                models.analysisModelName
             );
 
-             if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
-                console.log(chalk.yellow("  Analysis did not identify any specific file operations. Consolidation might be incomplete or unnecessary."));
-                await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found 0 ops. Aborting consolidation.` });
-                return;
+            if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
+                console.log(chalk.yellow("  Analysis did not identify any specific file operations. Aborting consolidation."));
+                await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found 0 ops. Aborting consolidation.`);
+                return null; // Indicate no operations found
             }
-            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
-            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
-            // Step B: Generation (Unchanged - Delegated to ConsolidationGenerator)
-            console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
+            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
+            await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found ${analysisResult.operations.length} ops...`);
+            return analysisResult;
+        } catch (error) {
+            // Analyzer already logs errors internally, just re-throw to stop process
+            console.error(chalk.red(`  Analysis Step Failed.`)); // Add context log
+            throw error;
+        }
+    }
+
+    /** Runs the generation step using ConsolidationGenerator. */
+    private async _runGenerationStep(
+        conversation: Conversation,
+        currentContextString: string,
+        analysisResult: ConsolidationAnalysis,
+        conversationFilePath: string,
+        models: ModelSelection
+    ): Promise<FinalFileStates> {
+        console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
+        try {
             const finalStates = await this.consolidationGenerator.generate(
                 conversation,
                 currentContextString,
                 analysisResult,
                 conversationFilePath,
-                useFlashForIndividualGeneration,
-                generationModelName
+                models.useFlashForGeneration,
+                models.generationModelName
             );
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
-            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
+            await this._logSystemMessage(conversationFilePath, `System: Generation (using ${models.generationModelName}) produced states for ${Object.keys(finalStates).length} files...`);
+            return finalStates;
+        } catch (error) {
+            // Generator already logs errors internally, just re-throw to stop process
+             console.error(chalk.red(`  Generation Step Failed.`)); // Add context log
+            throw error;
+        }
+    }
 
-            // Step C: Review Changes (Unchanged - Delegated to ConsolidationReviewer)
-            const applyChanges = await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
+    /** Runs the review step using ConsolidationReviewer. */
+    private async _runReviewStep(finalStates: FinalFileStates): Promise<boolean> {
+        // Reviewer handles its own logging internally
+        return await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
+    }
 
-            // Step D: Apply Changes (Unchanged - Delegated to ConsolidationApplier)
-             if (applyChanges) {
-                console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
+    /** Runs the apply step using ConsolidationApplier if the user approved. */
+    private async _runApplyStep(
+        userApproved: boolean,
+        finalStates: FinalFileStates,
+        conversationFilePath: string
+    ): Promise<void> {
+        if (userApproved) {
+            console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
+            try {
                 const { success, failed, skipped, summary } = await this.consolidationApplier.apply(
                     finalStates,
                     this.projectRoot
                 );
 
-                try {
-                    const title = failed > 0 ? 'Consolidation Apply Summary (with failures)' : 'Consolidation Apply Summary';
-                    await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
-                } catch (logErr) {
-                    console.warn(chalk.yellow("Warning: Could not log apply summary to conversation file."), logErr);
-                }
+                // Log summary to conversation file
+                const title = failed > 0 ? 'Consolidation Apply Summary (with failures)' : 'Consolidation Apply Summary';
+                await this._logSystemMessage(conversationFilePath, `${title}:\n${summary.join('\n')}`);
 
+                // Throw an error if any apply operations failed
                 if (failed > 0) {
-                    throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above.`);
+                    throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above and in the conversation file.`);
                 }
+                console.log(chalk.green(`  Apply step completed successfully.`));
 
-            } else {
-                const msg = `System: Consolidation aborted by user. No changes applied.`;
-                console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
-                await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: msg });
+            } catch (error) {
+                 console.error(chalk.red(`  Apply Step Failed.`)); // Add context log
+                 // Log the error specifically from the apply step before re-throwing
+                 await this._logError(conversationFilePath, `Apply Step Failed: ${(error as Error).message}`);
+                 throw error;
             }
+        } else {
+            const msg = `System: Consolidation aborted by user. No changes applied.`;
+            console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
+            await this._logSystemMessage(conversationFilePath, msg);
+        }
+    }
 
-        } catch (error) { // Error handling remains largely the same
-            console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
-            const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
-            try {
-                // Avoid duplicate logging for known, handled errors
-                if (!(error instanceof Error && (
-                    error.message.includes('Git working directory not clean') ||
-                    error.message.includes('Failed to verify Git status') ||
-                    error.message.includes('Git command not found') ||
-                    error.message.includes('not a Git repository') ||
-                    error.message.includes('Consolidation apply step completed with') ||
-                    error.message.includes('Failed to analyze conversation using') // Avoid logging analysis error twice
-                    ))) {
-                    const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
-                    await this.aiClient.logConversation(conversationFilePath, logPayload);
-                }
-            } catch (logErr) {
-                console.error(chalk.red("Additionally failed to log consolidation error:"), logErr);
-            }
+    /** Handles and logs errors occurring during the consolidation process. */
+    private async _handleConsolidationError(
+        error: unknown,
+        conversationName: string,
+        conversationFilePath: string
+    ): Promise<void> {
+        console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
+        const errorMessage = (error instanceof Error) ? error.message : String(error);
+
+        // Avoid duplicate logging for errors already handled and logged by specific steps
+        const isKnownHandledError = errorMessage.includes('Git Check Failed:') ||
+                                    errorMessage.includes('Analysis Step Failed.') || // Assuming analyzer logs details
+                                    errorMessage.includes('Generation Step Failed.') || // Assuming generator logs details
+                                    errorMessage.includes('Apply Step Failed:') ||
+                                    errorMessage.includes('Consolidation apply step completed with');
+
+        if (!isKnownHandledError) {
+            await this._logError(conversationFilePath, `Consolidation failed: ${errorMessage}`);
+        }
+        // No need to re-throw here, as the main process loop will terminate.
+    }
+
+    // --- Private Logging Helpers ---
+
+    /** Logs an error message to the conversation file. */
+    private async _logError(conversationFilePath: string, errorMsg: string): Promise<void> {
+        try {
+            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+        } catch (logErr) {
+            console.error(chalk.red("Additionally failed to log consolidation error:"), logErr);
+        }
+    }
+
+     /** Logs a system message to the conversation file. */
+     private async _logSystemMessage(conversationFilePath: string, message: string): Promise<void> {
+        try {
+            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: message });
+        } catch (logErr) {
+            console.error(chalk.red("Additionally failed to log system message:"), logErr);
         }
     }
 }
