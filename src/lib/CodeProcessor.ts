@@ -9,9 +9,16 @@ import { toSnakeCase, countTokens } from './utils'; // countTokens might not be 
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
 import { ConsolidationService } from './ConsolidationService';
-import { exec as execCb } from 'child_process';
-import { promisify } from 'util';
-const exec = promisify(execCb); // Promisify for async/await usage
+// REMOVE child_process imports as CommandService handles execution
+// import { exec as execCb } from 'child_process';
+// import { promisify } from 'util';
+// const exec = promisify(execCb);
+
+// --- Import the new services ---
+import { CommandService } from './CommandService';
+import { GitService } from './GitService';
+// --- End imports ---
+
 
 // Interface for paths managed within the conversation
 interface ConversationPaths {
@@ -28,6 +35,10 @@ class CodeProcessor {
     private readonly CONSOLIDATE_COMMAND = '/consolidate';
     private contextBuilder: ProjectContextBuilder;
     private consolidationService: ConsolidationService;
+    // --- Add service instance variables ---
+    private commandService: CommandService;
+    private gitService: GitService;
+    // --- End service instance variables ---
 
     constructor(config: Config) {
         this.config = config;
@@ -36,7 +47,20 @@ class CodeProcessor {
         this.ui = new UserInterface(config);
         this.projectRoot = process.cwd();
         this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config);
-        this.consolidationService = new ConsolidationService(this.config, this.fs, this.aiClient, this.projectRoot);
+
+        // --- Instantiate services ---
+        this.commandService = new CommandService();
+        this.gitService = new GitService(this.commandService); // Pass CommandService to GitService
+        // --- End service instantiation ---
+
+        // Pass GitService to ConsolidationService
+        this.consolidationService = new ConsolidationService(
+            this.config,
+            this.fs,
+            this.aiClient,
+            this.projectRoot,
+            this.gitService // Pass the created GitService instance
+        );
     }
 
     // --- REMOVED buildContextString method ---
@@ -270,7 +294,8 @@ class CodeProcessor {
         }
     }
 
-    // --- Consolidation Orchestration Method (Unchanged from previous state) ---
+    // --- Consolidation Orchestration Method ---
+    // This method now uses the injected consolidationService which itself uses the injected gitService
     async processConsolidationRequest(conversationName: string): Promise<void> {
         const { conversationFilePath } = this._getConversationPaths(conversationName); // Use helper
         let conversation: Conversation;
@@ -289,6 +314,7 @@ class CodeProcessor {
             const { context: currentContextString } = await this.contextBuilder.build();
 
             // Delegate *entirely* to the ConsolidationService
+            // The consolidationService instance already has the correct GitService instance injected
             await this.consolidationService.process(
                 conversationName,
                 conversation,

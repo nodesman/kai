@@ -11,7 +11,7 @@ import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-import { GitService } from './GitService'; // <-- Import GitService
+import { GitService } from './GitService'; // <-- Keep GitService import
 
 // REMOVE exec if no longer needed
 // const exec = promisify(execCb);
@@ -35,15 +35,23 @@ export class ConsolidationService {
     private fs: FileSystem;
     private aiClient: AIClient;
     private projectRoot: string;
-    private gitService: GitService; // <-- Add GitService instance variable
+    private gitService: GitService; // <-- Keep GitService instance variable
 
-    constructor(config: Config, fileSystem: FileSystem, aiClient: AIClient, projectRoot: string) {
+    // --- *** MODIFY CONSTRUCTOR *** ---
+    constructor(
+        config: Config,
+        fileSystem: FileSystem,
+        aiClient: AIClient,
+        projectRoot: string,
+        gitService: GitService // <-- Accept GitService here
+    ) {
         this.config = config;
         this.fs = fileSystem;
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
-        this.gitService = new GitService(); // <-- Instantiate GitService
+        this.gitService = gitService; // <-- Assign the passed instance (removed direct instantiation)
     }
+    // --- *** END CONSTRUCTOR MODIFICATION *** ---
 
     async process(
         conversationName: string,
@@ -56,16 +64,15 @@ export class ConsolidationService {
         await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
 
         try {
-            // --- *** USE GitService TO CHECK STATUS *** ---
+            // --- *** USE INJECTED GitService TO CHECK STATUS *** ---
             console.log(chalk.blue("\n  Step 0: Checking Git status..."));
             try {
-                await this.gitService.checkCleanStatus(this.projectRoot); // <-- Call the service method
-                console.log(chalk.green("  Proceeding with consolidation...")); // Moved success message here
+                // Call the method on the injected gitService instance
+                await this.gitService.checkCleanStatus(this.projectRoot);
+                console.log(chalk.green("  Proceeding with consolidation..."));
             } catch (gitError: any) {
-                // Log the error from the GitService to the conversation file
                 await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitError.message });
-                // Re-throw the specific error from the service to halt the process
-                throw gitError;
+                throw gitError; // Re-throw to halt the process
             }
             // --- *** END GIT CHECK REFACTOR *** ---
 
@@ -87,7 +94,6 @@ export class ConsolidationService {
             console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
-
             // --- Step B: Generating final file states ---
             console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
             const finalStates = await this.generateIndividualFileContents(
@@ -101,13 +107,11 @@ export class ConsolidationService {
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
-
             // --- Step C: Preparing changes for review ---
             console.log(chalk.cyan("\n  Step C: Preparing changes for review..."));
             const reviewData = await this.prepareReviewData(finalStates);
             console.log(chalk.green(`  Review preparation complete: ${reviewData.length} files with changes ready for review.`));
             const applyChanges = await this.presentChangesForReviewTUI(reviewData);
-
 
             // --- Step D: Applying approved changes ---
              if (applyChanges) {
@@ -315,6 +319,7 @@ Do NOT include explanations, comments, or any other text outside the JSON object
         } else {
             console.log(chalk.cyan(`    Generating content for ${filesToGenerate.length} file(s) individually using ${modelName}...`));
 
+            let attempt = 0; // Define attempt here to use it in catch block below
             for (const filePath of filesToGenerate) {
                 const normalizedPath = path.normalize(filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
                 console.log(chalk.cyan(`      Generating content for: ${normalizedPath}`));
@@ -334,10 +339,38 @@ Do NOT include explanations, comments, or any other text outside the JSON object
                         currentContent
                     );
 
-                    const responseTextRaw = await this.aiClient.getResponseTextFromAI(
-                        [{ role: 'user', content: individualPrompt }],
-                        useFlashModel
-                    );
+                     // --- ADD RETRY LOGIC HERE (as an example, using simple loop) ---
+                     let responseTextRaw = '';
+                     attempt = 0; // Reset attempt count for each file
+                     const maxAttempts = this.config.gemini.generation_max_retries ?? 3; // Use config value
+                     const baseDelay = this.config.gemini.generation_retry_base_delay_ms ?? 2000; // Use config value
+
+                     while (attempt <= maxAttempts) {
+                         try {
+                              console.log(chalk.dim(`        (Attempt ${attempt + 1}/${maxAttempts + 1}) Calling AI for ${normalizedPath}...`));
+                             responseTextRaw = await this.aiClient.getResponseTextFromAI(
+                                 [{ role: 'user', content: individualPrompt }],
+                                 useFlashModel
+                             );
+                             break; // Success, exit loop
+                         } catch (aiError: any) {
+                             // Check if the error is potentially retryable (e.g., rate limit, server error)
+                             // You might need more sophisticated checking based on the AIClient's error types/codes
+                             const isRetryable = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'NETWORK_ERROR', 'NO_RESPONSE'].includes(aiError.code) ||
+                                                 aiError.message?.includes('500') || aiError.message?.includes('503') || aiError.message?.toLowerCase().includes('rate limit');
+
+                             if (isRetryable && attempt < maxAttempts) {
+                                 attempt++;
+                                 const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+                                 console.warn(chalk.yellow(`        AI Error for ${normalizedPath} (Attempt ${attempt}): ${aiError.message}. Retrying in ${delay / 1000}s...`));
+                                 await new Promise(resolve => setTimeout(resolve, delay));
+                             } else {
+                                 console.error(chalk.red(`        Failed AI call for ${normalizedPath} after ${attempt + 1} attempts.`));
+                                 throw aiError; // Non-retryable or max attempts reached, re-throw
+                             }
+                         }
+                     }
+                     // --- END RETRY LOGIC ---
 
                     let responseTextClean = responseTextRaw.trim();
                     const startsWithFence = responseTextClean.match(/^```(?:[\w-]+)?\s*\n/);
@@ -359,11 +392,11 @@ Do NOT include explanations, comments, or any other text outside the JSON object
                         console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (Length: ${responseTextClean.length})`));
                     }
 
-                } catch (error) {
-                    const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName}. Error: ${(error as Error).message}`;
+                } catch (error) { // Catch errors from the retry block or non-retryable ones
+                    const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName} after ${attempt + 1} attempts. Error: ${(error as Error).message}`;
                     console.error(chalk.red(`      ${errorMsg}`));
                     await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-                    // Consider adding a retry mechanism here or letting the user know generation failed for this file
+                    // Let the user know generation failed for this file. Consider if the whole process should stop.
                 }
             }
         }
