@@ -1,10 +1,10 @@
 // File: src/lib/consolidation/ConsolidationAnalyzer.ts
 import path from 'path';
 import chalk from 'chalk';
-import { AIClient, LogEntryData } from '../AIClient'; // Path changed from './AIClient'
-import Conversation, { Message } from '../models/Conversation'; // Path changed from './models/Conversation'
-import { ConsolidationPrompts } from './prompts'; // Path changed from './prompts'
-import { ConsolidationAnalysis } from './types'; // Path changed from './ConsolidationService'
+import { AIClient, LogEntryData } from '../AIClient';
+import Conversation, { Message } from '../models/Conversation';
+import { ConsolidationPrompts } from './prompts';
+import { ConsolidationAnalysis } from './types';
 
 export class ConsolidationAnalyzer {
     private aiClient: AIClient;
@@ -38,47 +38,14 @@ export class ConsolidationAnalyzer {
         const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
 
         try {
-            // Use the injected AI Client
-            const responseTextRaw = await this.aiClient.getResponseTextFromAI(
-                [{ role: 'user', content: analysisPrompt }],
-                useFlashModel
-            );
+            // Step 1: Get Raw AI Response
+            const responseTextRaw = await this._callAnalysisAI(analysisPrompt, useFlashModel);
 
-            let responseTextClean = responseTextRaw.trim();
-            const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-            if (jsonMatch && jsonMatch[1]) {
-                responseTextClean = jsonMatch[1].trim();
-            } else if (responseTextClean.startsWith('{') && responseTextClean.endsWith('}')) {
-                // Assume raw JSON
-            } else {
-                throw new Error(`Analysis response from ${modelName} was not in the expected JSON format. Raw: ${responseTextRaw}`);
-            }
+            // Step 2: Parse and Clean Response
+            const analysis = this._parseAndCleanAnalysisResponse(responseTextRaw, modelName);
 
-            const analysis: ConsolidationAnalysis = JSON.parse(responseTextClean);
-
-            // Validation of the parsed structure
-            if (!analysis || !Array.isArray(analysis.operations)) {
-                throw new Error(`Invalid JSON structure received from ${modelName}. Expected { "operations": [...] }. Received: ${responseTextClean}`);
-            }
-
-            // Normalize and validate individual operations
-            const validOperations: ConsolidationAnalysis['operations'] = [];
-            for (const op of analysis.operations) {
-                if (!op.filePath || !op.action || !['CREATE', 'MODIFY', 'DELETE'].includes(op.action)) {
-                    console.warn(chalk.yellow(`  Warning: Invalid operation structure found in analysis: filePath=${op.filePath}, action=${op.action}. Skipping operation.`));
-                    continue; // Skip this invalid operation
-                }
-                // Ensure filePath is normalized relative path
-                op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
-                if (!op.filePath) { // Check if path became empty after normalization
-                     console.warn(chalk.yellow(`  Warning: Operation file path became empty after normalization. Skipping operation.`));
-                     continue;
-                }
-                validOperations.push(op);
-            }
-
-            // Update analysis.operations with only the valid ones
-            analysis.operations = validOperations;
+            // Step 3: Validate and Normalize Operations
+            analysis.operations = this._validateAndNormalizeOperations(analysis.operations);
 
             console.log(chalk.cyan(`    Analysis received from ${modelName}. Found ${analysis.operations.length} valid operations.`));
             return analysis;
@@ -86,16 +53,93 @@ export class ConsolidationAnalyzer {
         } catch (error) {
             const errorMsg = `Failed to analyze conversation using ${modelName}. Error: ${(error as Error).message}`;
             console.error(chalk.red(`    ${errorMsg}`));
-            // Use the injected AI Client to log
-            try {
-                await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            } catch (logErr) {
-                console.error(chalk.red("Additionally failed to log analysis error:"), logErr);
-            }
+            await this._logError(conversationFilePath, errorMsg);
             throw new Error(errorMsg); // Rethrow to stop consolidation in the caller
         }
     }
-}
 
-// Optional: Move the ConsolidationAnalysis interface definition here if preferred
-// export interface ConsolidationAnalysis { ... }
+    /**
+     * Calls the AI client to get the raw analysis response.
+     * @param analysisPrompt The prompt string for the AI.
+     * @param useFlashModel Whether to use the flash model.
+     * @returns The raw response text from the AI.
+     * @throws An error if the AI call fails.
+     */
+    private async _callAnalysisAI(analysisPrompt: string, useFlashModel: boolean): Promise<string> {
+        return this.aiClient.getResponseTextFromAI(
+            [{ role: 'user', content: analysisPrompt }],
+            useFlashModel
+        );
+    }
+
+    /**
+     * Cleans the raw AI response, extracts JSON, and parses it.
+     * @param responseTextRaw The raw text response from the AI.
+     * @param modelName The model name (for error messages).
+     * @returns The parsed ConsolidationAnalysis object.
+     * @throws An error if parsing or validation fails.
+     */
+    private _parseAndCleanAnalysisResponse(responseTextRaw: string, modelName: string): ConsolidationAnalysis {
+        let responseTextClean = responseTextRaw.trim();
+        const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+
+        if (jsonMatch && jsonMatch[1]) {
+            responseTextClean = jsonMatch[1].trim();
+        } else if (responseTextClean.startsWith('{') && responseTextClean.endsWith('}')) {
+            // Assume raw JSON
+        } else {
+            throw new Error(`Analysis response from ${modelName} was not in the expected JSON format. Raw: ${responseTextRaw}`);
+        }
+
+        try {
+            const analysis: ConsolidationAnalysis = JSON.parse(responseTextClean);
+            // Basic structure validation
+            if (!analysis || !Array.isArray(analysis.operations)) {
+                throw new Error(`Invalid JSON structure received from ${modelName}. Expected { "operations": [...] }. Received: ${responseTextClean}`);
+            }
+            return analysis;
+        } catch (parseError) {
+            throw new Error(`Failed to parse JSON analysis from ${modelName}. Error: ${(parseError as Error).message}. Raw: ${responseTextClean}`);
+        }
+    }
+
+    /**
+     * Validates individual operations, normalizes file paths, and filters invalid operations.
+     * @param operations The raw array of operations from the parsed AI response.
+     * @returns A filtered array containing only valid and normalized operations.
+     */
+    private _validateAndNormalizeOperations(
+        operations: ConsolidationAnalysis['operations']
+    ): ConsolidationAnalysis['operations'] {
+        const validOperations: ConsolidationAnalysis['operations'] = [];
+        for (const op of operations) {
+            // Check required fields and valid action type
+            if (!op.filePath || typeof op.filePath !== 'string' || !op.action || !['CREATE', 'MODIFY', 'DELETE'].includes(op.action)) {
+                console.warn(chalk.yellow(`  Warning: Invalid operation structure found in analysis: filePath=${op.filePath}, action=${op.action}. Skipping operation.`));
+                continue;
+            }
+
+            // Ensure filePath is normalized relative path and not empty after normalization
+            op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
+            if (!op.filePath) {
+                console.warn(chalk.yellow(`  Warning: Operation file path became empty after normalization. Skipping operation.`));
+                continue;
+            }
+            validOperations.push(op);
+        }
+        return validOperations;
+    }
+
+    /**
+     * Logs an error message to the conversation file.
+     * @param conversationFilePath The path to the conversation log file.
+     * @param errorMsg The error message to log.
+     */
+    private async _logError(conversationFilePath: string, errorMsg: string): Promise<void> {
+        try {
+            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+        } catch (logErr) {
+            console.error(chalk.red("Additionally failed to log analysis error:"), logErr);
+        }
+    }
+}
