@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // src/kai.ts
 
+import { exec } from 'child_process'; // Import exec
 import path from 'path';
 import { Config } from './lib/Config';
 import { UserInterface, UserInteractionResult } from './lib/UserInterface'; // Import updated type
@@ -12,6 +13,18 @@ import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
 
 async function main() {
+    // --- Play startup sound on macOS ---
+    if (process.platform === 'darwin') {
+        const soundPath = '/System/Library/Sounds/Tink.aiff'; // A common "ting" sound
+        exec(`afplay "${soundPath}"`, (error) => {
+            if (error) {
+                // Log warning, but don't crash the app if sound fails
+                console.warn(chalk.yellow(`[Startup Sound] Could not play sound (${soundPath}): ${error.message}`));
+            }
+        });
+    }
+    // --- End sound playback ---
+
     // --- Declare variables outside the try block ---
     let codeProcessor: CodeProcessor | null = null;
     // --- MODIFICATION: Use a generic name holder, specific logic below ---
