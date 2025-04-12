@@ -1,58 +1,50 @@
-// src/lib/ConsolidationService.ts
+// File: src/lib/ConsolidationService.ts
 import path from 'path';
 import chalk from 'chalk';
-import * as Diff from 'diff';
-// REMOVE child_process and promisify if no longer needed elsewhere in this file
-// import { exec as execCb } from 'child_process';
-// import { promisify } from 'util';
-import inquirer from 'inquirer';
+// REMOVED: import * as Diff from 'diff';
+// REMOVED: import inquirer from 'inquirer';
 import { FileSystem } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient'; // Correct import
 import { Config } from './Config';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
-import { GitService } from './GitService'; // <-- Keep GitService import
-import { ConsolidationPrompts } from './prompts'; // <-- ADD THIS IMPORT
+// REMOVED: import ReviewUIManager, { ReviewDataItem, ReviewAction } from './ReviewUIManager';
+import { GitService } from './GitService';
+import { ConsolidationPrompts } from './prompts';
+import { ConsolidationReviewer } from './ConsolidationReviewer'; // <-- ADDED THIS IMPORT
 
-// REMOVE exec if no longer needed
-// const exec = promisify(execCb);
-
-// --- Interfaces (Unchanged) ---
-interface ConsolidationAnalysis {
-    operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
-    // Groups are less critical now but kept in analysis output for potential future use
-    groups?: string[][]; // Make groups optional as the simple parser might not produce them
-}
-
-interface FinalFileStates {
-    // Key is the relative file path
-    // Value is the FULL final content string OR 'DELETE_CONFIRMED'
+// Define FinalFileStates interface here
+export interface FinalFileStates {
     [filePath: string]: string | 'DELETE_CONFIRMED';
 }
-// --- End Interfaces ---
+
+// Keep ConsolidationAnalysis interface
+interface ConsolidationAnalysis {
+    operations: Array<{ filePath: string; action: 'CREATE' | 'MODIFY' | 'DELETE' }>;
+    groups?: string[][];
+}
 
 export class ConsolidationService {
     private config: Config;
     private fs: FileSystem;
     private aiClient: AIClient;
     private projectRoot: string;
-    private gitService: GitService; // <-- Keep GitService instance variable
+    private gitService: GitService;
+    private consolidationReviewer: ConsolidationReviewer; // <-- ADDED THIS
 
-    // --- *** MODIFY CONSTRUCTOR *** ---
     constructor(
         config: Config,
         fileSystem: FileSystem,
         aiClient: AIClient,
         projectRoot: string,
-        gitService: GitService // <-- Accept GitService here
+        gitService: GitService
     ) {
         this.config = config;
         this.fs = fileSystem;
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
-        this.gitService = gitService; // <-- Assign the passed instance (removed direct instantiation)
+        this.gitService = gitService;
+        this.consolidationReviewer = new ConsolidationReviewer(this.fs); // <-- INSTANTIATED HERE
     }
-    // --- *** END CONSTRUCTOR MODIFICATION *** ---
 
     async process(
         conversationName: string,
@@ -65,26 +57,25 @@ export class ConsolidationService {
         await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: startMsg });
 
         try {
-            // --- *** USE INJECTED GitService TO CHECK STATUS *** ---
+            // Step 0: Git Check
             console.log(chalk.blue("\n  Step 0: Checking Git status..."));
             try {
-                // Call the method on the injected gitService instance
                 await this.gitService.checkCleanStatus(this.projectRoot);
                 console.log(chalk.green("  Proceeding with consolidation..."));
             } catch (gitError: any) {
                 await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: gitError.message });
-                throw gitError; // Re-throw to halt the process
+                throw gitError;
             }
-            // --- *** END GIT CHECK REFACTOR *** ---
 
-            // --- Determine model for consolidation steps ---
+            // Determine models
             const useFlashForAnalysis = false;
             const useFlashForIndividualGeneration = false;
             const analysisModelName = useFlashForAnalysis ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             const generationModelName = useFlashForIndividualGeneration ? (this.config.gemini.subsequent_chat_model_name || 'Flash') : (this.config.gemini.model_name || 'Pro');
             console.log(chalk.cyan(`  (Using ${analysisModelName} for analysis, ${generationModelName} for individual file generation)`));
 
-            // --- Step A: Analyzing conversation ---
+
+            // Step A: Analysis
             console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
             const analysisResult = await this.analyzeConversationForChanges(conversation, currentContextString, conversationFilePath, useFlashForAnalysis, analysisModelName);
              if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
@@ -95,7 +86,8 @@ export class ConsolidationService {
             console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Analysis (using ${analysisModelName}) found ${analysisResult.operations.length} ops...` });
 
-            // --- Step B: Generating final file states ---
+
+            // Step B: Generation
             console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
             const finalStates = await this.generateIndividualFileContents(
                 conversation,
@@ -108,16 +100,16 @@ export class ConsolidationService {
             console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Generation (using ${generationModelName}) produced states for ${Object.keys(finalStates).length} files...` });
 
-            // --- Step C: Preparing changes for review ---
-            console.log(chalk.cyan("\n  Step C: Preparing changes for review..."));
-            const reviewData = await this.prepareReviewData(finalStates);
-            console.log(chalk.green(`  Review preparation complete: ${reviewData.length} files with changes ready for review.`));
-            const applyChanges = await this.presentChangesForReviewTUI(reviewData);
 
-            // --- Step D: Applying approved changes ---
+            // --- Step C: Review Changes (Delegated) ---
+            const applyChanges = await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
+            // --- END DELEGATION ---
+
+
+            // Step D: Apply Changes
              if (applyChanges) {
                 console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
-                await this.applyConsolidatedChanges(finalStates, conversationFilePath);
+                await this.applyConsolidatedChanges(finalStates, conversationFilePath); // This method remains
             } else {
                 const msg = `System: Consolidation aborted by user. No changes applied.`;
                 console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
@@ -125,13 +117,10 @@ export class ConsolidationService {
             }
 
         } catch (error) {
-            // --- Updated error handling ---
+            // Error Handling
             console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
-            // Log specific Git errors if they weren't caught and logged above (should be caught now)
-            // The generic logging remains useful for other error types.
             const errorMsg = `System: Error during consolidation: ${(error as Error).message}. See console for details.`;
             try {
-                // Avoid double-logging Git check errors that were already logged
                 if (!(error instanceof Error && (error.message.includes('Git working directory not clean') || error.message.includes('Failed to verify Git status') || error.message.includes('Git command not found') || error.message.includes('not a Git repository')))) {
                     const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
                     await this.aiClient.logConversation(conversationFilePath, logPayload);
@@ -139,11 +128,10 @@ export class ConsolidationService {
             } catch (logErr) {
                 console.error(chalk.red("Additionally failed to log consolidation error:"), logErr);
             }
-            // --- End Updated error handling ---
         }
     }
 
-    // --- analyzeConversationForChanges method ---
+    // --- analyzeConversationForChanges (Unchanged logic) ---
     private async analyzeConversationForChanges(
         conversation: Conversation,
         codeContext: string,
@@ -156,9 +144,7 @@ export class ConsolidationService {
             .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
             .join('');
 
-        // --- Use imported prompt function ---
         const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
-        // --- End modification ---
 
         try {
             const responseTextRaw = await this.aiClient.getResponseTextFromAI(
@@ -166,30 +152,25 @@ export class ConsolidationService {
                 useFlashModel
             );
 
-            // Clean potential markdown fences
             let responseTextClean = responseTextRaw.trim();
-            const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/); // Extract content within ```json ... ```
+            const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
             if (jsonMatch && jsonMatch[1]) {
                 responseTextClean = jsonMatch[1].trim();
             } else if (responseTextClean.startsWith('{') && responseTextClean.endsWith('}')) {
-                // Assume it's raw JSON if it looks like it
+                // Assume raw JSON
             } else {
                 throw new Error(`Analysis response from ${modelName} was not in the expected JSON format. Raw: ${responseTextRaw}`);
             }
 
             const analysis: ConsolidationAnalysis = JSON.parse(responseTextClean);
 
-            // Validate the structure
             if (!analysis || !Array.isArray(analysis.operations)) {
                 throw new Error(`Invalid JSON structure received from ${modelName}. Expected { "operations": [...] }. Received: ${responseTextClean}`);
             }
-            // Optional: Deeper validation of each operation object
             for (const op of analysis.operations) {
                 if (!op.filePath || !op.action || !['CREATE', 'MODIFY', 'DELETE'].includes(op.action)) {
                     console.warn(chalk.yellow(`  Warning: Invalid operation structure found in analysis:`), op);
-                    // Decide whether to filter out invalid ops or throw an error
                 }
-                // Normalize file path separators
                 op.filePath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
             }
 
@@ -200,75 +181,11 @@ export class ConsolidationService {
             const errorMsg = `Failed to analyze conversation using ${modelName}. Error: ${(error as Error).message}`;
             console.error(chalk.red(`    ${errorMsg}`));
             await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-            // Rethrow or return a default empty state? Rethrowing is safer to halt the process.
             throw new Error(errorMsg);
         }
     }
 
-    // --- applyConsolidatedChanges method ---
-    private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
-         // --- Git status check was moved to the start of `process` ---
-        console.log(chalk.blue("Proceeding with file operations..."));
-
-        let success = 0, failed = 0, skipped = 0;
-        const summary: string[] = [];
-
-        for (const relativePath in finalStates) {
-            const absolutePath = path.resolve(this.projectRoot, relativePath);
-            const contentOrAction = finalStates[relativePath];
-
-            try {
-                if (contentOrAction === 'DELETE_CONFIRMED') {
-                    try {
-                        await this.fs.access(absolutePath);
-                        await this.fs.deleteFile(absolutePath);
-                        console.log(chalk.red(`  Deleted: ${relativePath}`));
-                        summary.push(`Deleted: ${relativePath}`);
-                        success++;
-                    } catch (accessError) {
-                        if ((accessError as NodeJS.ErrnoException).code === 'ENOENT') {
-                            console.warn(chalk.yellow(`  Skipped delete (already gone): ${relativePath}`));
-                            summary.push(`Skipped delete (already gone): ${relativePath}`);
-                            skipped++;
-                        } else {
-                            throw accessError; // Rethrow unexpected delete/access errors
-                        }
-                    }
-                } else {
-                    // Ensure directory exists before writing the file
-                    await this.fs.ensureDirExists(path.dirname(absolutePath));
-                    // Write the file content (handles both create and modify)
-                    await this.fs.writeFile(absolutePath, contentOrAction);
-                    console.log(chalk.green(`  Written: ${relativePath}`));
-                    summary.push(`Written: ${relativePath}`);
-                    success++;
-                }
-            } catch (error) {
-                console.error(chalk.red(`  Failed apply operation for ${relativePath}:`), error);
-                summary.push(`Failed ${contentOrAction === 'DELETE_CONFIRMED' ? 'delete' : 'write'}: ${relativePath} - ${(error as Error).message}`);
-                failed++;
-            }
-        }
-
-        // --- Summary logging remains the same ---
-        console.log(chalk.blue("\n--- Consolidation Apply Summary ---"));
-        summary.forEach(l => console.log(l.startsWith("Failed") ? chalk.red(`- ${l}`) : l.startsWith("Skipped") ? chalk.yellow(`- ${l}`) : chalk.green(`- ${l}`)));
-        console.log(chalk.blue(`---------------------------------`));
-        console.log(chalk.blue(`Applied: ${success}, Skipped/No-op: ${skipped}, Failed: ${failed}.`));
-
-        try {
-            const title = failed > 0 ? 'Consolidation Summary (with failures)' : 'Consolidation Summary';
-            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
-        } catch (logErr) {
-            console.warn(chalk.yellow("Warning: Could not log apply summary to conversation file."), logErr);
-        }
-
-        if (failed > 0) {
-            throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors.`);
-        }
-    }
-
-    // --- generateIndividualFileContents method ---
+    // --- generateIndividualFileContents (Complete and Unchanged logic) ---
     private async generateIndividualFileContents(
         conversation: Conversation,
         codeContext: string,
@@ -278,12 +195,9 @@ export class ConsolidationService {
         modelName: string
     ): Promise<FinalFileStates> {
         const finalStates: FinalFileStates = {};
-
-        // --- Get history string once ---
         const historyString = conversation.getMessages()
             .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
             .join('');
-        // ---
 
         const filesToGenerate = analysisResult.operations
             .filter(op => op.action === 'CREATE' || op.action === 'MODIFY')
@@ -307,16 +221,14 @@ export class ConsolidationService {
                         if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
                     }
 
-                    // --- Use imported prompt function directly ---
                     const individualPrompt = ConsolidationPrompts.individualFileGenerationPrompt(
                         codeContext,
                         historyString,
                         normalizedPath,
                         currentContent
                     );
-                    // --- End modification ---
 
-                     // --- ADD RETRY LOGIC HERE (as an example, using simple loop) ---
+                     // --- RETRY LOGIC ---
                      let responseTextRaw = '';
                      attempt = 0; // Reset attempt count for each file
                      const maxAttempts = this.config.gemini.generation_max_retries ?? 3; // Use config value
@@ -332,14 +244,14 @@ export class ConsolidationService {
                              break; // Success, exit loop
                          } catch (aiError: any) {
                              // Check if the error is potentially retryable (e.g., rate limit, server error)
-                             // You might need more sophisticated checking based on the AIClient's error types/codes
+                             // This is a simplified check; more robust checking might be needed based on AIClient errors
                              const isRetryable = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'NETWORK_ERROR', 'NO_RESPONSE'].includes(aiError.code) ||
-                                                 aiError.message?.includes('500') || aiError.message?.includes('503') || aiError.message?.toLowerCase().includes('rate limit');
+                                                 aiError.message?.includes('500') || aiError.message?.includes('503') || aiError.message?.toLowerCase().includes('rate limit') || aiError.message?.toLowerCase().includes('retry');
 
                              if (isRetryable && attempt < maxAttempts) {
                                  attempt++;
                                  const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
-                                 console.warn(chalk.yellow(`        AI Error for ${normalizedPath} (Attempt ${attempt}): ${aiError.message}. Retrying in ${delay / 1000}s...`));
+                                 console.warn(chalk.yellow(`        AI Error for ${normalizedPath} (Attempt ${attempt}/${maxAttempts}): ${aiError.message}. Retrying in ${delay / 1000}s...`));
                                  await new Promise(resolve => setTimeout(resolve, delay));
                              } else {
                                  console.error(chalk.red(`        Failed AI call for ${normalizedPath} after ${attempt + 1} attempts.`));
@@ -373,18 +285,23 @@ export class ConsolidationService {
                     const errorMsg = `Failed to generate content for ${normalizedPath} using ${modelName} after ${attempt + 1} attempts. Error: ${(error as Error).message}`;
                     console.error(chalk.red(`      ${errorMsg}`));
                     await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
-                    // Let the user know generation failed for this file. Consider if the whole process should stop.
+                    // Decide how to handle: stop the whole process, or skip this file? Skipping for now.
+                    // Maybe add a placeholder or error state to finalStates?
+                    // finalStates[normalizedPath] = `/* ERROR: Generation failed: ${(error as Error).message} */`;
                 }
             }
         }
 
+        // Handle DELETE actions from analysis that weren't generated (or overridden by generation)
         for (const op of analysisResult.operations) {
             if (op.action === 'DELETE') {
                 const normalizedPath = path.normalize(op.filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
                 if (!(normalizedPath in finalStates)) {
+                    // If the file wasn't generated (correct), mark it for deletion based on analysis
                     console.log(chalk.dim(`      Marking DELETE for ${normalizedPath} based on analysis.`));
                     finalStates[normalizedPath] = 'DELETE_CONFIRMED';
                 } else if (finalStates[normalizedPath] !== 'DELETE_CONFIRMED') {
+                    // If generation *did* produce content but analysis says DELETE, prioritize DELETE
                     console.warn(chalk.yellow(`      Warning: ${normalizedPath} was marked DELETE in analysis, but generation step provided content. Prioritizing DELETE based on analysis.`));
                     finalStates[normalizedPath] = 'DELETE_CONFIRMED';
                     await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `System: Overriding generated content for ${normalizedPath} with DELETE based on analysis.` });
@@ -395,107 +312,65 @@ export class ConsolidationService {
         return finalStates;
     }
 
-    // --- REMOVED _constructIndividualFileGenerationPrompt method ---
+    // --- applyConsolidatedChanges (Unchanged logic) ---
+    private async applyConsolidatedChanges(finalStates: FinalFileStates, conversationFilePath: string): Promise<void> {
+        console.log(chalk.blue("Proceeding with file operations..."));
 
-    // --- prepareReviewData method ---
-    private async prepareReviewData(finalStates: FinalFileStates): Promise<ReviewDataItem[]> {
-        const reviewData: ReviewDataItem[] = [];
+        let success = 0, failed = 0, skipped = 0;
+        const summary: string[] = [];
+
         for (const relativePath in finalStates) {
-            const proposed = finalStates[relativePath];
             const absolutePath = path.resolve(this.projectRoot, relativePath);
-            let current: string | null = null;
-            let action: ReviewAction = 'MODIFY';
+            const contentOrAction = finalStates[relativePath];
 
             try {
-                current = await this.fs.readFile(absolutePath);
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                    console.error(chalk.red(`Error reading current state of ${relativePath}:`), error);
-                    throw error;
-                }
-                // If ENOENT, current remains null, indicating creation
-            }
-
-            let diffStr = '';
-            let isMeaningful = false;
-
-            if (proposed === 'DELETE_CONFIRMED') {
-                action = 'DELETE';
-                if (current !== null) {
-                    // Generate diff from current state to empty state
-                    diffStr = Diff.createPatch(relativePath, current, '', '', '', { context: 5 });
-                    isMeaningful = true; // Deleting an existing file is meaningful
-                } else {
-                    // File was marked for delete but doesn't exist, skip review
-                    console.log(chalk.gray(`  Skipping review for DELETE ${relativePath} - file already gone.`));
-                    continue; // Move to the next file
-                }
-            } else {
-                // Ensure proposed is a string (handle potential type issues)
-                const proposedContent = typeof proposed === 'string' ? proposed : '';
-
-                if (current === null) {
-                    action = 'CREATE';
-                    // Generate diff from empty state to proposed content
-                    diffStr = Diff.createPatch(relativePath, '', proposedContent, '', '', { context: 5 });
-                    // Creation is meaningful only if content is not just whitespace
-                    isMeaningful = proposedContent.trim().length > 0;
-                } else {
-                    action = 'MODIFY';
-                    if (current !== proposedContent) {
-                        // Generate diff between current and proposed content
-                        diffStr = Diff.createPatch(relativePath, current, proposedContent, '', '', { context: 5 });
-                        // Check if the diff introduces actual changes beyond headers/whitespace
-                        // A simple check: does the diff contain '+' or '-' lines (excluding file headers)?
-                        isMeaningful = diffStr.split('\n').slice(2).some(l => l.startsWith('+') || l.startsWith('-'));
-                    } else {
-                        // Current and proposed content are identical
-                        isMeaningful = false;
+                if (contentOrAction === 'DELETE_CONFIRMED') {
+                    try {
+                        await this.fs.access(absolutePath);
+                        await this.fs.deleteFile(absolutePath);
+                        console.log(chalk.red(`  Deleted: ${relativePath}`));
+                        summary.push(`Deleted: ${relativePath}`);
+                        success++;
+                    } catch (accessError) {
+                        if ((accessError as NodeJS.ErrnoException).code === 'ENOENT') {
+                            console.warn(chalk.yellow(`  Skipped delete (already gone): ${relativePath}`));
+                            summary.push(`Skipped delete (already gone): ${relativePath}`);
+                            skipped++;
+                        } else {
+                            throw accessError;
+                        }
                     }
+                } else {
+                    await this.fs.ensureDirExists(path.dirname(absolutePath));
+                    await this.fs.writeFile(absolutePath, contentOrAction);
+                    console.log(chalk.green(`  Written: ${relativePath}`));
+                    summary.push(`Written: ${relativePath}`);
+                    success++;
                 }
-            }
-
-            // Add to review data only if the change is meaningful
-            if (isMeaningful) {
-                reviewData.push({ filePath: relativePath, action, diff: diffStr });
-            } else {
-                console.log(chalk.gray(`  Skipping review for ${relativePath} - no effective changes detected.`));
+            } catch (error) {
+                console.error(chalk.red(`  Failed apply operation for ${relativePath}:`), error);
+                summary.push(`Failed ${contentOrAction === 'DELETE_CONFIRMED' ? 'delete' : 'write'}: ${relativePath} - ${(error as Error).message}`);
+                failed++;
             }
         }
-        return reviewData;
-    }
 
-    // --- presentChangesForReviewTUI method ---
-    private async presentChangesForReviewTUI(reviewData: ReviewDataItem[]): Promise<boolean> {
-        if (reviewData.length === 0) {
-            console.log(chalk.yellow("No changes to review."));
-            return false; // No changes means don't apply anything
-        }
+        console.log(chalk.blue("\n--- Consolidation Apply Summary ---"));
+        summary.forEach(l => console.log(l.startsWith("Failed") ? chalk.red(`- ${l}`) : l.startsWith("Skipped") ? chalk.yellow(`- ${l}`) : chalk.green(`- ${l}`)));
+        console.log(chalk.blue(`---------------------------------`));
+        console.log(chalk.blue(`Applied: ${success}, Skipped/No-op: ${skipped}, Failed: ${failed}.`));
 
-        console.log(chalk.yellow("\nInitializing Review UI..."));
         try {
-            // Instantiate and run the TUI
-            const reviewUI = new ReviewUIManager(reviewData);
-            const userDecision = await reviewUI.run(); // This promise resolves with true (Apply) or false (Reject)
-            return userDecision;
+            const title = failed > 0 ? 'Consolidation Summary (with failures)' : 'Consolidation Summary';
+            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: `${title}:\n${summary.join('\n')}` });
+        } catch (logErr) {
+            console.warn(chalk.yellow("Warning: Could not log apply summary to conversation file."), logErr);
+        }
 
-        } catch (tuiError) {
-            // Fallback to simple CLI confirmation if TUI fails
-            console.error(chalk.red("Error displaying Review TUI:"), tuiError);
-            console.log(chalk.yellow("Falling back to simple CLI confirmation."));
-
-            // Summarize changes for the fallback prompt
-            const changeSummary = reviewData.map(item => `  ${item.action.padEnd(6)}: ${item.filePath}`).join('\n');
-            console.log(chalk.cyan("\nProposed changes:"));
-            console.log(changeSummary);
-
-            const { confirm } = await inquirer.prompt<{ confirm: boolean }>([{
-                type: 'confirm',
-                name: 'confirm',
-                message: `Review UI failed. Apply the ${reviewData.length} file change(s) listed above?`,
-                default: false // Default to not applying changes for safety
-            }]);
-            return confirm;
+        if (failed > 0) {
+            throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors.`);
         }
     }
+
+    // --- REMOVED prepareReviewData method ---
+    // --- REMOVED presentChangesForReviewTUI method ---
 }
