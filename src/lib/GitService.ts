@@ -41,8 +41,8 @@ export class GitService {
             if (isNotRepoError) {
                 // --- Attempt to initialize Git repository ---
                 console.log(chalk.yellow("  Warning: Project directory is not a Git repository. Attempting to initialize..."));
+                const initCommand = 'git init'; // <<< MOVED DECLARATION HERE
                 try {
-                    const initCommand = 'git init';
                     // Use CommandService to run 'git init'
                     await this.commandService.run(initCommand, { cwd: projectRoot });
                     console.log(chalk.green("  Successfully initialized Git repository."));
@@ -50,10 +50,11 @@ export class GitService {
                     return;
                 } catch (initError: any) {
                     // Handle errors during 'git init'
-                    console.error(chalk.red(`\nError during automatic '${initCommand}':`), initError.message || initError);
+                    console.error(chalk.red(`\nError during automatic '${initCommand}':`), initError.message || initError); // Now initCommand is accessible
                     let initFailMsg = `Failed to automatically initialize Git repository. Error: ${initError.message || 'Unknown error'}`;
                     if (initError.code === 'ENOENT' || initError.message?.includes('command not found')) {
-                        initFailMsg = 'Failed to initialize Git: Git command not found. Please ensure Git is installed and in your system PATH.';
+                        // Use the variable here too for consistency
+                        initFailMsg = `Failed to initialize Git: Git command not found ('${initCommand}' failed). Please ensure Git is installed and in your system PATH.`;
                     } else if (initError.stderr) {
                         initFailMsg += ` Stderr: ${initError.stderr.trim()}`;
                     } else if (initError.code) {
