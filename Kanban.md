@@ -21,12 +21,21 @@
 
 ### E1: Core Infrastructure & Shared Services
 
-*   **[ ] Task:** Refactor `AIClient`
+*   **[ ] Task: Automatically Initialize Git Repository**
+    *   **Details:** Modify `GitService.checkCleanStatus`. When the "not a git repository" error is detected:
+        *   Log a message indicating initialization attempt.
+        *   Use `CommandService` to execute `git init` in the `projectRoot`.
+        *   Log success message if `git init` completes.
+        *   Handle errors during `git init` (e.g., `git` not found, permissions) and throw an informative error.
+        *   If `git init` succeeds, `checkCleanStatus` should effectively return as 'clean'.
+    *   **Depends on:** `CommandService`
+    *   **Priority:** Medium
+*   **[ ] Task: Refactor `AIClient`**
     *   **Details:** Clearly separate Pro/Flash model selection logic. Implement robust error handling/retry for `generateContent` (using config). Add support for selecting OpenAI models via `Config` (requires adding OpenAI keys/config). Ensure logging includes model used.
     *   **Depends on:** -
     *   **Priority:** High
 *   **[ ] Task:** Enhance `FileSystem`
-    *   **Details:** Implement a reliable `applyDiffToFile(filePath, diffContent)` method using the `diff` library (specifically `Diff.applyPatch`). Ensure it handles file creation (`+++`) and deletion (`---` only) markers correctly within the diff content provided by the AI, alongside modifications. Ensure `ensureDirExists` is used appropriately.
+    *   **Details:** Implement a reliable `applyDiffToFile(filePath, diffContent)` method using the `diff` library (specifically `Diff.applyPatch`). Ensure it handles file creation (`+++`) and deletion (`---` only) markers correctly within the diff content provided by the AI, alongside modifications. Ensure `ensureDirExists` is used appropriately. Add logic to `readGitignore` to create `.gitignore` if missing and append `.kai/logs/` rule if missing from existing file.
     *   **Depends on:** -
     *   **Priority:** High
 *   **[ ] Task:** Enhance `CommandService` / Create `TestRunnerService`
@@ -42,7 +51,7 @@
     *   **Depends on:** -
     *   **Priority:** Medium
 *   **[ ] Task:** Refine `Config`
-    *   **Details:** Add configuration sections specifically for System 1 and System 2 (e.g., default prompts, max iterations, analysis model preferences, test framework configurations). Add OpenAI config if implementing that model support.
+    *   **Details:** Change default `chats_dir` to `.kai/logs`. Add configuration sections specifically for System 1 and System 2 (e.g., default prompts, max iterations, analysis model preferences, test framework configurations). Add OpenAI config if implementing that model support. Ensure `.kai/logs` directory is created on startup.
     *   **Depends on:** -
     *   **Priority:** Medium
 

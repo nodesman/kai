@@ -117,7 +117,9 @@ class ConfigLoader implements IConfig {
             root_dir: yamlConfig.project?.root_dir || "generated_project",
             prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
             prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
-            chats_dir: yamlConfig.project?.chats_dir || ".kaichats",
+            // --- MODIFICATION: Change default chats_dir ---
+            chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Changed from ".kaichats"
+            // --- END MODIFICATION ---
         };
 
         // Calculate absolute chats directory path
@@ -126,18 +128,19 @@ class ConfigLoader implements IConfig {
         // Ensure chats directory exists immediately
         try {
             if (!fs.existsSync(absoluteChatsDir)) {
+                // recursive: true will create parent directories (.kai) if needed
                 fs.mkdirSync(absoluteChatsDir, { recursive: true });
-                console.log(chalk.blue(`Created chats directory: ${absoluteChatsDir}`));
+                console.log(chalk.blue(`Created logs directory: ${absoluteChatsDir}`)); // Updated log message
             }
         } catch (dirError) {
-            console.error(chalk.red(`Fatal: Could not create chats directory at ${absoluteChatsDir}:`), dirError);
+            console.error(chalk.red(`Fatal: Could not create logs directory at ${absoluteChatsDir}:`), dirError); // Updated log message
             process.exit(1);
         }
 
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
-            chatsDir: absoluteChatsDir
+            chatsDir: absoluteChatsDir // Keep name chatsDir, but it now points to .kai/logs
         };
     }
 }
