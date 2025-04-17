@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // src/kai.ts
 
-import { exec } from 'child_process'; // Import exec
 import path from 'path';
 import { Config } from './lib/Config';
 import { UserInterface, UserInteractionResult } from './lib/UserInterface'; // Import updated type
@@ -42,17 +41,6 @@ async function performStartupChecks(projectRoot: string, fs: FileSystem, gitServ
 
 
 async function main() {
-    const startupSound = 'Submarine'; // Default to submarine sound
-    // --- Play startup sound on macOS ---
-    if (process.platform === 'darwin') {
-        const soundPath = `/System/Library/Sounds/${startupSound}.aiff`;
-        exec(`afplay "${soundPath}"`, (error) => {
-            if (error) {
-                console.warn(chalk.yellow(`[Startup Sound] Could not play sound (${soundPath}): ${error.message}`));
-            }
-        });
-    }
-    // --- End sound playback ---
 
     let codeProcessor: CodeProcessor | null = null;
     let targetIdentifier: string | string[] | null = null;
