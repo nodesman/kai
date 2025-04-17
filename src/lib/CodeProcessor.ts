@@ -5,18 +5,11 @@ import { AIClient, LogEntryData } from './AIClient';
 import { Config } from "./Config";
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
-import { toSnakeCase } from './utils'; // countTokens might not be needed here anymore
+import { toSnakeCase } from './utils';
 import chalk from 'chalk';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
-// --- MODIFICATION: Update import path for ConsolidationService ---
 import { ConsolidationService } from './consolidation/ConsolidationService';
-// --- END MODIFICATION ---
-// REMOVE child_process imports as CommandService handles execution
-// import { exec as execCb } from 'child_process';
-// import { promisify } from 'util';
-// const exec = promisify(execCb);
-
-// --- Import the new services ---
+// --- Import the new services (already present) ---
 import { CommandService } from './CommandService';
 import { GitService } from './GitService';
 // --- End imports ---
@@ -37,33 +30,39 @@ class CodeProcessor {
     private readonly CONSOLIDATE_COMMAND = '/consolidate';
     private contextBuilder: ProjectContextBuilder;
     private consolidationService: ConsolidationService;
-    // --- Add service instance variables ---
+    // Service instance variables (already present)
     private commandService: CommandService;
     private gitService: GitService;
-    // --- End service instance variables ---
 
-    constructor(config: Config) {
+    // --- MODIFIED Constructor ---
+    constructor(
+        config: Config,
+        fs: FileSystem,                 // Inject FileSystem
+        commandService: CommandService, // Inject CommandService
+        gitService: GitService          // Inject GitService
+    ) {
         this.config = config;
-        this.fs = new FileSystem();
-        this.aiClient = new AIClient(config);
-        this.ui = new UserInterface(config);
+        this.fs = fs; // Use injected instance
+        this.aiClient = new AIClient(config); // AIClient typically just needs config
+        this.ui = new UserInterface(config); // UI needs config
         this.projectRoot = process.cwd();
-        this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config);
+        this.contextBuilder = new ProjectContextBuilder(this.fs, this.projectRoot, this.config); // Pass injected fs
 
-        // --- Instantiate services ---
-        this.commandService = new CommandService();
-        this.gitService = new GitService(this.commandService); // Pass CommandService to GitService
-        // --- End service instantiation ---
+        // --- Use injected services ---
+        this.commandService = commandService; // Assign injected instance
+        this.gitService = gitService;         // Assign injected instance
+        // --- End service assignment ---
 
-        // Pass GitService to ConsolidationService
+        // Pass injected GitService to ConsolidationService
         this.consolidationService = new ConsolidationService(
             this.config,
-            this.fs,
+            this.fs, // Pass injected fs
             this.aiClient,
             this.projectRoot,
-            this.gitService // Pass the created GitService instance
+            this.gitService // Pass injected gitService
         );
     }
+    // --- END MODIFIED Constructor ---
 
     // --- REMOVED buildContextString method ---
     // It's now handled entirely by ProjectContextBuilder instance
@@ -146,14 +145,12 @@ class CodeProcessor {
         paths: ConversationPaths
     ): Promise<void> {
         while (true) {
+            // Use the injected ui instance
             const interactionResult = await this.ui.getPromptViaSublimeLoop(
                 conversationName,
                 conversation.getMessages(),
                 paths.editorFilePath // Pass editor path explicitly
             );
-
-            // Editor file path might change if ui logic changes, update for cleanup
-            // editorFilePathForCleanup = interactionResult.editorFilePath;
 
             if (interactionResult.newPrompt === null) {
                 break; // User exited editor or provided no prompt
@@ -200,9 +197,10 @@ class CodeProcessor {
         try {
             // Fetch fresh context using the builder
             console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
-            const { context: currentContextString } = await this.contextBuilder.build(); // Use the builder
+            // Use the injected contextBuilder instance
+            const { context: currentContextString } = await this.contextBuilder.build();
 
-            // Delegate to the consolidation service
+            // Delegate to the consolidation service (uses injected services internally)
             await this.consolidationService.process(
                 conversationName,
                 conversation,
@@ -231,8 +229,10 @@ class CodeProcessor {
         conversation.addMessage('user', userPrompt); // Add user message first
 
         try {
+            // Use the injected contextBuilder instance
             const { context: currentContextString } = await this.contextBuilder.build();
 
+            // Use the injected aiClient instance
             await this.aiClient.getResponseFromAI(
                 conversation,
                 conversationFilePath,
@@ -245,8 +245,9 @@ class CodeProcessor {
             // Add specific error message to conversation for user feedback
             const errorMessage = `[System Error during AI request: ${(aiError as Error).message}. You can try again or exit.]`;
             conversation.addMessage('system', errorMessage);
-            // Log the detailed error to the file (handled by getResponseFromAI internally, but log system message too)
+            // Log the detailed error to the file
             try {
+                // Use the injected aiClient instance
                 await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: errorMessage });
             } catch (logErr) {
                 console.error(chalk.red("Additionally failed to log AI error system message:"), logErr);
@@ -262,7 +263,7 @@ class CodeProcessor {
         conversationFilePath: string | null // Can be null if error happens before path is set
     ): Promise<void> {
         console.error(chalk.red(`\nAn unexpected error occurred in conversation "${conversationName}":`), error);
-        if (conversationFilePath && this.aiClient) { // Check aiClient exists
+        if (conversationFilePath && this.aiClient) { // Check injected aiClient exists
             try {
                 const logPayload: LogEntryData = {
                     type: 'error',
@@ -282,8 +283,8 @@ class CodeProcessor {
     private async _cleanupEditorFile(editorFilePath: string | null): Promise<void> {
         if (editorFilePath) {
             try {
-                await this.fs.access(editorFilePath); // Check if it exists
-                await this.fs.deleteFile(editorFilePath);
+                await this.fs.access(editorFilePath); // Use injected fs
+                await this.fs.deleteFile(editorFilePath); // Use injected fs
                 console.log(chalk.dim(`Cleaned up editor file: ${editorFilePath}`));
             } catch (cleanupError) {
                 // Only log errors that aren't "file not found"
@@ -297,13 +298,13 @@ class CodeProcessor {
     }
 
     // --- Consolidation Orchestration Method ---
-    // This method now uses the injected consolidationService which itself uses the injected gitService
+    // This method now uses the injected consolidationService which itself uses the injected services
     async processConsolidationRequest(conversationName: string): Promise<void> {
         const { conversationFilePath } = this._getConversationPaths(conversationName); // Use helper
         let conversation: Conversation;
 
         try {
-            // Load conversation data
+            // Load conversation data using injected fs
             const logData = await this.fs.readJsonlFile(conversationFilePath) as JsonlLogEntry[];
             conversation = Conversation.fromJsonlData(logData);
             if (conversation.getMessages().length === 0) {
@@ -311,12 +312,12 @@ class CodeProcessor {
                 return;
             }
 
-            // Build context string using the builder
+            // Build context string using the injected contextBuilder
             console.log(chalk.cyan("Fetching fresh codebase context for consolidation..."));
             const { context: currentContextString } = await this.contextBuilder.build();
 
             // Delegate *entirely* to the ConsolidationService
-            // The consolidationService instance already has the correct GitService instance injected
+            // The consolidationService instance already has the correct injected services
             await this.consolidationService.process(
                 conversationName,
                 conversation,
@@ -330,6 +331,7 @@ class CodeProcessor {
             const errorMsg = `System: Error during consolidation setup: ${(error as Error).message}. See console for details.`;
             try {
                 const logPayload: LogEntryData = { type: 'error', role: 'system', error: errorMsg };
+                // Use injected aiClient
                 await this.aiClient.logConversation(conversationFilePath, logPayload);
             } catch (logErr) { console.error(chalk.red("Additionally failed to log consolidation setup error:"), logErr); }
         }

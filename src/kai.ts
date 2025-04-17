@@ -5,39 +5,77 @@ import { exec } from 'child_process'; // Import exec
 import path from 'path';
 import { Config } from './lib/Config';
 import { UserInterface, UserInteractionResult } from './lib/UserInterface'; // Import updated type
-import { CodeProcessor } from './lib/CodeProcessor';
-// AIClient import is not directly used here, CodeProcessor handles it
-// import { AIClient } from './lib/AIClient';
+import { CodeProcessor } from './lib/CodeProcessor'; // CodeProcessor needs updated constructor
 import { FileSystem } from './lib/FileSystem';
+// --- ADDED Imports ---
+import { CommandService } from './lib/CommandService';
+import { GitService } from './lib/GitService';
+// --- END ADDED Imports ---
 import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
+
+/**
+ * Performs essential checks when the CLI starts up.
+ * Ensures .kai/logs exists, Git repo is initialized, and .gitignore is configured.
+ * @param projectRoot Absolute path to the project root.
+ * @param fs FileSystem instance.
+ * @param gitService GitService instance.
+ * @returns {Promise<boolean>} True if all checks pass, false otherwise.
+ */
+async function performStartupChecks(projectRoot: string, fs: FileSystem, gitService: GitService): Promise<boolean> {
+    console.log(chalk.cyan("\nPerforming startup environment checks..."));
+    try {
+        // Check 1: .kai/logs directory (implicitly handled by Config constructor)
+        console.log(chalk.dim("  Directory check (.kai/logs) handled by config loading."));
+        // Check 2: Git repository status (ensure repo exists, init if necessary)
+        await gitService.ensureGitRepository(projectRoot);
+        // Check 3: .gitignore rules (ensure file exists, has .kai/logs/ rule)
+        await fs.ensureGitignoreRules(projectRoot);
+        console.log(chalk.green("Startup checks complete."));
+        return true;
+    } catch (error) {
+        console.error(chalk.red("\n❌ Fatal Error during startup checks:"), error instanceof Error ? error.message : error);
+        console.error(chalk.red("   Please resolve the issues above before running Kai again."));
+        return false; // Indicate failure
+    }
+}
+
 
 async function main() {
     const startupSound = 'Submarine'; // Default to submarine sound
     // --- Play startup sound on macOS ---
     if (process.platform === 'darwin') {
-        const soundPath = `/System/Library/Sounds/${startupSound}.aiff`; // A less annoying sound
-        exec(`afplay "${soundPath}"`, (error) => { // Play submarine sound
+        const soundPath = `/System/Library/Sounds/${startupSound}.aiff`;
+        exec(`afplay "${soundPath}"`, (error) => {
             if (error) {
-                // Log warning, but don't crash the app if sound fails
                 console.warn(chalk.yellow(`[Startup Sound] Could not play sound (${soundPath}): ${error.message}`));
             }
         });
     }
     // --- End sound playback ---
 
-    // --- Declare variables outside the try block ---
     let codeProcessor: CodeProcessor | null = null;
-    // --- MODIFICATION: Use a generic name holder, specific logic below ---
     let targetIdentifier: string | string[] | null = null;
-    // ---
     let interactionResult: UserInteractionResult | null = null;
     let config: Config | undefined = undefined;
+    const projectRoot = process.cwd(); // Define project root early
 
     try {
+        // --- Instantiate Core Services Needed Early ---
         config = new Config();
+        // --- Pass config to services that need it ---
         const ui = new UserInterface(config);
-        const fs = new FileSystem(); // Keep fs instance
+        const fs = new FileSystem();
+        const commandService = new CommandService();
+        const gitService = new GitService(commandService);
+        // --- End Core Service Instantiation ---
+
+        // --- Perform Startup Checks ---
+        const startupOk = await performStartupChecks(projectRoot, fs, gitService);
+        if (!startupOk) {
+            process.exit(1); // Exit if startup checks fail
+        }
+        // --- End Startup Checks ---
 
         interactionResult = await ui.getUserInteraction();
 
@@ -47,6 +85,11 @@ async function main() {
         }
 
         const { mode } = interactionResult; // Get mode first
+
+        // --- Instantiate CodeProcessor (needs all services) ---
+        // Pass the *same instances* of services created earlier
+        codeProcessor = new CodeProcessor(config, fs, commandService, gitService); // Pass services
+        // --- End CodeProcessor Instantiation ---
 
         // --- Handle selected mode ---
         if (mode === 'Start/Continue Conversation') {
@@ -67,7 +110,8 @@ async function main() {
                 console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
                 throw new Error("Conversation name is required for this mode.");
             }
-            codeProcessor = new CodeProcessor(config);
+            // CodeProcessor already initialized above
+            // codeProcessor = new CodeProcessor(config); // Remove redundant init
             await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false);
 
         } else if (mode === 'Consolidate Changes...') {
@@ -89,7 +133,8 @@ async function main() {
                 throw new Error("Conversation name is required for consolidation.");
             }
             console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(targetIdentifier)}...`));
-            codeProcessor = new CodeProcessor(config);
+            // CodeProcessor already initialized above
+            // codeProcessor = new CodeProcessor(config); // Remove redundant init
             await codeProcessor.processConsolidationRequest(targetIdentifier);
             console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
 
@@ -110,6 +155,7 @@ async function main() {
 
             let successCount = 0;
             let failCount = 0;
+            // Use the fs instance created earlier for deletion logic
 
             for (const nameToDelete of targetIdentifier) {
                 // Names are already snake-cased base names from listJsonlFiles
@@ -125,7 +171,7 @@ async function main() {
 
                 // Try deleting conversation file
                 try {
-                    await fs.deleteFile(conversationFilePath);
+                    await fs.deleteFile(conversationFilePath); // Use existing fs instance
                     console.log(chalk.green(`    ✓ Successfully deleted conversation file: ${conversationFilePath}`));
                     conversationDeleted = true;
                 } catch (deleteError) {
@@ -141,8 +187,8 @@ async function main() {
 
                 // Try deleting editor file (only if main file existed or deletion didn't error critically)
                 try {
-                    await fs.access(editorFilePath); // Check if editor file exists
-                    await fs.deleteFile(editorFilePath);
+                    await fs.access(editorFilePath); // Use existing fs instance
+                    await fs.deleteFile(editorFilePath); // Use existing fs instance
                     console.log(chalk.green(`    ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
                     editorDeleted = true;
                 } catch (editorError) {
@@ -179,6 +225,7 @@ async function main() {
         // The targetIdentifier might be a string or an array depending on where the error occurred
         const loggableIdentifier = typeof targetIdentifier === 'string' ? targetIdentifier : Array.isArray(targetIdentifier) ? targetIdentifier.join(', ') : 'unknown_context';
 
+        // Ensure codeProcessor exists before accessing its aiClient
         if (config && codeProcessor && codeProcessor.aiClient) { // Check crucial components exist
             try {
                 // Don't log errors during the delete process itself to the (now deleted) file

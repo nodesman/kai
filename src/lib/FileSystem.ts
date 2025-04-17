@@ -6,7 +6,7 @@ import chalk from 'chalk'; // Import chalk for logging
 
 class FileSystem {
 
-    // --- Common FS methods (ensure writeFile uses ensureDirExists) ---
+    // --- Common FS methods (remain unchanged) ---
     async access(filePath: string): Promise<void> {
         await fs.access(filePath);
     }
@@ -15,15 +15,8 @@ class FileSystem {
         await fs.unlink(filePath);
     }
 
-    /**
-     * Writes content to a file, ensuring the directory exists first.
-     * @param filePath The absolute path to the file.
-     * @param content The string content to write.
-     */
     async writeFile(filePath: string, content: string): Promise<void> {
-        // Ensure directory exists before writing
         const dir = path.dirname(filePath);
-        // Use ensureDirExists from this class (which uses async fs.mkdir)
         await this.ensureDirExists(dir);
         await fs.writeFile(filePath, content, 'utf-8');
     }
@@ -42,89 +35,105 @@ class FileSystem {
     }
     // --- End common FS methods ---
 
-    // --- Project file reading methods (MODIFIED gitignore logic AGAIN) ---
-
     /**
-     * Reads .gitignore, creates it with defaults if missing, appends '.kai/logs/' if missing
-     * from an existing file, and returns ignore rules for in-memory filtering.
-     * Ensures `.kai/logs/` is always ignored *in memory* for the tool's context building.
+     * Ensures .gitignore exists and contains the rule to ignore '.kai/logs/'.
+     * Creates the file with defaults if missing, appends the rule if missing from an existing file.
+     * Should be called once during application startup.
      * @param projectRoot The root directory of the project.
-     * @returns An `ignore` instance populated with rules.
      */
-    private async readGitignore(projectRoot: string): Promise<Ignore> {
-        const ig = ignore();
+    async ensureGitignoreRules(projectRoot: string): Promise<void> {
+        console.log(chalk.dim("Checking .gitignore configuration..."));
         const gitignorePath = path.join(projectRoot, '.gitignore');
-        // Define the specific line to ensure exists in the .gitignore file
         const kaiLogsIgnoreLine = '.kai/logs/'; // Trailing slash ignores directory + contents
-        const kaiLogsComment = '# Kai specific logs (auto-added)'; // Comment to add when appending
-
-        // Define default base content for a *new* .gitignore file
+        const kaiLogsComment = '# Kai specific logs (auto-added)';
         const defaultNewGitignoreContent = `# Common Node ignores\nnode_modules/\n.DS_Store\n\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
-
-        // --- Step 1: Always add essential *in-memory* ignores ---
-        // Ensures the tool behaves correctly for context building regardless of file state.
-        ig.add(['.git', 'node_modules', '.gitignore', kaiLogsIgnoreLine]); // Use the constant
 
         try {
             let gitignoreContent = await this.readFile(gitignorePath); // Returns null if ENOENT
 
             if (gitignoreContent === null) {
-                // --- Step 2a: .gitignore does NOT exist - CREATE IT ---
-                console.log(chalk.yellow(`  .gitignore not found. Creating one with defaults...`));
+                // --- .gitignore does NOT exist - CREATE IT ---
+                console.log(chalk.yellow(`  .gitignore not found. Creating one with defaults including '${kaiLogsIgnoreLine}'...`));
                 try {
-                    // Write the default content (which includes kaiLogsIgnoreLine)
                     await this.writeFile(gitignorePath, defaultNewGitignoreContent);
-                    console.log(chalk.green(`  Successfully created .gitignore and added rule for '${kaiLogsIgnoreLine}'.`));
-                    // The in-memory 'ig' object already includes this rule.
+                    console.log(chalk.green(`  Successfully created .gitignore.`));
                 } catch (writeError) {
                     console.error(chalk.red(`  Error creating .gitignore file at ${gitignorePath}:`), writeError);
-                    // Continue with in-memory ignores anyway
+                    // Throw or handle more gracefully? For now, log and continue startup.
+                    // Depending on severity, you might want to throw new Error(...) here.
                 }
             } else {
-                // --- Step 2b: .gitignore *DOES* exist - READ & CHECK ---
-                console.log(chalk.dim(`  Using existing .gitignore file.`));
-                // Add existing content to in-memory rules first
-                ig.add(gitignoreContent);
-
-                // --- Check if the specific line exists (more robust check) ---
+                // --- .gitignore DOES exist - CHECK & APPEND if needed ---
+                console.log(chalk.dim(`  Found existing .gitignore file.`));
                 const lines = gitignoreContent.split('\n').map(line => line.trim());
                 const ruleExists = lines.includes(kaiLogsIgnoreLine);
 
                 if (!ruleExists) {
-                    // --- Append the rule if it's missing ---
-                    console.log(chalk.yellow(`  Rule '${kaiLogsIgnoreLine}' not found in existing .gitignore. Appending it...`));
+                    console.log(chalk.yellow(`  Rule '${kaiLogsIgnoreLine}' not found in .gitignore. Appending it...`));
                     try {
-                        // Append the rule with a preceding newline (if needed) and a comment
-                        const contentToAppend = (gitignoreContent.endsWith('\n') ? '' : '\n') // Add newline if file doesn't end with one
-                                                + `\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`; // Add comment, rule, and trailing newline
+                        const contentToAppend = (gitignoreContent.endsWith('\n') ? '' : '\n')
+                                                + `\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
                         await fs.appendFile(gitignorePath, contentToAppend, 'utf-8');
                         console.log(chalk.green(`  Successfully appended '${kaiLogsIgnoreLine}' to .gitignore.`));
-                        // The in-memory 'ig' object already includes this rule from Step 1.
                     } catch (appendError) {
-                         console.error(chalk.red(`  Error appending '${kaiLogsIgnoreLine}' to .gitignore file at ${gitignorePath}:`), appendError);
-                         // In-memory ignore still works because of Step 1.
+                        console.error(chalk.red(`  Error appending '${kaiLogsIgnoreLine}' to .gitignore file at ${gitignorePath}:`), appendError);
+                        // Log and continue startup.
                     }
                 } else {
-                     console.log(chalk.dim(`  Rule '${kaiLogsIgnoreLine}' already present in .gitignore.`));
+                    console.log(chalk.dim(`  Rule '${kaiLogsIgnoreLine}' already present in .gitignore.`));
                 }
             }
         } catch (readError) {
-            // Catch errors from readFile *other* than ENOENT (which returns null)
+            // Catch errors from readFile *other* than ENOENT
             console.error(chalk.red(`  Error processing .gitignore file at ${gitignorePath}:`), readError);
-            // Continue with in-memory ignores anyway (Step 1 ensures this)
+            // Log and continue startup.
+        }
+        console.log(chalk.dim("  .gitignore configuration check complete."));
+    }
+
+    /**
+     * Reads .gitignore rules for in-memory filtering during context building.
+     * Does NOT create or modify the file itself. Always includes default ignores.
+     * @param projectRoot The root directory of the project.
+     * @returns An `ignore` instance populated with rules.
+     */
+    private async readGitignoreForContext(projectRoot: string): Promise<Ignore> {
+        const ig = ignore();
+        const gitignorePath = path.join(projectRoot, '.gitignore');
+        const kaiLogsIgnoreLine = '.kai/logs/';
+
+        // --- Step 1: Always add essential *in-memory* ignores ---
+        // Ensures the tool behaves correctly for context building regardless of file state.
+        ig.add(['.git', 'node_modules', '.gitignore', kaiLogsIgnoreLine]);
+
+        // --- Step 2: Read the actual file IF it exists ---
+        try {
+            const gitignoreContent = await this.readFile(gitignorePath); // Returns null if ENOENT
+            if (gitignoreContent !== null) {
+                console.log(chalk.dim(`  Applying rules from existing .gitignore for context building.`));
+                ig.add(gitignoreContent);
+            } else {
+                 console.log(chalk.dim(`  No .gitignore file found, using default ignores for context building.`));
+            }
+        } catch (readError) {
+            // Catch errors from readFile *other* than ENOENT
+            console.error(chalk.red(`  Warning: Error reading .gitignore file at ${gitignorePath} for context building:`), readError);
+            // Continue with default in-memory ignores anyway
         }
 
         // --- Step 3: Return the in-memory ignore object ---
-        // This object contains both default ignores and any rules read from the file.
         return ig;
     }
 
 
-    // getProjectFiles, readFileContents, isTextFile (remain unchanged)
+    // --- Project file reading methods (MODIFIED getProjectFiles) ---
+
+    // getProjectFiles, readFileContents, isTextFile (remain unchanged except call to readGitignoreForContext)
     async getProjectFiles(dirPath: string, projectRoot?: string, ig?: Ignore): Promise<string[]> {
         projectRoot = projectRoot || dirPath;
-        // This call now creates/appends to .gitignore if necessary
-        ig = ig || await this.readGitignore(projectRoot);
+        // --- MODIFICATION: Call the read-only version ---
+        ig = ig || await this.readGitignoreForContext(projectRoot);
+        // --- END MODIFICATION ---
 
         let files: string[] = [];
         const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -133,7 +142,10 @@ class FileSystem {
             const fullPath = path.join(dirPath, entry.name);
             const relativePath = path.relative(projectRoot, fullPath);
 
-            if (ig.ignores(relativePath)) {
+            // Check against absolute path for initial system dirs like .git
+            // and relative path for rules defined in .gitignore
+            if (ig.ignores(entry.name) || ig.ignores(relativePath)) {
+                 // console.log(chalk.gray(`    Ignoring: ${relativePath}`)); // Optional verbose logging
                 continue;
             }
 
@@ -153,13 +165,14 @@ class FileSystem {
             if (content !== null) {
                 contents[filePath] = content;
             } else {
-                console.warn(`Skipping file not found or unreadable: ${filePath}`);
+                console.warn(chalk.yellow(`Skipping file not found or unreadable during content read: ${filePath}`));
             }
         }
         return contents;
     }
 
      async isTextFile(filePath: string): Promise<boolean> {
+        // This simple heuristic remains the same
         const textExtensions = ['.ts', '.js', '.json', '.yaml', '.yml', '.txt', '.md', '.html', '.css', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.sh', '.rb', '.php', '.go', '.rs', '.swift', '.kt', '.kts', '.gitignore', '.npmignore', 'LICENSE', '.env', '.xml', '.svg', '.jsx', '.tsx'];
         const ext = path.extname(filePath).toLowerCase();
         const base = path.basename(filePath);
@@ -167,15 +180,14 @@ class FileSystem {
     }
     // --- End project file reading methods ---
 
-    // --- JSONL/Directory methods (ensureDirExists uses async mkdir) ---
+    // --- JSONL/Directory methods (remain unchanged) ---
     async ensureDirExists(dirPath: string): Promise<void> {
         try {
             await fs.access(dirPath);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                // recursive: true handles nested creation like .kai/logs
                 await fs.mkdir(dirPath, { recursive: true });
-                // Avoid duplicate logs here if Config.ts also logs creation
+                // Log moved to Config constructor where .kai/logs is created
             } else {
                 console.error(`Error checking/creating directory ${dirPath}:`, error);
                 throw error;
