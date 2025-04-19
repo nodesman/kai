@@ -75,9 +75,9 @@ Kai uses a `config.yaml` file in the project root for settings like AI model nam
 
 ## Manual Version Tagging
 
-To manually create version tags (following SemVer) for stable points in your codebase, use the standard `npm version` command. This is useful for marking releases or known good states.
+To manually create version tags (following SemVer) for stable points in your codebase, use the standard `npm version` command. This is useful for marking releases or known good states. The `preversion` and `postversion` scripts in `package.json` automate checks and pushing.
 
-1.  **Ensure your working directory is clean:** Commit or stash any pending changes (`git status`).
+1.  **Ensure your working directory is clean:** The `preversion` script checks this.
 2.  **Run `npm version`:**
     *   **Patch Release (e.g., 0.1.0 -> 0.1.1):** For bug fixes or minor changes.
         ```bash
@@ -97,10 +97,7 @@ To manually create version tags (following SemVer) for stable points in your cod
         ```
     *(The `%s` in the message will be replaced with the new version number.)*
 
-3.  **Push changes:** After running `npm version`, push the commit and the new tag to your remote repository:
-    ```bash
-    git push && git push --tags
-    ```
+3.  **Push changes:** The `postversion` script automatically pushes the commit and the new tag to your remote repository.
 
 *(Note: Kai's consolidation process does **not** automatically tag or commit changes. Use `npm version` as described above for manual, deliberate versioning of the project.)*
 

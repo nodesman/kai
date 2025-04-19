@@ -135,59 +135,12 @@ export class GitService {
         }
     }
 
-    /**
-     * Finds the latest SemVer tag matching a given prefix.
-     * Tags must be in the format `prefixX.Y.Z`.
-     * @param projectRoot The absolute path to the project root directory.
-     * @param prefix The prefix to filter tags by (e.g., "kai_consolidate_v").
-     * @returns A promise resolving to the latest tag name string (e.g., "kai_consolidate_v1.2.3") or null if no matching SemVer tags are found.
-     * @throws {Error} If the Git command fails.
-     */
-    async getLatestSemverTag(projectRoot: string, prefix: string): Promise<string | null> {
-        // Escape the prefix for shell command and ensure it ends with 'v' if not provided correctly
-        const sanitizedPrefix = prefix.endsWith('v') ? prefix : prefix + 'v';
-        // Command to list tags matching the prefix, sorted by version descendingly
-        // Uses --sort=-v:refname which handles SemVer sorting correctly (e.g., 1.10.0 > 1.2.0)
-        const listCommand = `git tag --list "${sanitizedPrefix}*" --sort=-v:refname`;
-
-        console.log(chalk.dim(`  Fetching latest SemVer tag with prefix '${sanitizedPrefix}'...`));
-
-        try {
-            const { stdout, stderr } = await this.commandService.run(listCommand, { cwd: projectRoot });
-
-            if (stderr.trim()) {
-                console.warn(chalk.yellow(`  Git tag list command produced stderr: ${stderr.trim()}`));
-            }
-
-            const tags = stdout.trim().split('\n').filter(tag => tag); // Filter out empty lines
-
-            if (tags.length === 0) {
-                console.log(chalk.dim(`  No existing tags found with prefix '${sanitizedPrefix}'.`));
-                return null;
-            }
-
-            // The first tag in the sorted list is the latest SemVer tag
-            const latestTag = tags[0];
-            console.log(chalk.dim(`  Found latest tag: ${latestTag}`));
-            return latestTag;
-
-        } catch (listError: any) {
-            console.error(chalk.red(`\nError listing Git tags with prefix '${sanitizedPrefix}':`), listError.message || listError);
-            let listFailMsg = `Failed to list Git tags. Error: ${listError.message || 'Unknown error'}`;
-            if (listError.code === 'ENOENT') {
-                listFailMsg = `Failed to list tags: Git command not found ('${listCommand}' failed). Ensure Git is installed.`;
-            } else if (listError.stderr) {
-                listFailMsg += ` Stderr: ${listError.stderr.trim()}`;
-            } else if (listError.code) {
-                listFailMsg += ` Exit Code: ${listError.code}`;
-            }
-            throw new Error(listFailMsg);
-        }
-    }
+    // REMOVED: getLatestSemverTag method was here
 
 
     /**
      * Creates an annotated Git tag.
+     * (Kept for potential future use, e.g., a manual tagging command)
      * @param projectRoot The absolute path to the project root directory.
      * @param tagName The name for the tag.
      * @param message The annotation message for the tag.
@@ -216,16 +169,14 @@ export class GitService {
                 // Check for common tag errors like "tag already exists"
                 if (tagError.stderr.includes('already exists')) {
                     tagFailMsg = `Failed to create Git tag: Tag '${tagName}' already exists.`;
-                     console.warn(chalk.yellow(`  Tag '${tagName}' already exists. Skipping creation.`));
-                     // Allow it to proceed without throwing for this specific case in auto-tagging.
-                     return; // Exit the function gracefully if tag already exists
+                     // Throw "already exists" error if called manually
+                     throw new Error(tagFailMsg);
                 } else {
                     tagFailMsg += ` Stderr: ${tagError.stderr.trim()}`;
                 }
             } else if (tagError.code) {
                 tagFailMsg += ` Exit Code: ${tagError.code}`;
             }
-            // Only throw if it wasn't the "already exists" error
             throw new Error(tagFailMsg);
         }
     }

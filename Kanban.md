@@ -158,8 +158,3 @@
 ## Done
 
 *(Move tasks here when completed)*
-
-*   **[X] Task:** Add Automatic Git Tagging (SemVer Patch Increment)
-    *   **Details:** Implemented `GitService.getLatestSemverTag` and `GitService.createAnnotatedTag`. Modified `ConsolidationService._runTaggingStep` to fetch the latest tag with prefix `kai_consolidate_v`, parse the SemVer, increment the patch version (starting from `v0.1.0` if no tag exists), and create a new annotated tag (e.g., `kai_consolidate_v0.1.1`) after successful, user-approved consolidation.
-    *   **Depends on:** `CommandService`, `ConsolidationService` structure
-    *   **Priority:** Medium -> **Done**

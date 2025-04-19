@@ -11,7 +11,7 @@ import { ConsolidationGenerator } from './ConsolidationGenerator';
 import { ConsolidationApplier } from './ConsolidationApplier';
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
 import { FinalFileStates, ConsolidationAnalysis } from './types';
-// Removed date-fns import as it's no longer needed for tagging
+// Removed date-fns import and TAG_PREFIX
 
 interface ModelSelection {
     analysisModelName: string;
@@ -22,7 +22,7 @@ interface ModelSelection {
 
 // Define a marker for successful consolidation
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
-const TAG_PREFIX = "kai_consolidate_v"; // Define the prefix for automatic tags
+// REMOVED: const TAG_PREFIX = "kai_consolidate_v";
 
 export class ConsolidationService {
     private config: Config;
@@ -109,10 +109,10 @@ export class ConsolidationService {
             // Step D: Apply (if approved)
             changesApplied = await this._runApplyStep(userApproved, finalStates, conversationFilePath); // Store result
 
-            // Step E: Tag (if approved and applied)
-            if (userApproved && changesApplied) {
-                await this._runTaggingStep(conversationName, conversationFilePath); // Pass conversation name
-            }
+            // REMOVED: Step E: Tagging
+            // if (userApproved && changesApplied) {
+            //     await this._runTaggingStep(conversationName, conversationFilePath); // REMOVED CALL
+            // }
 
             // Mark overall success if we reached here and changes were applied/approved
             if (userApproved && changesApplied) {
@@ -306,63 +306,7 @@ export class ConsolidationService {
         }
     }
 
-    /** Runs the automatic Git tagging step using SemVer. */
-    private async _runTaggingStep(conversationName: string, conversationFilePath: string): Promise<void> {
-        console.log(chalk.cyan("\n  Step E: Tagging successful consolidation (SemVer)..."));
-        try {
-            // 1. Get the latest existing tag with the defined prefix
-            const latestTag = await this.gitService.getLatestSemverTag(this.projectRoot, TAG_PREFIX);
-
-            let major = 0;
-            let minor = 1;
-            let patch = 0;
-
-            // 2. Parse the latest tag if it exists
-            if (latestTag) {
-                 // Extract version string after prefix
-                const versionPart = latestTag.substring(TAG_PREFIX.length);
-                const versionMatch = versionPart.match(/^(\d+)\.(\d+)\.(\d+)$/);
-                if (versionMatch) {
-                    major = parseInt(versionMatch[1], 10);
-                    minor = parseInt(versionMatch[2], 10);
-                    patch = parseInt(versionMatch[3], 10);
-                    console.log(chalk.dim(`    Parsed latest tag ${latestTag} as v${major}.${minor}.${patch}`));
-                    // 3. Increment the patch version
-                    patch++;
-                } else {
-                    console.warn(chalk.yellow(`    Could not parse SemVer from latest tag '${latestTag}'. Starting from v0.1.0.`));
-                    // Reset to default starting version if parsing fails
-                    major = 0;
-                    minor = 1;
-                    patch = 0;
-                }
-            } else {
-                console.log(chalk.dim(`    No previous tag found. Starting with v0.1.0.`));
-                // Start at v0.1.0 if no tags exist
-                major = 0;
-                minor = 1;
-                patch = 0;
-            }
-
-            // 4. Construct the new tag name
-            const newTagName = `${TAG_PREFIX}${major}.${minor}.${patch}`;
-
-            // 5. Generate tag message
-            const tagMessage = `Kai Auto-Tag: Successful consolidation for conversation '${conversationName}'`;
-
-            // 6. Call GitService to create the tag
-            await this.gitService.createAnnotatedTag(this.projectRoot, newTagName, tagMessage);
-
-            await this._logSystemMessage(conversationFilePath, `System: Successfully created Git tag '${newTagName}'.`);
-
-        } catch (tagError: any) {
-             // Log the tagging error to the conversation file, but don't stop the overall success marker
-             const errorMsg = `Failed to create Git tag after successful consolidation: ${tagError.message}`;
-             console.error(chalk.red(`  Tagging Step Failed: ${errorMsg}`));
-             await this._logError(conversationFilePath, `Tagging Warning: ${errorMsg}`);
-             // Do not re-throw; allow consolidation to be marked successful even if tagging fails.
-        }
-    }
+    // REMOVED: private async _runTaggingStep(...) method
 
     /** Handles and logs errors occurring during the consolidation process. */
     private async _handleConsolidationError(
@@ -378,7 +322,7 @@ export class ConsolidationService {
                                  errorMessage.includes('Analysis Step Failed:') ||
                                  errorMessage.includes('Generation Step Failed:') ||
                                  errorMessage.includes('Apply Step Failed:') ||
-                                 errorMessage.includes('Tagging Warning:') || // Add tag warning
+                                //  errorMessage.includes('Tagging Warning:') || // Removed tag warning check
                                  errorMessage.includes('Consolidation apply step completed with');
 
          if (!isKnownHandledError) {

@@ -9,7 +9,9 @@
   "scripts": {
     "test": "jest",
     "build": "tsc",
-    "start": "node bin/kai.js"
+    "start": "node bin/kai.js",
+    "preversion": "npm test && git diff --quiet && npm run build",
+    "postversion": "git push && git push --tags"
   },
   "keywords": [
     "ai",
