@@ -9,7 +9,7 @@ interface GeminiRateLimitConfig {
     requests_per_minute?: number;
 }
 
-// *** ADDED subsequent_chat_model_name AND RETRY SETTINGS ***
+// *** ADDED interactive_prompt_review ***
 interface GeminiConfig {
     api_key: string; // Loaded from ENV
     model_name?: string; // Primary model (e.g., Pro)
@@ -19,8 +19,9 @@ interface GeminiConfig {
     rate_limit?: GeminiRateLimitConfig;
     max_retries?: number; // General retries (might deprecate if specific ones are better)
     retry_delay?: number; // General retry delay (might deprecate)
-    generation_max_retries?: number; // Max retries specifically for the generation step (Step B) <-- ADDED
-    generation_retry_base_delay_ms?: number; // Base delay for generation step retries (ms) <-- ADDED
+    generation_max_retries?: number; // Max retries specifically for the generation step (Step B)
+    generation_retry_base_delay_ms?: number; // Base delay for generation step retries (ms)
+    interactive_prompt_review?: boolean; // <-- ADDED: Flag for interactive review/edit
     // Add safetySettings if needed:
     // safetySettings?: SafetySetting[];
 }
@@ -91,10 +92,10 @@ class ConfigLoader implements IConfig {
         }
 
         // 3. Construct the final Config object with defaults
-        // Default subsequent model to Flash if not specified
         const defaultSubsequentModel = "gemini-2.0-flash";
         const defaultGenerationMaxRetries = 3;
         const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
+        const defaultInteractivePromptReview = false; // <-- ADDED: Default to false
 
         const finalGeminiConfig: GeminiConfig = {
             api_key: apiKey, // Mandatory, loaded from env
@@ -108,18 +109,17 @@ class ConfigLoader implements IConfig {
             // Keep general retry settings for now, but prioritize specific ones
             max_retries: yamlConfig.gemini?.max_retries || 3,
             retry_delay: yamlConfig.gemini?.retry_delay || 60000,
-            // *** USE new generation retry settings ***
             generation_max_retries: yamlConfig.gemini?.generation_max_retries ?? defaultGenerationMaxRetries,
             generation_retry_base_delay_ms: yamlConfig.gemini?.generation_retry_base_delay_ms ?? defaultGenerationRetryBaseDelayMs,
+            // *** USE new interactive prompt review setting ***
+            interactive_prompt_review: yamlConfig.gemini?.interactive_prompt_review ?? defaultInteractivePromptReview, // <-- ADDED: Load or default
         };
 
         const finalProjectConfig: Required<ProjectConfig> = {
             root_dir: yamlConfig.project?.root_dir || "generated_project",
             prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
             prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
-            // --- MODIFICATION: Change default chats_dir ---
-            chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Changed from ".kaichats"
-            // --- END MODIFICATION ---
+            chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Using the updated default
         };
 
         // Calculate absolute chats directory path
@@ -128,19 +128,18 @@ class ConfigLoader implements IConfig {
         // Ensure chats directory exists immediately
         try {
             if (!fs.existsSync(absoluteChatsDir)) {
-                // recursive: true will create parent directories (.kai) if needed
                 fs.mkdirSync(absoluteChatsDir, { recursive: true });
-                console.log(chalk.blue(`Created logs directory: ${absoluteChatsDir}`)); // Updated log message
+                console.log(chalk.blue(`Created logs directory: ${absoluteChatsDir}`));
             }
         } catch (dirError) {
-            console.error(chalk.red(`Fatal: Could not create logs directory at ${absoluteChatsDir}:`), dirError); // Updated log message
+            console.error(chalk.red(`Fatal: Could not create logs directory at ${absoluteChatsDir}:`), dirError);
             process.exit(1);
         }
 
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
-            chatsDir: absoluteChatsDir // Keep name chatsDir, but it now points to .kai/logs
+            chatsDir: absoluteChatsDir
         };
     }
 }
