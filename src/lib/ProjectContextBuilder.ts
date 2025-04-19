@@ -47,13 +47,22 @@ export class ProjectContextBuilder {
                 continue;
             }
 
+            // --- MODIFICATION START ---
+            // Calculate token count for the individual file's content
+            const fileTokenCount = countTokens(content);
+            // --- MODIFICATION END ---
+
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
             const fileBlock = fileHeader + content + fileFooter;
             // No token check here - just append the file block
             contextString += fileBlock;
             includedFiles++;
-            console.log(chalk.dim(`  Included ${relativePath}`));
+
+            // --- MODIFICATION START ---
+            // Update the log message to include the file's token count
+            console.log(chalk.dim(`  Included ${relativePath} (${fileTokenCount} tokens)`));
+            // --- MODIFICATION END ---
         }
 
         // Calculate the final token count of the full context
