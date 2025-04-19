@@ -11,48 +11,32 @@ export class GitService {
     }
 
     /**
-     * Ensures the project directory is a Git repository.
-     * Attempts to initialize one if it doesn't exist.
-     * Should be called once during application startup.
+     * Checks if the specified directory is a Git repository.
      * @param projectRoot The absolute path to the project root directory.
-     * @throws {Error} If Git is not found or initialization fails.
+     * @returns A promise resolving to `true` if it's a Git repo, `false` otherwise.
+     * @throws {Error} If the Git command itself fails (e.g., Git not found).
      */
-    async ensureGitRepository(projectRoot: string): Promise<void> {
-        console.log(chalk.dim("Checking if project is a Git repository..."));
-        // Use 'rev-parse' as it's a more direct way to check if inside a repo
+    async isGitRepository(projectRoot: string): Promise<boolean> {
+        console.log(chalk.dim("  Checking if project is a Git repository..."));
         const checkCommand = 'git rev-parse --is-inside-work-tree';
         try {
-            await this.commandService.run(checkCommand, { cwd: projectRoot });
-            console.log(chalk.dim("  ✓ Git repository found."));
+            // Use run and check stdout. If it succeeds and stdout is 'true', it's a repo.
+            const { stdout } = await this.commandService.run(checkCommand, { cwd: projectRoot });
+            const isRepo = stdout.trim() === 'true';
+            console.log(chalk.dim(`  Is Git repository? ${isRepo}`));
+            return isRepo;
         } catch (error: any) {
-            const isNotRepoError = error.stderr?.includes('not a git repository') || error.stdout?.includes('false'); // Check stdout too
+            const isNotRepoError = error.stderr?.includes('not a git repository');
             const isGitNotFound = error.code === 'ENOENT' || error.message?.includes('command not found');
 
             if (isGitNotFound) {
                  const gitNotFoundMsg = `Git command not found ('${checkCommand}' failed). Please ensure Git is installed and in your system PATH.`;
                  console.error(chalk.red(`\nError checking Git repository status:`), gitNotFoundMsg);
-                 throw new Error(gitNotFoundMsg);
+                 throw new Error(gitNotFoundMsg); // Critical failure
             } else if (isNotRepoError) {
-                // --- Attempt to initialize Git repository ---
-                console.log(chalk.yellow("  Project directory is not a Git repository. Attempting to initialize..."));
-                const initCommand = 'git init';
-                try {
-                    await this.commandService.run(initCommand, { cwd: projectRoot });
-                    console.log(chalk.green("  Successfully initialized Git repository."));
-                    // A newly initialized repo is considered clean for subsequent checks if needed immediately.
-                } catch (initError: any) {
-                    console.error(chalk.red(`\nError during automatic 'git init':`), initError.message || initError);
-                    let initFailMsg = `Failed to automatically initialize Git repository. Error: ${initError.message || 'Unknown error'}`;
-                    if (initError.code === 'ENOENT' || initError.message?.includes('command not found')) {
-                        initFailMsg = `Failed to initialize Git: Git command not found ('${initCommand}' failed). Please ensure Git is installed and in your system PATH.`;
-                    } else if (initError.stderr) {
-                        initFailMsg += ` Stderr: ${initError.stderr.trim()}`;
-                    } else if (initError.code) {
-                        initFailMsg += ` Exit Code: ${initError.code}`;
-                    }
-                    throw new Error(initFailMsg); // Throw specific error for init failure
-                }
-                // --- End Git initialization attempt ---
+                // This is expected if it's not a repo, return false.
+                console.log(chalk.dim("  Is Git repository? false (Not a git repository error detected)"));
+                return false;
             } else {
                 // Handle other unexpected errors from the check command
                 let genericFailMsg = `Failed to verify Git repository status using '${checkCommand}'. Error: ${error.message || 'Unknown error'}`;
@@ -60,49 +44,89 @@ export class GitService {
                      genericFailMsg += ` Exit Code: ${error.code}. Stderr: ${error.stderr?.trim() || 'N/A'}`;
                  }
                 console.error(chalk.red(`\nError during Git check ('${checkCommand}'):`), genericFailMsg);
-                throw new Error(genericFailMsg);
+                throw new Error(genericFailMsg); // Critical failure
             }
         }
+    }
+
+     /**
+      * Initializes a Git repository in the specified directory.
+      * Should only be called after user confirmation if the directory wasn't already a repo.
+      * @param projectRoot The absolute path to the project root directory.
+      * @throws {Error} If Git initialization fails.
+      */
+     async initializeRepository(projectRoot: string): Promise<void> {
+         console.log(chalk.yellow("  Attempting to initialize Git repository..."));
+         const initCommand = 'git init';
+         try {
+             await this.commandService.run(initCommand, { cwd: projectRoot });
+             console.log(chalk.green("  Successfully initialized Git repository."));
+         } catch (initError: any) {
+             console.error(chalk.red(`\nError during 'git init':`), initError.message || initError);
+             let initFailMsg = `Failed to initialize Git repository. Error: ${initError.message || 'Unknown error'}`;
+             if (initError.code === 'ENOENT' || initError.message?.includes('command not found')) {
+                 initFailMsg = `Failed to initialize Git: Git command not found ('${initCommand}' failed). Please ensure Git is installed and in your system PATH.`;
+             } else if (initError.stderr) {
+                 initFailMsg += ` Stderr: ${initError.stderr.trim()}`;
+             } else if (initError.code) {
+                 initFailMsg += ` Exit Code: ${initError.code}`;
+             }
+             throw new Error(initFailMsg); // Throw specific error for init failure
+         }
+     }
+
+    /**
+     * Ensures the project directory is a Git repository.
+     * *** DEPRECATED in favor of isGitRepository check and explicit initializeRepository call after confirmation. ***
+     * This method remains for potential internal use but shouldn't handle auto-init anymore.
+     * @param projectRoot The absolute path to the project root directory.
+     * @throws {Error} If Git is not found.
+     */
+    async ensureGitRepository(projectRoot: string): Promise<void> {
+        console.warn(chalk.grey("Warning: ensureGitRepository called. Use isGitRepository and initializeRepository directly for better control."));
+        await this.isGitRepository(projectRoot); // Just perform the check, relies on isGitRepository throwing if git not found
     }
 
 
     /**
      * Checks if the Git working directory is clean (no uncommitted changes).
-     * Assumes the directory IS a Git repository (ensureGitRepository should be called first).
+     * Assumes the directory IS a Git repository (isGitRepository should be true).
      * Used primarily before operations like consolidation.
      * @param projectRoot The absolute path to the project root directory.
      * @throws {Error} If the working directory is not clean or the Git command fails.
      */
     async checkCleanStatus(projectRoot: string): Promise<void> {
-        console.log(chalk.blue("  Checking Git working directory status...")); // Renamed log slightly
+        console.log(chalk.blue("  Checking Git working directory status..."));
         const statusCommand = 'git status --porcelain';
         try {
             const { stdout, stderr } = await this.commandService.run(statusCommand, { cwd: projectRoot });
 
-            // Check for uncommitted changes
             const status = stdout.trim();
             if (status !== '') {
                 console.error(chalk.red("\nError: Git working directory not clean:"));
-                console.error(chalk.red(status)); // Show the specific changes
+                console.error(chalk.red(status));
                 throw new Error('Git working directory not clean. Please commit or stash changes before proceeding.');
             } else {
-                 // Log stderr only if it contains something unexpected (git status --porcelain shouldn't normally output to stderr on success)
                  if (stderr.trim()) {
                      console.warn(chalk.yellow(`  Git status check produced unexpected stderr:\n${stderr.trim()}`));
                  }
                 console.log(chalk.green("  Git working directory is clean."));
             }
         } catch (error: any) {
-             // Handle errors from 'git status' command - it should NOT be 'not a repo' here.
             const isGitNotFound = error.code === 'ENOENT' || error.message?.includes('command not found');
+             // If it's *not* a repo, this check shouldn't have been called - indicates logic error elsewhere.
+             const isNotRepoError = error.stderr?.includes('not a git repository');
 
             if (isGitNotFound) {
-                const gitNotFoundMsg = `Git command not found ('${statusCommand}' failed). Please ensure Git is installed and in your system PATH.`;
+                const gitNotFoundMsg = `Git command not found ('${statusCommand}' failed). Ensure Git is installed and PATH is correct.`;
                 console.error(chalk.red(`\nError during '${statusCommand}':`), gitNotFoundMsg);
                 throw new Error(gitNotFoundMsg);
+            } else if (isNotRepoError) {
+                 const notRepoMsg = `Cannot check status: Directory '${projectRoot}' is not a Git repository. This check should only run on existing repos.`;
+                 console.error(chalk.red(`\nLogic Error during '${statusCommand}':`), notRepoMsg);
+                 throw new Error(notRepoMsg);
             } else {
-                 // Handle other unexpected errors from 'git status'
-                let genericFailMsg = `Failed to verify Git status using '${statusCommand}'. Error: ${error.message || 'Unknown error'}`;
+                 let genericFailMsg = `Failed to verify Git status using '${statusCommand}'. Error: ${error.message || 'Unknown error'}`;
                  if (error.code && error.code !== 0) {
                      genericFailMsg += ` Exit Code: ${error.code}. Stderr: ${error.stderr?.trim() || 'N/A'}`;
                  }
@@ -111,17 +135,4 @@ export class GitService {
              }
         }
     }
-
-    // --- Potential future methods (would also use this.commandService.run) ---
-    // async stageFile(projectRoot: string, filePath: string): Promise<void> {
-    //     await this.commandService.run(`git add ${filePath}`, { cwd: projectRoot });
-    // }
-    // async commitChanges(projectRoot: string, message: string): Promise<void> {
-    //     await this.commandService.run(`git commit -m "${message}"`, { cwd: projectRoot });
-    // }
-    // async getCurrentBranch(projectRoot: string): Promise<string> {
-    //     const { stdout } = await this.commandService.run('git rev-parse --abbrev-ref HEAD', { cwd: projectRoot });
-    //     return stdout.trim();
-    // }
-    // --- End potential future methods ---
 }

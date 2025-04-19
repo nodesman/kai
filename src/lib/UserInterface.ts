@@ -39,9 +39,34 @@ class UserInterface {
         this.config = config; // Store config
     }
 
+    /**
+     * Asks the user for confirmation before initializing Git, creating .kai/logs,
+     * and configuring .gitignore in a directory that is not currently a Git repo.
+     * @param directoryPath The path of the directory where initialization would occur.
+     * @param isDirectorySafe A boolean indicating if the directory is empty or contains only safe files.
+     * @returns `true` if the user confirms, `false` otherwise.
+     */
+    async confirmInitialization(directoryPath: string, isDirectorySafe: boolean): Promise<boolean> {
+        const message = isDirectorySafe
+            ? `The directory '${directoryPath}' is not a Git repository but appears empty or safe.\nDo you want Kai to initialize Git, create the '.kai/logs' directory, and configure '.gitignore'?`
+            : `The directory '${directoryPath}' is not a Git repository and contains existing files.\nInitializing Git here will affect these files.\nDo you want Kai to initialize Git, create the '.kai/logs' directory, and configure '.gitignore'?`;
+
+        const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
+            {
+                type: 'confirm',
+                name: 'confirm',
+                message: message,
+                default: false, // Default to NO for safety, especially if directory isn't "safe"
+            },
+        ]);
+        return confirm;
+    }
+
+
     // --- selectOrCreateConversation (Unchanged) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
-        await this.fs.ensureDirExists(this.config.chatsDir); // Ensure dir exists
+        // Ensure dir exists *before* listing - moved to startup check in kai.ts
+        // await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
         const choices = [
@@ -212,7 +237,8 @@ class UserInterface {
 
             // --- Handle Delete Conversation Mode ---
             if (mode === 'Delete Conversation...') {
-                await this.fs.ensureDirExists(this.config.chatsDir);
+                // Ensure dir exists before listing
+                await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
                 const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
                 if (existingConversations.length === 0) {
@@ -281,6 +307,8 @@ class UserInterface {
             let conversationName: string | null = null;
             let isNewConversation = false;
 
+            // Ensure dir exists before allowing selection/creation
+             await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
             conversationDetails = await this.selectOrCreateConversation();
             if (mode === 'Consolidate Changes...' && conversationDetails.isNew) {
                 console.error(chalk.red("Error: Cannot consolidate changes for a newly created (empty) conversation."));

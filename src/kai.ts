@@ -2,36 +2,90 @@
 // src/kai.ts
 
 import path from 'path';
+import inquirer from 'inquirer'; // <-- Add inquirer import
 import { Config } from './lib/Config';
-import { UserInterface, UserInteractionResult } from './lib/UserInterface'; // Import updated type
-import { CodeProcessor } from './lib/CodeProcessor'; // CodeProcessor needs updated constructor
+import { UserInterface, UserInteractionResult } from './lib/UserInterface';
+import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
-// --- ADDED Imports ---
 import { CommandService } from './lib/CommandService';
 import { GitService } from './lib/GitService';
-// --- END ADDED Imports ---
 import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
 
 /**
  * Performs essential checks when the CLI starts up.
- * Ensures .kai/logs exists, Git repo is initialized, and .gitignore is configured.
+ * Handles Git repo status, .kai/logs directory, and .gitignore rules.
+ * Prompts the user for confirmation if initialization is needed in a non-empty, non-Git directory.
  * @param projectRoot Absolute path to the project root.
  * @param fs FileSystem instance.
  * @param gitService GitService instance.
- * @returns {Promise<boolean>} True if all checks pass, false otherwise.
+ * @param ui UserInterface instance for prompting.
+ * @param config Config instance for paths.
+ * @returns {Promise<boolean>} True if all checks pass and necessary actions are confirmed/completed, false otherwise.
  */
-async function performStartupChecks(projectRoot: string, fs: FileSystem, gitService: GitService): Promise<boolean> {
+async function performStartupChecks(
+    projectRoot: string,
+    fs: FileSystem,
+    gitService: GitService,
+    ui: UserInterface, // <-- Add UI
+    config: Config     // <-- Add Config
+): Promise<boolean> {
     console.log(chalk.cyan("\nPerforming startup environment checks..."));
     try {
-        // Check 1: .kai/logs directory (implicitly handled by Config constructor)
-        console.log(chalk.dim("  Directory check (.kai/logs) handled by config loading."));
-        // Check 2: Git repository status (ensure repo exists, init if necessary)
-        await gitService.ensureGitRepository(projectRoot);
-        // Check 3: .gitignore rules (ensure file exists, has .kai/logs/ rule)
-        await fs.ensureGitignoreRules(projectRoot);
+        // --- Git Repository Check ---
+        let isRepo = await gitService.isGitRepository(projectRoot);
+        let proceedWithSetup = true; // Assume we proceed unless user denies
+
+        if (!isRepo) {
+            console.log(chalk.yellow("  This directory is not currently a Git repository."));
+            const isSafeDir = await fs.isDirectoryEmptyOrSafe(projectRoot);
+
+            if (!isSafeDir) {
+                console.log(chalk.yellow("  The directory is not empty and may contain important files."));
+                const { confirmInit } = await inquirer.prompt([ // Use inquirer directly for startup check
+                    {
+                        type: 'confirm',
+                        name: 'confirmInit',
+                        message: `Initialize Git repository, create '.kai/logs' directory, and add '.kai/logs/' to .gitignore in this directory (${projectRoot})?`,
+                        default: false,
+                    }
+                ]);
+                proceedWithSetup = confirmInit;
+                if (!proceedWithSetup) {
+                     console.log(chalk.red("  User declined initialization. Aborting startup checks."));
+                     return false; // User explicitly said no
+                } else {
+                    console.log(chalk.cyan("  User confirmed. Proceeding with initialization..."));
+                }
+            } else {
+                 console.log(chalk.cyan("  Directory is empty or safe. Proceeding with automatic initialization..."));
+            }
+
+            // Initialize Git repo only if needed and confirmed/safe
+            if (proceedWithSetup) {
+                 await gitService.initializeRepository(projectRoot);
+                 isRepo = true; // Mark as repo after successful init
+            }
+        } else {
+            console.log(chalk.green("  ✓ Git repository detected."));
+        }
+
+        // --- .kai/logs and .gitignore Check (Run only if proceeding) ---
+        if (proceedWithSetup) {
+            // Ensure .kai/logs exists (using path from config)
+            await fs.ensureKaiDirectoryExists(config.chatsDir);
+
+            // Ensure .gitignore rules exist
+            await fs.ensureGitignoreRules(projectRoot);
+        } else {
+            // This case should only be reachable if user declined init on non-empty dir
+             console.log(chalk.yellow("  Skipping .kai/logs and .gitignore checks as initialization was declined."));
+             return false; // Setup was not fully completed due to user choice
+        }
+
         console.log(chalk.green("Startup checks complete."));
-        return true;
+        return true; // All checks passed or were successfully completed/confirmed
+
     } catch (error) {
         console.error(chalk.red("\n❌ Fatal Error during startup checks:"), error instanceof Error ? error.message : error);
         console.error(chalk.red("   Please resolve the issues above before running Kai again."));
@@ -58,10 +112,10 @@ async function main() {
         const gitService = new GitService(commandService);
         // --- End Core Service Instantiation ---
 
-        // --- Perform Startup Checks ---
-        const startupOk = await performStartupChecks(projectRoot, fs, gitService);
+        // --- Perform Startup Checks (Pass UI and Config) ---
+        const startupOk = await performStartupChecks(projectRoot, fs, gitService, ui, config);
         if (!startupOk) {
-            process.exit(1); // Exit if startup checks fail
+            process.exit(1); // Exit if startup checks fail or user declines needed setup
         }
         // --- End Startup Checks ---
 
@@ -98,8 +152,6 @@ async function main() {
                 console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
                 throw new Error("Conversation name is required for this mode.");
             }
-            // CodeProcessor already initialized above
-            // codeProcessor = new CodeProcessor(config); // Remove redundant init
             await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false);
 
         } else if (mode === 'Consolidate Changes...') {
@@ -121,13 +173,10 @@ async function main() {
                 throw new Error("Conversation name is required for consolidation.");
             }
             console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(targetIdentifier)}...`));
-            // CodeProcessor already initialized above
-            // codeProcessor = new CodeProcessor(config); // Remove redundant init
             await codeProcessor.processConsolidationRequest(targetIdentifier);
             console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
 
         } else if (mode === 'Delete Conversation...') {
-            // --- MODIFICATION: Handle multiple deletions ---
             // Type assertion
             const deleteResult = interactionResult as Extract<UserInteractionResult, { mode: 'Delete Conversation...' }>;
             const { conversationNamesToDelete } = deleteResult;
@@ -143,10 +192,8 @@ async function main() {
 
             let successCount = 0;
             let failCount = 0;
-            // Use the fs instance created earlier for deletion logic
 
             for (const nameToDelete of targetIdentifier) {
-                // Names are already snake-cased base names from listJsonlFiles
                 const conversationFileName = `${nameToDelete}.jsonl`;
                 const conversationFilePath = path.join(config.chatsDir, conversationFileName);
                 const editorFileName = `${nameToDelete}_edit.txt`;
@@ -157,68 +204,55 @@ async function main() {
                 let editorDeleted = false;
                 let editorSkipped = false;
 
-                // Try deleting conversation file
                 try {
-                    await fs.deleteFile(conversationFilePath); // Use existing fs instance
+                    await fs.deleteFile(conversationFilePath);
                     console.log(chalk.green(`    ✓ Successfully deleted conversation file: ${conversationFilePath}`));
                     conversationDeleted = true;
                 } catch (deleteError) {
                     if ((deleteError as NodeJS.ErrnoException).code === 'ENOENT') {
                         console.error(chalk.red(`    ❌ Error: Conversation file not found: ${conversationFilePath}.`));
-                        // Continue to try deleting editor file even if main file not found
                     } else {
                         console.error(chalk.red(`    ❌ Error deleting conversation file ${conversationFilePath}:`), deleteError);
                         failCount++;
-                        continue; // Skip to next conversation on critical error deleting main file
+                        continue;
                     }
                 }
 
-                // Try deleting editor file (only if main file existed or deletion didn't error critically)
                 try {
-                    await fs.access(editorFilePath); // Use existing fs instance
-                    await fs.deleteFile(editorFilePath); // Use existing fs instance
+                    await fs.access(editorFilePath);
+                    await fs.deleteFile(editorFilePath);
                     console.log(chalk.green(`    ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
                     editorDeleted = true;
                 } catch (editorError) {
                     if ((editorError as NodeJS.ErrnoException).code === 'ENOENT') {
-                        // Only log if the conversation file was actually found/deleted
                         if (conversationDeleted) {
                             console.log(chalk.gray(`    ⓘ No temporary editor file found to delete for ${nameToDelete}.`));
                         }
-                        editorSkipped = true; // Mark as skipped even if conversation file wasn't there
+                        editorSkipped = true;
                     } else {
                         console.warn(chalk.yellow(`    ! Warning: Could not delete temporary editor file ${editorFilePath}:`), editorError);
-                        // Don't increment failCount here unless you deem editor file deletion critical
                     }
                 }
 
                 if (conversationDeleted || editorDeleted || editorSkipped) {
-                    successCount++; // Count as success if either file was deleted or editor was skipped correctly
+                    successCount++;
                 }
-            } // End loop
+            }
 
             console.log(chalk.blue(`\nDeletion Summary: ${successCount} succeeded, ${failCount} failed.`));
-            // --- END MODIFICATION ---
 
         } else {
-            // Should be unreachable due to type checking, but good defensive programming
             console.log(chalk.yellow(`Unknown mode selected. Exiting.`));
         }
 
     } catch (error) {
         console.error(chalk.red("\n🛑 An unexpected error occurred in main execution:"), error);
 
-        // --- Error logging - Attempt to log based on available info ---
-        // Check if config and aiClient were initialized (needed for logging)
-        // The targetIdentifier might be a string or an array depending on where the error occurred
         const loggableIdentifier = typeof targetIdentifier === 'string' ? targetIdentifier : Array.isArray(targetIdentifier) ? targetIdentifier.join(', ') : 'unknown_context';
 
-        // Ensure codeProcessor exists before accessing its aiClient
-        if (config && codeProcessor && codeProcessor.aiClient) { // Check crucial components exist
+        if (config && codeProcessor && codeProcessor.aiClient) {
             try {
-                // Don't log errors during the delete process itself to the (now deleted) file
                 if (interactionResult?.mode !== 'Delete Conversation...') {
-                     // Use the single name if available and applicable mode
                      if (typeof targetIdentifier === 'string' && (interactionResult?.mode === 'Start/Continue Conversation' || interactionResult?.mode === 'Consolidate Changes...')) {
                         const logFileName = `${toSnakeCase(targetIdentifier)}.jsonl`;
                         const logFilePath = path.join(config.chatsDir, logFileName);
@@ -233,7 +267,6 @@ async function main() {
         } else {
              console.error(chalk.red(`General error occurred (Context: ${loggableIdentifier}). Could not log to conversation file (config or AI client unavailable).`), error);
         }
-        // --- End Error Logging ---
 
         process.exitCode = 1;
 

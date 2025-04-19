@@ -38,7 +38,7 @@ interface ProjectConfig {
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: GeminiConfig;
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
-    chatsDir: string; // Absolute path to chats directory
+    chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
 // Type for the raw data loaded from YAML (all fields optional)
@@ -78,6 +78,7 @@ class ConfigLoader implements IConfig {
 
         // 2. Load config.yaml
         try {
+            // Use synchronous existsSync for initial check during config load
             if (fs.existsSync(configPath)) {
                 const fileContents = fs.readFileSync(configPath, 'utf8');
                 const loadedYaml = yaml.load(fileContents);
@@ -125,24 +126,17 @@ class ConfigLoader implements IConfig {
         };
         // *** END REMOVAL ***
 
-        // Calculate absolute chats directory path
+        // Calculate absolute chats directory path (DO NOT CREATE IT HERE)
         const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
 
-        // Ensure chats directory exists immediately
-        try {
-            if (!fs.existsSync(absoluteChatsDir)) {
-                fs.mkdirSync(absoluteChatsDir, { recursive: true });
-                console.log(chalk.blue(`Created logs directory: ${absoluteChatsDir}`));
-            }
-        } catch (dirError) {
-            console.error(chalk.red(`Fatal: Could not create logs directory at ${absoluteChatsDir}:`), dirError);
-            process.exit(1);
-        }
+        // --- REMOVED: Automatic directory creation block ---
+        // The directory existence will be handled during startup checks in kai.ts
+        // --- END REMOVED ---
 
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
-            chatsDir: absoluteChatsDir
+            chatsDir: absoluteChatsDir // Return the calculated path
         };
     }
 }
