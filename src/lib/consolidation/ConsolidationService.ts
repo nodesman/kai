@@ -11,6 +11,7 @@ import { ConsolidationGenerator } from './ConsolidationGenerator';
 import { ConsolidationApplier } from './ConsolidationApplier';
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
 import { FinalFileStates, ConsolidationAnalysis } from './types';
+// Removed date-fns import as it's no longer needed for tagging
 
 interface ModelSelection {
     analysisModelName: string;
@@ -21,6 +22,7 @@ interface ModelSelection {
 
 // Define a marker for successful consolidation
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
+const TAG_PREFIX = "kai_consolidate_v"; // Define the prefix for automatic tags
 
 export class ConsolidationService {
     private config: Config;
@@ -64,6 +66,7 @@ export class ConsolidationService {
     ): Promise<void> {
         await this._logStart(conversationName, conversationFilePath);
         let consolidationSucceeded = false; // Flag to track success for logging marker
+        let changesApplied = false; // Flag to track if apply step actually ran successfully
 
         try {
             // Step 0: Git Check
@@ -104,10 +107,15 @@ export class ConsolidationService {
             const userApproved = await this._runReviewStep(finalStates);
 
             // Step D: Apply (if approved)
-            await this._runApplyStep(userApproved, finalStates, conversationFilePath);
+            changesApplied = await this._runApplyStep(userApproved, finalStates, conversationFilePath); // Store result
 
-            // Mark success if we reached here and user approved (or no approval needed)
-            if (userApproved) {
+            // Step E: Tag (if approved and applied)
+            if (userApproved && changesApplied) {
+                await this._runTaggingStep(conversationName, conversationFilePath); // Pass conversation name
+            }
+
+            // Mark overall success if we reached here and changes were applied/approved
+            if (userApproved && changesApplied) {
                 consolidationSucceeded = true;
             }
 
@@ -141,7 +149,6 @@ export class ConsolidationService {
         // Slice the array from the message *after* the marker
         return allMessages.slice(lastSuccessIndex + 1);
     }
-
 
     /** Logs the start of the consolidation process. */
     private async _logStart(conversationName: string, conversationFilePath: string): Promise<void> {
@@ -215,7 +222,11 @@ export class ConsolidationService {
             return analysisResult;
         } catch (error) {
              console.error(chalk.red(`  Analysis Step Failed.`));
-            throw error; // Analyzer logs details
+             // Log the error before throwing, if not already logged by analyzer
+             if (error instanceof Error && !error.message.includes('Analysis response')) {
+                 await this._logError(conversationFilePath, `Analysis Step Failed: ${error.message}`);
+             }
+             throw error; // Analyzer might log details, but we ensure logging here too
         }
     }
 
@@ -243,7 +254,10 @@ export class ConsolidationService {
             return finalStates;
         } catch (error) {
              console.error(chalk.red(`  Generation Step Failed.`));
-            throw error; // Generator logs details
+             if (error instanceof Error) { // Log before throwing
+                await this._logError(conversationFilePath, `Generation Step Failed: ${error.message}`);
+             }
+             throw error; // Generator might log details
         }
     }
 
@@ -253,12 +267,12 @@ export class ConsolidationService {
         return await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
     }
 
-    /** Runs the apply step using ConsolidationApplier if the user approved. */
+    /** Runs the apply step using ConsolidationApplier if the user approved. Returns true if changes were applied successfully, false otherwise. */
     private async _runApplyStep(
         userApproved: boolean,
         finalStates: FinalFileStates,
         conversationFilePath: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         if (userApproved) {
             console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
             try {
@@ -276,18 +290,77 @@ export class ConsolidationService {
                     throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above and in the conversation file.`);
                 }
                 console.log(chalk.green(`  Apply step completed successfully.`));
+                return true; // Changes were successfully applied
 
             } catch (error) {
                  console.error(chalk.red(`  Apply Step Failed.`)); // Add context log
                  // Log the error specifically from the apply step before re-throwing
                  await this._logError(conversationFilePath, `Apply Step Failed: ${(error as Error).message}`);
-                 throw error;
+                 throw error; // Re-throw the error
             }
         } else {
             const msg = `System: Consolidation aborted by user. No changes applied.`;
             console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
             await this._logSystemMessage(conversationFilePath, msg);
-            // NOTE: If user rejects, we do NOT add the success marker later.
+            return false; // No changes were applied
+        }
+    }
+
+    /** Runs the automatic Git tagging step using SemVer. */
+    private async _runTaggingStep(conversationName: string, conversationFilePath: string): Promise<void> {
+        console.log(chalk.cyan("\n  Step E: Tagging successful consolidation (SemVer)..."));
+        try {
+            // 1. Get the latest existing tag with the defined prefix
+            const latestTag = await this.gitService.getLatestSemverTag(this.projectRoot, TAG_PREFIX);
+
+            let major = 0;
+            let minor = 1;
+            let patch = 0;
+
+            // 2. Parse the latest tag if it exists
+            if (latestTag) {
+                 // Extract version string after prefix
+                const versionPart = latestTag.substring(TAG_PREFIX.length);
+                const versionMatch = versionPart.match(/^(\d+)\.(\d+)\.(\d+)$/);
+                if (versionMatch) {
+                    major = parseInt(versionMatch[1], 10);
+                    minor = parseInt(versionMatch[2], 10);
+                    patch = parseInt(versionMatch[3], 10);
+                    console.log(chalk.dim(`    Parsed latest tag ${latestTag} as v${major}.${minor}.${patch}`));
+                    // 3. Increment the patch version
+                    patch++;
+                } else {
+                    console.warn(chalk.yellow(`    Could not parse SemVer from latest tag '${latestTag}'. Starting from v0.1.0.`));
+                    // Reset to default starting version if parsing fails
+                    major = 0;
+                    minor = 1;
+                    patch = 0;
+                }
+            } else {
+                console.log(chalk.dim(`    No previous tag found. Starting with v0.1.0.`));
+                // Start at v0.1.0 if no tags exist
+                major = 0;
+                minor = 1;
+                patch = 0;
+            }
+
+            // 4. Construct the new tag name
+            const newTagName = `${TAG_PREFIX}${major}.${minor}.${patch}`;
+
+            // 5. Generate tag message
+            const tagMessage = `Kai Auto-Tag: Successful consolidation for conversation '${conversationName}'`;
+
+            // 6. Call GitService to create the tag
+            await this.gitService.createAnnotatedTag(this.projectRoot, newTagName, tagMessage);
+
+            await this._logSystemMessage(conversationFilePath, `System: Successfully created Git tag '${newTagName}'.`);
+
+        } catch (tagError: any) {
+             // Log the tagging error to the conversation file, but don't stop the overall success marker
+             const errorMsg = `Failed to create Git tag after successful consolidation: ${tagError.message}`;
+             console.error(chalk.red(`  Tagging Step Failed: ${errorMsg}`));
+             await this._logError(conversationFilePath, `Tagging Warning: ${errorMsg}`);
+             // Do not re-throw; allow consolidation to be marked successful even if tagging fails.
         }
     }
 
@@ -302,9 +375,10 @@ export class ConsolidationService {
          const errorMessage = (error instanceof Error) ? error.message : String(error);
          // Avoid duplicate logging for errors already handled and logged by specific steps
          const isKnownHandledError = errorMessage.includes('Git Check Failed:') ||
-                                 errorMessage.includes('Analysis Step Failed.') || // Assuming analyzer logs details
-                                 errorMessage.includes('Generation Step Failed.') || // Assuming generator logs details
+                                 errorMessage.includes('Analysis Step Failed:') ||
+                                 errorMessage.includes('Generation Step Failed:') ||
                                  errorMessage.includes('Apply Step Failed:') ||
+                                 errorMessage.includes('Tagging Warning:') || // Add tag warning
                                  errorMessage.includes('Consolidation apply step completed with');
 
          if (!isKnownHandledError) {
