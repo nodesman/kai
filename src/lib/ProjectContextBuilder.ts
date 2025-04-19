@@ -9,31 +9,28 @@ import { countTokens } from './utils'; // Import from utils
 export class ProjectContextBuilder {
     private fs: FileSystem;
     private projectRoot: string;
-    private config: Config;
+    private config: Config; // Keep config in case other settings are needed in the future
 
     constructor(fileSystem: FileSystem, projectRoot: string, config: Config) {
         this.fs = fileSystem;
         this.projectRoot = projectRoot;
-        this.config = config;
+        this.config = config; // Store config
     }
 
     /**
      * Reads project files, applies ignores, optimizes content, and builds the context string.
-     * @returns An object containing the context string and its token count.
+     * Includes ALL detected text files without enforcing token limits.
+     * @returns An object containing the context string and its total token count.
      */
     async build(): Promise<{ context: string; tokenCount: number }> {
-        console.log(chalk.blue('\nBuilding project context...'));
+        console.log(chalk.blue('\nBuilding project context (including all text files)...'));
         const filePaths = await this.fs.getProjectFiles(this.projectRoot);
         const fileContents = await this.fs.readFileContents(filePaths);
 
         let contextString = "Code Base Context:\n";
-        let currentTokenCount = countTokens(contextString);
-        // Use max_prompt_tokens from config, apply safety margin
-        const maxContextTokens = (this.config.gemini.max_prompt_tokens || 32000) * 0.6; // 60% safety margin
         let includedFiles = 0;
         let excludedFiles = 0;
         const sortedFilePaths = Object.keys(fileContents).sort();
-        let estimatedTotalTokens = currentTokenCount; // Use a separate variable for estimated total
 
         for (const filePath of sortedFilePaths) {
             const relativePath = path.relative(this.projectRoot, filePath);
@@ -53,23 +50,19 @@ export class ProjectContextBuilder {
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
             const fileBlock = fileHeader + content + fileFooter;
-            const fileTokens = countTokens(fileBlock);
-
+            // No token check here - just append the file block
             contextString += fileBlock;
-            estimatedTotalTokens += fileTokens; // Update estimated total
             includedFiles++;
-            console.log(chalk.dim(`  Included ${relativePath} (${fileTokens} tokens). Current total: ${estimatedTotalTokens.toFixed(0)}`));
+            console.log(chalk.dim(`  Included ${relativePath}`));
         }
 
-        console.log(chalk.blue(`Context built with ${includedFiles} files (${estimatedTotalTokens.toFixed(0)} tokens estimated). ${excludedFiles} files excluded/skipped. Max context set to ${maxContextTokens.toFixed(0)} tokens.`));
-        // Recalculate final token count just to be sure, though estimation should be close
+        // Calculate the final token count of the full context
         const finalTokenCount = countTokens(contextString);
+
+        console.log(chalk.blue(`Context built with ${includedFiles} files. ${excludedFiles} files excluded/skipped.`));
         console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
-
-        if (finalTokenCount > (this.config.gemini.max_prompt_tokens || 32000)) {
-            console.warn(chalk.yellow(`Warning: Final context token count (${finalTokenCount}) exceeds configured max_prompt_tokens (${this.config.gemini.max_prompt_tokens}). Potential truncation by API.`));
-        }
-
+        // Note: The 'max_prompt_tokens' setting in config.yaml is no longer used to limit context size here.
+        // The full context will be sent, and potential truncation will happen at the API level if it exceeds the model's limit.
 
         return { context: contextString, tokenCount: finalTokenCount };
     }
