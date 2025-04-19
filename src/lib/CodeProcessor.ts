@@ -206,8 +206,8 @@ class CodeProcessor {
                 conversation,
                 currentContextString,
                 conversationFilePath
-            );
-            conversation.addMessage('system', `[Consolidation process triggered for '${conversationName}' has finished. See logs.]`);
+            ); // ConsolidationService handles incremental logic
+            conversation.addMessage('system', `[Consolidation process triggered for '${conversationName}' has finished. See logs for details.]`); // Clarify message
         } catch (consolidationError) {
             console.error(chalk.red(`Error during consolidation triggered by command:`), consolidationError);
             const errorMsg = `[System Error during consolidation: ${(consolidationError as Error).message}]`;

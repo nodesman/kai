@@ -9,6 +9,8 @@ import { Config } from "./Config";
 import Conversation, { Message } from "./models/Conversation";
 import chalk from 'chalk';
 import { encode as gpt3Encode } from 'gpt-3-encoder';
+// *** ADDED Import ***
+import { HIDDEN_CONVERSATION_INSTRUCTION } from './internal_prompts'; // <-- Import the hidden prompt
 
 // --- Import necessary types from @google/generative-ai ---
 import {
@@ -54,7 +56,7 @@ class AIClient {
         catch (err) { console.error(chalk.red(`Error writing log file ${conversationFilePath}:`), err); }
     }
 
-    // --- getResponseFromAI (for standard chat) --- Unchanged
+    // --- getResponseFromAI (for standard chat) --- MODIFIED ---
     async getResponseFromAI(
         conversation: Conversation,
         conversationFilePath: string,
@@ -70,29 +72,45 @@ class AIClient {
             throw new Error("Conversation history must end with a user message to get AI response.");
         }
 
+        // --- IMPORTANT: Log the ORIGINAL user message BEFORE modifying for the AI call ---
         await this.logConversation(conversationFilePath, { type: 'request', role: 'user', content: lastMessage.content });
 
-        let messagesForModel: Message[];
+        // --- Prepare messages for the AI, including the hidden prompt ---
+        let finalUserPromptText = lastMessage.content; // Start with original prompt
+
+        // Prepend context if provided
         if (contextString && contextString.length > "Code Base Context:\n".length) {
             const contextTokenCount = this.countTokens(contextString);
             console.log(chalk.magenta(`Prepending context (${contextTokenCount} tokens)...`));
-            const finalUserPromptText = `This is the code base context:\n${contextString}\n\n---\nUser Question:\n${lastMessage.content}`;
-            messagesForModel = [ ...messages.slice(0, -1), { ...lastMessage, content: finalUserPromptText } ];
+            finalUserPromptText = `This is the code base context:\n${contextString}\n\n---\nUser Question:\n${finalUserPromptText}`;
         } else {
-            messagesForModel = messages;
             console.log(chalk.gray("No context string provided or context is empty."));
         }
+
+        // *** Prepend the hidden instruction ***
+        // This instruction is prepended to the final user message text sent to the model.
+        // It does NOT get saved back into the Conversation object or logged.
+        finalUserPromptText = `${HIDDEN_CONVERSATION_INSTRUCTION}\n\n---\n\n${finalUserPromptText}`;
+        console.log(chalk.dim("Prepended hidden conversation instruction (not logged)."));
+
+        // Create the message structure for the model, replacing the last user message content
+        const messagesForModel: Message[] = [
+            ...messages.slice(0, -1),
+            { ...lastMessage, content: finalUserPromptText } // Use the modified final prompt
+        ];
+        // --- End AI message preparation ---
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
         const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
         console.log(chalk.blue(`Selecting model instance for chat: ${modelLogName}`));
 
         try {
-            // Use the getResponseFromAI method of the model instance (designed for chat)
+            // Pass the modified messages (with hidden prompt baked in) to the model
             const responseText = await modelToCall.getResponseFromAI(messagesForModel);
 
+            // Log the actual AI response and add it to the conversation *without* the hidden prompt
             await this.logConversation(conversationFilePath, { type: 'response', role: 'assistant', content: responseText });
-            conversation.addMessage('assistant', responseText);
+            conversation.addMessage('assistant', responseText); // Add clean response to conversation
             return responseText; // Return the string
 
         } catch (error) {
@@ -103,12 +121,15 @@ class AIClient {
         }
     }
 
-    // --- getResponseTextFromAI (for simple text generation) --- Unchanged
+    // --- getResponseTextFromAI (for simple text generation like consolidation analysis/generation) ---
+    // This does NOT automatically prepend the hidden conversation instruction,
+    // as it's meant for specific tasks where the prompt is fully constructed by the caller.
+    // The ConsolidationGenerator will prepend its specific hidden instruction.
     async getResponseTextFromAI(
-        messages: Message[],
+        messages: Message[], // Expects caller to format messages correctly
         useFlashModel: boolean = false
     ): Promise<string> {
-        // ... (Implementation remains the same as before) ...
+        // ... (Implementation remains the same - no hidden prompt added here) ...
         if (!messages || messages.length === 0) {
             console.error(chalk.red("Cannot get raw AI response with empty message history."));
             throw new Error("Cannot get raw AI response with empty message history.");
@@ -119,8 +140,8 @@ class AIClient {
         console.log(chalk.blue(`Querying AI for simple text (using ${modelLogName})...`));
 
         try {
-            // This method in the model should still just return text
-            const responseText = await modelToCall.getResponseFromAI(messages); // Use the chat-focused method
+            // Use the chat-focused method of the model, assuming it handles simple text gen too
+            const responseText = await modelToCall.getResponseFromAI(messages);
 
             console.log(chalk.blue(`Received simple text response (Length: ${responseText.length})`));
             return responseText;
@@ -132,12 +153,14 @@ class AIClient {
         }
     }
 
-    // --- *** NEW: generateContent (Handles Function Calling) *** ---
+    // --- generateContent (Handles Function Calling) ---
+    // Also does NOT automatically prepend the hidden conversation instruction.
+    // Callers using function calls are expected to structure the full request.
     async generateContent(
         request: GenerateContentRequest, // Use the SDK's request type
         useFlashModel: boolean = false
     ): Promise<GenerateContentResult> { // Return the SDK's result type
-
+        // ... (Implementation remains the same - no hidden prompt added here) ...
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
         const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
         console.log(chalk.blue(`Generating content (potentially with function calls) using ${modelLogName}...`));
@@ -158,7 +181,6 @@ class AIClient {
             } else {
                 const finishReason = firstCandidate?.finishReason;
                 console.log(chalk.yellow(`Received response with no function call or text. Finish Reason: ${finishReason}`));
-                // Consider logging the finishReason if available: response?.candidates?.[0]?.finishReason
             }
 
             return result;
@@ -171,7 +193,6 @@ class AIClient {
             throw error; // Re-throw
         }
     }
-    // --- *** END NEW METHOD *** ---
 }
 
 // Export the FunctionDeclaration type if needed elsewhere, or define tool within CodeProcessor

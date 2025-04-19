@@ -2,7 +2,8 @@
 import path from 'path';
 import chalk from 'chalk';
 import { AIClient, LogEntryData } from '../AIClient';
-import Conversation, { Message } from '../models/Conversation';
+// import Conversation, { Message } from '../models/Conversation'; // <-- Remove Conversation import
+import { Message } from '../models/Conversation'; // <-- Import Message directly
 import { ConsolidationPrompts } from './prompts';
 import { ConsolidationAnalysis } from './types';
 
@@ -14,8 +15,8 @@ export class ConsolidationAnalyzer {
     }
 
     /**
-     * Analyzes the conversation history against the code context to identify file operations.
-     * @param conversation The conversation history.
+     * Analyzes the relevant conversation history slice against the code context.
+     * @param relevantHistory The relevant slice of conversation messages. // <-- UPDATED Doc
      * @param codeContext The current codebase context string.
      * @param conversationFilePath Path to the conversation log file for logging errors/warnings.
      * @param useFlashModel Whether to use the faster/cheaper model for analysis.
@@ -24,16 +25,18 @@ export class ConsolidationAnalyzer {
      * @throws An error if the analysis fails or returns invalid data.
      */
     async analyze(
-        conversation: Conversation,
+        relevantHistory: Message[], // <-- UPDATED Signature
         codeContext: string,
         conversationFilePath: string,
         useFlashModel: boolean,
         modelName: string
     ): Promise<ConsolidationAnalysis> {
         console.log(chalk.cyan(`    Requesting analysis from ${modelName}...`));
-        const historyString = conversation.getMessages()
+        // --- Build history string from the relevant slice ---
+        const historyString = relevantHistory
             .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
             .join('');
+        // --- End history string build ---
 
         const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
 

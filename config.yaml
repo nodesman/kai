@@ -1,0 +1,20 @@
+project:
+  root_dir: "generated_project"
+  prompts_dir: "prompts"
+  prompt_template: "prompt_template.yaml"
+  chats_dir: ".kai/logs" # Default location for conversation logs
+
+gemini:
+  model_name: "gemini-2.5-pro-preview-03-25" # Default primary model
+  subsequent_chat_model_name: "gemini-2.0-flash" # Default secondary model
+  max_output_tokens: 8192
+  max_prompt_tokens: 32000 # Max tokens for the *input* prompt (context limit)
+  rate_limit:
+    requests_per_minute: 60
+  # General retry settings (can be overridden by specific ones)
+  max_retries: 3
+  retry_delay: 60000
+  # Specific retries for the generation step (Consolidation Step B)
+  generation_max_retries: 3
+  generation_retry_base_delay_ms: 2000 # Base delay in ms
+  interactive_prompt_review: false # Enable manual review/edit of prompts before sending (currently only for Gemini Pro chat)

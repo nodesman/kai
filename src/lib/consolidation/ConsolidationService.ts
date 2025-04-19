@@ -19,6 +19,9 @@ interface ModelSelection {
     useFlashForGeneration: boolean;
 }
 
+// Define a marker for successful consolidation
+const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
+
 export class ConsolidationService {
     private config: Config;
     private fs: FileSystem;
@@ -55,28 +58,46 @@ export class ConsolidationService {
      */
     async process(
         conversationName: string,
-        conversation: Conversation,
+        conversation: Conversation, // Receive the full conversation
         currentContextString: string,
         conversationFilePath: string
     ): Promise<void> {
         await this._logStart(conversationName, conversationFilePath);
+        let consolidationSucceeded = false; // Flag to track success for logging marker
 
         try {
             // Step 0: Git Check
             await this._performGitCheck(conversationFilePath);
 
+            // --- Step 0.5: Determine Relevant History ---
+            const relevantHistory = this._findRelevantHistorySlice(conversation);
+            if (relevantHistory.length === 0) {
+                console.log(chalk.yellow("  No relevant new conversation history found since last successful consolidation. Skipping."));
+                await this._logSystemMessage(conversationFilePath, "System: No new history since last successful consolidation. Skipping.");
+                return;
+            }
+            console.log(chalk.blue(`  Processing ${relevantHistory.length} relevant messages since last consolidation.`));
+            // --- End Relevant History Determination ---
+
             // Determine Models
             const models = this._determineModels();
 
-            // Step A: Analyze
+            // Step A: Analyze (using relevant history)
             const analysisResult = await this._runAnalysisStep(
-                conversation, currentContextString, conversationFilePath, models
+                relevantHistory, // Pass the slice
+                currentContextString,
+                conversationFilePath,
+                models
             );
             if (!analysisResult) return; // Analysis found nothing or failed critically
 
-            // Step B: Generate
+            // Step B: Generate (using relevant history)
             const finalStates = await this._runGenerationStep(
-                conversation, currentContextString, analysisResult, conversationFilePath, models
+                relevantHistory, // Pass the slice
+                currentContextString,
+                analysisResult,
+                conversationFilePath,
+                models
             );
 
             // Step C: Review
@@ -85,12 +106,42 @@ export class ConsolidationService {
             // Step D: Apply (if approved)
             await this._runApplyStep(userApproved, finalStates, conversationFilePath);
 
+            // Mark success if we reached here and user approved (or no approval needed)
+            if (userApproved) {
+                consolidationSucceeded = true;
+            }
+
         } catch (error) {
             await this._handleConsolidationError(error, conversationName, conversationFilePath);
+            consolidationSucceeded = false; // Ensure flag is false on error
+        } finally {
+            // Add success marker only if the process completed without errors AND changes were applied
+            if (consolidationSucceeded) {
+                await this._logSuccessMarker(conversationFilePath);
+                conversation.addMessage('system', CONSOLIDATION_SUCCESS_MARKER); // Add to in-memory convo too
+            }
         }
     }
 
     // --- Private Step Helper Methods ---
+
+    /** Finds the portion of history after the last successful consolidation marker. */
+    private _findRelevantHistorySlice(conversation: Conversation): Message[] {
+        const allMessages = conversation.getMessages();
+        let lastSuccessIndex = -1;
+
+        // Find the index of the *last* success marker
+        for (let i = allMessages.length - 1; i >= 0; i--) {
+            if (allMessages[i].role === 'system' && allMessages[i].content === CONSOLIDATION_SUCCESS_MARKER) {
+                lastSuccessIndex = i;
+                break;
+            }
+        }
+
+        // Slice the array from the message *after* the marker
+        return allMessages.slice(lastSuccessIndex + 1);
+    }
+
 
     /** Logs the start of the consolidation process. */
     private async _logStart(conversationName: string, conversationFilePath: string): Promise<void> {
@@ -137,62 +188,62 @@ export class ConsolidationService {
 
     /** Runs the analysis step using ConsolidationAnalyzer. */
     private async _runAnalysisStep(
-        conversation: Conversation,
+        relevantHistory: Message[], // Accepts relevant history slice
         currentContextString: string,
         conversationFilePath: string,
         models: ModelSelection
     ): Promise<ConsolidationAnalysis | null> {
-        console.log(chalk.cyan("\n  Step A: Analyzing conversation..."));
+        console.log(chalk.cyan("\n  Step A: Analyzing relevant conversation history..."));
         try {
+            // Pass relevant history slice to the analyzer
             const analysisResult = await this.consolidationAnalyzer.analyze(
-                conversation,
+                relevantHistory, // <-- Use the slice
                 currentContextString,
                 conversationFilePath,
                 models.useFlashForAnalysis,
                 models.analysisModelName
             );
 
-            if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) {
-                console.log(chalk.yellow("  Analysis did not identify any specific file operations. Aborting consolidation."));
-                await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found 0 ops. Aborting consolidation.`);
+            if (!analysisResult || !analysisResult.operations || analysisResult.operations.length === 0) { // Correct check
+                console.log(chalk.yellow("  Analysis did not identify any specific file operations in the recent history. Aborting consolidation."));
+                await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found 0 ops in recent history. Aborting consolidation.`);
                 return null; // Indicate no operations found
             }
 
-            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations.`));
-            await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found ${analysisResult.operations.length} ops...`);
+            console.log(chalk.green(`  Analysis complete: Identified ${analysisResult.operations.length} operations from recent history.`));
+            await this._logSystemMessage(conversationFilePath, `System: Analysis (using ${models.analysisModelName}) found ${analysisResult.operations.length} ops from recent history...`);
             return analysisResult;
         } catch (error) {
-            // Analyzer already logs errors internally, just re-throw to stop process
-            console.error(chalk.red(`  Analysis Step Failed.`)); // Add context log
-            throw error;
+             console.error(chalk.red(`  Analysis Step Failed.`));
+            throw error; // Analyzer logs details
         }
     }
 
     /** Runs the generation step using ConsolidationGenerator. */
     private async _runGenerationStep(
-        conversation: Conversation,
+        relevantHistory: Message[], // Accepts relevant history slice
         currentContextString: string,
         analysisResult: ConsolidationAnalysis,
         conversationFilePath: string,
         models: ModelSelection
     ): Promise<FinalFileStates> {
-        console.log(chalk.cyan("\n  Step B: Generating final file states individually..."));
+        console.log(chalk.cyan("\n  Step B: Generating final file states individually based on recent history..."));
         try {
+            // Pass relevant history slice to the generator
             const finalStates = await this.consolidationGenerator.generate(
-                conversation,
+                relevantHistory, // <-- Use the slice
                 currentContextString,
                 analysisResult,
                 conversationFilePath,
                 models.useFlashForGeneration,
                 models.generationModelName
             );
-            console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files.`));
-            await this._logSystemMessage(conversationFilePath, `System: Generation (using ${models.generationModelName}) produced states for ${Object.keys(finalStates).length} files...`);
+            console.log(chalk.green(`  Generation complete: Produced final states for ${Object.keys(finalStates).length} files based on recent history.`));
+            await this._logSystemMessage(conversationFilePath, `System: Generation (using ${models.generationModelName}) produced states for ${Object.keys(finalStates).length} files based on recent history...`);
             return finalStates;
         } catch (error) {
-            // Generator already logs errors internally, just re-throw to stop process
-             console.error(chalk.red(`  Generation Step Failed.`)); // Add context log
-            throw error;
+             console.error(chalk.red(`  Generation Step Failed.`));
+            throw error; // Generator logs details
         }
     }
 
@@ -236,6 +287,7 @@ export class ConsolidationService {
             const msg = `System: Consolidation aborted by user. No changes applied.`;
             console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
             await this._logSystemMessage(conversationFilePath, msg);
+            // NOTE: If user rejects, we do NOT add the success marker later.
         }
     }
 
@@ -245,19 +297,19 @@ export class ConsolidationService {
         conversationName: string,
         conversationFilePath: string
     ): Promise<void> {
-        console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
-        const errorMessage = (error instanceof Error) ? error.message : String(error);
+        // Keep existing error handling, it's general enough
+         console.error(chalk.red(`\n❌ Error during consolidation process for '${conversationName}':`), error);
+         const errorMessage = (error instanceof Error) ? error.message : String(error);
+         // Avoid duplicate logging for errors already handled and logged by specific steps
+         const isKnownHandledError = errorMessage.includes('Git Check Failed:') ||
+                                 errorMessage.includes('Analysis Step Failed.') || // Assuming analyzer logs details
+                                 errorMessage.includes('Generation Step Failed.') || // Assuming generator logs details
+                                 errorMessage.includes('Apply Step Failed:') ||
+                                 errorMessage.includes('Consolidation apply step completed with');
 
-        // Avoid duplicate logging for errors already handled and logged by specific steps
-        const isKnownHandledError = errorMessage.includes('Git Check Failed:') ||
-                                    errorMessage.includes('Analysis Step Failed.') || // Assuming analyzer logs details
-                                    errorMessage.includes('Generation Step Failed.') || // Assuming generator logs details
-                                    errorMessage.includes('Apply Step Failed:') ||
-                                    errorMessage.includes('Consolidation apply step completed with');
-
-        if (!isKnownHandledError) {
-            await this._logError(conversationFilePath, `Consolidation failed: ${errorMessage}`);
-        }
+         if (!isKnownHandledError) {
+             await this._logError(conversationFilePath, `Consolidation failed: ${errorMessage}`);
+         }
         // No need to re-throw here, as the main process loop will terminate.
     }
 
@@ -280,4 +332,14 @@ export class ConsolidationService {
             console.error(chalk.red("Additionally failed to log system message:"), logErr);
         }
     }
+
+     /** Logs the success marker to the conversation file. */
+     private async _logSuccessMarker(conversationFilePath: string): Promise<void> {
+         try {
+             console.log(chalk.green("  Consolidation completed successfully. Logging marker."));
+             await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: CONSOLIDATION_SUCCESS_MARKER });
+         } catch (logErr) {
+             console.error(chalk.red("Failed to log consolidation success marker:"), logErr);
+         }
+     }
 }

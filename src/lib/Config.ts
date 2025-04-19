@@ -9,7 +9,6 @@ interface GeminiRateLimitConfig {
     requests_per_minute?: number;
 }
 
-// *** ADDED interactive_prompt_review ***
 interface GeminiConfig {
     api_key: string; // Loaded from ENV
     model_name?: string; // Primary model (e.g., Pro)
@@ -21,18 +20,19 @@ interface GeminiConfig {
     retry_delay?: number; // General retry delay (might deprecate)
     generation_max_retries?: number; // Max retries specifically for the generation step (Step B)
     generation_retry_base_delay_ms?: number; // Base delay for generation step retries (ms)
-    interactive_prompt_review?: boolean; // <-- ADDED: Flag for interactive review/edit
+    interactive_prompt_review?: boolean; // Flag for interactive review/edit
     // Add safetySettings if needed:
     // safetySettings?: SafetySetting[];
 }
-// *** END ADDITION ***
 
+// *** REMOVED hidden prompt fields ***
 interface ProjectConfig {
     root_dir?: string;
     prompts_dir?: string;
     prompt_template?: string;
     chats_dir?: string; // Directory for conversation logs
 }
+// *** END REMOVAL ***
 
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
@@ -42,10 +42,12 @@ interface IConfig { // Renamed to IConfig to avoid conflict with Config class na
 }
 
 // Type for the raw data loaded from YAML (all fields optional)
+// *** REMOVED hidden prompt fields ***
 type YamlConfigData = {
     gemini?: Partial<GeminiConfig>;
-    project?: Partial<ProjectConfig>;
+    project?: Partial<ProjectConfig>; // No longer includes optional hidden prompts
 };
+// *** END REMOVAL ***
 
 // --- Config Class ---
 // Renamed class to avoid conflict with IConfig interface
@@ -63,6 +65,7 @@ class ConfigLoader implements IConfig {
 
     private loadConfig(): IConfig {
         const configPath = path.resolve(process.cwd(), 'config.yaml');
+        // REMOVED: const projectRoot = process.cwd(); (Not needed for prompt paths anymore)
         let yamlConfig: YamlConfigData = {};
 
         // 1. Load API Key from Environment Variable
@@ -95,7 +98,7 @@ class ConfigLoader implements IConfig {
         const defaultSubsequentModel = "gemini-2.0-flash";
         const defaultGenerationMaxRetries = 3;
         const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
-        const defaultInteractivePromptReview = false; // <-- ADDED: Default to false
+        const defaultInteractivePromptReview = false;
 
         const finalGeminiConfig: GeminiConfig = {
             api_key: apiKey, // Mandatory, loaded from env
@@ -106,21 +109,21 @@ class ConfigLoader implements IConfig {
             rate_limit: {
                 requests_per_minute: yamlConfig.gemini?.rate_limit?.requests_per_minute || 60
             },
-            // Keep general retry settings for now, but prioritize specific ones
             max_retries: yamlConfig.gemini?.max_retries || 3,
             retry_delay: yamlConfig.gemini?.retry_delay || 60000,
             generation_max_retries: yamlConfig.gemini?.generation_max_retries ?? defaultGenerationMaxRetries,
             generation_retry_base_delay_ms: yamlConfig.gemini?.generation_retry_base_delay_ms ?? defaultGenerationRetryBaseDelayMs,
-            // *** USE new interactive prompt review setting ***
-            interactive_prompt_review: yamlConfig.gemini?.interactive_prompt_review ?? defaultInteractivePromptReview, // <-- ADDED: Load or default
+            interactive_prompt_review: yamlConfig.gemini?.interactive_prompt_review ?? defaultInteractivePromptReview,
         };
 
+        // *** REMOVED defaults and loading for hidden prompt paths ***
         const finalProjectConfig: Required<ProjectConfig> = {
             root_dir: yamlConfig.project?.root_dir || "generated_project",
             prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
             prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
             chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Using the updated default
         };
+        // *** END REMOVAL ***
 
         // Calculate absolute chats directory path
         const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
