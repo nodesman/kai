@@ -79,7 +79,6 @@ class FileSystem {
         }
     }
 
-
     /**
      * Ensures the specific .kai/logs directory exists.
      * Separated from Config loading, called after potential user confirmation.
@@ -101,7 +100,6 @@ class FileSystem {
              }
         }
     }
-
 
     /**
      * Ensures .gitignore exists and contains the rule to ignore '.kai/logs/'.
@@ -304,7 +302,9 @@ class FileSystem {
             await this.ensureDirExists(dir);
             await fs.appendFile(filePath, logEntry, 'utf-8');
         } catch (error) {
-            console.error(`Error appending to JSONL file ${filePath}:`), error);
+            // --- FIX: Corrected console.error call ---
+            console.error(`Error appending to JSONL file ${filePath}:`, error);
+            // --- END FIX ---
             throw error;
         }
     }
