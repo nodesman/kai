@@ -34,7 +34,7 @@ class Gemini2FlashModel extends BaseModel {
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
         // --- Use Flash model name from config or default ---
-        this.modelName = config.gemini.subsequent_chat_model_name || "gemini-2.0-flash";
+        this.modelName = config.gemini.subsequent_chat_model_name || "gemini-2.5-flash-preview-04-17";
         // --- End Flash model name ---
         console.log(chalk.yellow(`Initializing Gemini Flash Model instance with: ${this.modelName}`));
         try {
