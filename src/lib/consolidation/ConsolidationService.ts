@@ -6,12 +6,11 @@ import { AIClient, LogEntryData } from '../AIClient';
 import { Config } from '../Config';
 import Conversation, { Message, JsonlLogEntry } from '../models/Conversation';
 import { GitService } from '../GitService';
-import { ConsolidationReviewer } from './ConsolidationReviewer';
+// REMOVED: import { ConsolidationReviewer } from './ConsolidationReviewer';
 import { ConsolidationGenerator } from './ConsolidationGenerator';
 import { ConsolidationApplier } from './ConsolidationApplier';
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
 import { FinalFileStates, ConsolidationAnalysis } from './types';
-// Removed date-fns import and TAG_PREFIX
 
 interface ModelSelection {
     analysisModelName: string;
@@ -22,7 +21,6 @@ interface ModelSelection {
 
 // Define a marker for successful consolidation
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
-// REMOVED: const TAG_PREFIX = "kai_consolidate_v";
 
 export class ConsolidationService {
     private config: Config;
@@ -30,7 +28,7 @@ export class ConsolidationService {
     private aiClient: AIClient;
     private projectRoot: string;
     private gitService: GitService;
-    private consolidationReviewer: ConsolidationReviewer;
+    // REMOVED: private consolidationReviewer: ConsolidationReviewer;
     private consolidationGenerator: ConsolidationGenerator;
     private consolidationApplier: ConsolidationApplier;
     private consolidationAnalyzer: ConsolidationAnalyzer;
@@ -47,7 +45,7 @@ export class ConsolidationService {
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
         this.gitService = gitService;
-        this.consolidationReviewer = new ConsolidationReviewer(this.fs);
+        // REMOVED: this.consolidationReviewer = new ConsolidationReviewer(this.fs);
         this.consolidationGenerator = new ConsolidationGenerator(
             this.config, this.fs, this.aiClient, this.projectRoot
         );
@@ -103,19 +101,14 @@ export class ConsolidationService {
                 models
             );
 
-            // Step C: Review
-            const userApproved = await this._runReviewStep(finalStates);
+            // REMOVED: Step C: Review
+            // const userApproved = await this._runReviewStep(finalStates); // REMOVED
 
-            // Step D: Apply (if approved)
-            changesApplied = await this._runApplyStep(userApproved, finalStates, conversationFilePath); // Store result
+            // Step C: Apply (always attempts if generation succeeded)
+            changesApplied = await this._runApplyStep(finalStates, conversationFilePath); // Modified call
 
-            // REMOVED: Step E: Tagging
-            // if (userApproved && changesApplied) {
-            //     await this._runTaggingStep(conversationName, conversationFilePath); // REMOVED CALL
-            // }
-
-            // Mark overall success if we reached here and changes were applied/approved
-            if (userApproved && changesApplied) {
+            // Mark overall success if we reached here and changes were applied
+            if (changesApplied) { // Simplified success condition
                 consolidationSucceeded = true;
             }
 
@@ -261,52 +254,40 @@ export class ConsolidationService {
         }
     }
 
-    /** Runs the review step using ConsolidationReviewer. */
-    private async _runReviewStep(finalStates: FinalFileStates): Promise<boolean> {
-        // Reviewer handles its own logging internally
-        return await this.consolidationReviewer.reviewChanges(finalStates, this.projectRoot);
-    }
+    // REMOVED: private async _runReviewStep(...)
 
-    /** Runs the apply step using ConsolidationApplier if the user approved. Returns true if changes were applied successfully, false otherwise. */
+    /** Runs the apply step using ConsolidationApplier. Returns true if changes were applied successfully, false otherwise. */
     private async _runApplyStep(
-        userApproved: boolean,
-        finalStates: FinalFileStates,
+        finalStates: FinalFileStates, // Removed userApproved parameter
         conversationFilePath: string
     ): Promise<boolean> {
-        if (userApproved) {
-            console.log(chalk.cyan("\n  Step D: Applying approved changes..."));
-            try {
-                const { success, failed, skipped, summary } = await this.consolidationApplier.apply(
-                    finalStates,
-                    this.projectRoot
-                );
+        // Removed the 'if (userApproved)' check
+        console.log(chalk.cyan("\n  Step C: Applying generated changes directly...")); // Renumbered step
+        try {
+            const { success, failed, skipped, summary } = await this.consolidationApplier.apply(
+                finalStates,
+                this.projectRoot
+            );
 
-                // Log summary to conversation file
-                const title = failed > 0 ? 'Consolidation Apply Summary (with failures)' : 'Consolidation Apply Summary';
-                await this._logSystemMessage(conversationFilePath, `${title}:\n${summary.join('\n')}`);
+            // Log summary to conversation file
+            const title = failed > 0 ? 'Consolidation Apply Summary (with failures)' : 'Consolidation Apply Summary';
+            await this._logSystemMessage(conversationFilePath, `${title}:\n${summary.join('\n')}`);
 
-                // Throw an error if any apply operations failed
-                if (failed > 0) {
-                    throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above and in the conversation file.`);
-                }
-                console.log(chalk.green(`  Apply step completed successfully.`));
-                return true; // Changes were successfully applied
-
-            } catch (error) {
-                 console.error(chalk.red(`  Apply Step Failed.`)); // Add context log
-                 // Log the error specifically from the apply step before re-throwing
-                 await this._logError(conversationFilePath, `Apply Step Failed: ${(error as Error).message}`);
-                 throw error; // Re-throw the error
+            // Throw an error if any apply operations failed
+            if (failed > 0) {
+                throw new Error(`Consolidation apply step completed with ${failed} failure(s). Please review the errors logged above and in the conversation file.`);
             }
-        } else {
-            const msg = `System: Consolidation aborted by user. No changes applied.`;
-            console.log(chalk.yellow("\n" + msg.replace('System: ', '')));
-            await this._logSystemMessage(conversationFilePath, msg);
-            return false; // No changes were applied
-        }
-    }
+            console.log(chalk.green(`  Apply step completed successfully.`));
+            return true; // Changes were successfully applied
 
-    // REMOVED: private async _runTaggingStep(...) method
+        } catch (error) {
+             console.error(chalk.red(`  Apply Step Failed.`)); // Add context log
+             // Log the error specifically from the apply step before re-throwing
+             await this._logError(conversationFilePath, `Apply Step Failed: ${(error as Error).message}`);
+             throw error; // Re-throw the error
+        }
+        // Removed the 'else' block related to user not approving
+    }
 
     /** Handles and logs errors occurring during the consolidation process. */
     private async _handleConsolidationError(
@@ -322,7 +303,6 @@ export class ConsolidationService {
                                  errorMessage.includes('Analysis Step Failed:') ||
                                  errorMessage.includes('Generation Step Failed:') ||
                                  errorMessage.includes('Apply Step Failed:') ||
-                                //  errorMessage.includes('Tagging Warning:') || // Removed tag warning check
                                  errorMessage.includes('Consolidation apply step completed with');
 
          if (!isKnownHandledError) {

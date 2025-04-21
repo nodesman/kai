@@ -5,10 +5,9 @@ Kai is an AI-powered coding assistant designed to help with various development 
 ## Features
 
 *   **Conversation Mode:** Engage in a chat-like interface where Kai can generate code, answer questions, and modify files based on your prompts.
-*   **Consolidation Mode:** Analyze conversation history and codebase context to propose and apply consolidated changes, bringing the codebase in line with the discussion.
+*   **Consolidation Mode:** Analyze conversation history and codebase context to propose and directly apply consolidated changes to your filesystem, bringing the codebase in line with the discussion. *(Verification of changes is done manually via Git tools after consolidation)*.
 *   **Context-Aware:** Reads your project files (respecting `.gitignore`) to provide relevant context to the AI.
-*   **Interactive Review:** (Consolidation) Offers a terminal-based UI to review and approve proposed file changes before they are applied.
-*   **(Experimental) Agentic Systems:** Future work includes agentic systems for requirements clarification and test-driven development.
+*   **(Experimental) Agentic Systems:** Future work includes agentic systems for requirements clarification and test-driven development, building upon the direct file manipulation capabilities.
 
 ## Getting Started
 
@@ -17,7 +16,7 @@ Kai is an AI-powered coding assistant designed to help with various development 
 *   Node.js (Version recommended by `package.json` or higher)
 *   npm (comes with Node.js)
 *   Git
-*   Sublime Text (with `subl` command-line tool installed and in your system's PATH) - Required for the interactive conversation editor.
+*   Sublime Text (with `subl` command-line tool installed and in your system's PATH) - Required for the interactive conversation editor. *(Other editors like WebStorm/CLion via command-line launchers are experimental)*.
 *   A Gemini API Key (set as the `GEMINI_API_KEY` environment variable).
 
 ### Installation
@@ -65,8 +64,8 @@ kai
 
 Kai will then prompt you to select a mode:
 
-*   **Start/Continue Conversation:** Opens the Sublime Text editor interface for interacting with the AI.
-*   **Consolidate Changes...:** Runs the consolidation process for a selected conversation.
+*   **Start/Continue Conversation:** Opens the Sublime Text (or detected compatible editor) interface for interacting with the AI.
+*   **Consolidate Changes...:** Runs the analysis, generation, and *direct application* of changes for a selected conversation. **Use Git tools (like `git status`, `git diff`, Sublime Merge) to review changes before committing.**
 *   **Delete Conversation...:** Allows you to select and delete logged conversations.
 
 ## Configuration

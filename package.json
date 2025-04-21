@@ -22,7 +22,6 @@
   "author": "Raj",
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "blessed": "^0.1.81",
     "chalk": "^5.4.1",
     "diff": "^7.0.0",
     "gpt-3-encoder": "^1.1.4",
@@ -35,7 +34,6 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/blessed": "^0.1.25",
     "@types/diff": "^7.0.2",
     "@types/inquirer": "^9.0.7",
     "@types/js-yaml": "^4.0.9",
