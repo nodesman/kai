@@ -174,11 +174,19 @@ class UserInterface {
                 editorArgs = ['--wait', editorFilePath];
                 editorName = 'CLion';
                 console.log(chalk.blue(`Detected running inside CLion (macOS). Using '${editorCommand}' command...`));
+            } else if (bundleId === 'com.jetbrains.intellij') { // <<<--- ADDED INTELLIJ DETECTION
+                editorCommand = 'idea'; // Assumes 'idea' command-line launcher is installed and in PATH
+                editorArgs = ['--wait', editorFilePath]; // Use --wait flag
+                editorName = 'IntelliJ IDEA';
+                console.log(chalk.blue(`Detected running inside IntelliJ IDEA (macOS). Using '${editorCommand}' command...`));
             }
-             // Add more else if for other JetBrains IDEs using __CFBundleIdentifier
-             // else if (bundleId === 'com.jetbrains.intellij') { editorCommand = 'idea'; ... }
+             // Add more else if for other JetBrains IDEs (e.g., GoLand, PyCharm) if needed
+             // else if (bundleId === 'com.jetbrains.goland') { editorCommand = 'goland'; ... }
+             // else if (bundleId === 'com.jetbrains.pycharm') { editorCommand = 'charm'; ... }
         }
         // TODO: Add detection for other platforms (Windows, Linux) if possible
+        //       - Windows might check for env vars like WT_SESSION or specific paths.
+        //       - Linux might check TERMINAL_EMULATOR or other DE-specific vars.
         // --- End Editor Detection Logic ---
 
         console.log(`\nOpening conversation "${conversationName}" in ${editorName}...`);
@@ -196,8 +204,11 @@ class UserInterface {
                 editorProcess.on('error', (error) => {
                     if ((error as any).code === 'ENOENT') {
                         const errorMsg = `❌ Error: '${editorCommand}' command not found.`;
-                        if ((editorCommand === 'webstorm' || editorCommand === 'clion') && !isFallbackAttempt) { // Check if IDE launcher failed and not already a fallback
-                            console.error(chalk.red(`\n${errorMsg} Ensure the JetBrains IDE command-line launcher is created (Tools -> Create Command-line Launcher...) and the launcher script's directory is in your system's PATH.`));
+                        // --- Modified Check for JetBrains IDEs ---
+                        const isJetBrainsLauncher = ['webstorm', 'clion', 'idea'].includes(editorCommand); // Add other launchers here if supported
+
+                        if (isJetBrainsLauncher && !isFallbackAttempt) { // Check if IDE launcher failed and not already a fallback
+                            console.error(chalk.red(`\n${errorMsg} Ensure the JetBrains IDE command-line launcher ('${editorCommand}') is created (Tools -> Create Command-line Launcher...) and its directory is in your system's PATH.`));
                             console.warn(chalk.yellow(`Falling back to 'subl'...`));
                             // Reject with a special object to trigger fallback
                             reject({ type: 'fallback', editor: 'subl', args: ['-w', editorFilePath] } as FallbackError);
@@ -205,6 +216,7 @@ class UserInterface {
                             console.error(chalk.red(`\n${errorMsg} Make sure ${editorName} is installed and '${editorCommand}' is in your system's PATH.`));
                             reject(new Error(`'${editorCommand}' command not found.'`)); // Reject with standard error
                         }
+                        // --- End Modified Check ---
                     } else {
                         console.error(chalk.red(`\n❌ Error spawning ${editorName}:`), error);
                         reject(error); // Reject with the original spawn error
@@ -383,7 +395,7 @@ class UserInterface {
                  // Check for the standard editor command not found error
                  else if (error instanceof Error && error.message.includes('command not found')) {
                      console.error(chalk.red(`\nEditor Interaction Error: ${error.message}`));
-                     console.error(chalk.yellow('Please ensure your chosen editor command (subl, webstorm, clion, etc.) is configured correctly in your PATH.'));
+                     console.error(chalk.yellow('Please ensure your chosen editor command (subl, webstorm, clion, idea, etc.) is configured correctly in your PATH.'));
                  }
                  // Handle other general errors
                  else {
