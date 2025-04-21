@@ -8,7 +8,8 @@ import { UserInterface, UserInteractionResult } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
 import { CommandService } from './lib/CommandService';
-import { GitService } from './lib/GitService';
+import { GitService } from './lib/GitService'; // Import GitService
+import { ProjectContextBuilder } from './lib/ProjectContextBuilder'; // Import ProjectContextBuilder
 import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
 
@@ -26,9 +27,9 @@ import { toSnakeCase } from "./lib/utils";
 async function performStartupChecks(
     projectRoot: string,
     fs: FileSystem,
-    gitService: GitService,
-    ui: UserInterface, // <-- Add UI
-    config: Config     // <-- Add Config
+    gitService: GitService, // Receive GitService
+    ui: UserInterface,
+    config: Config
 ): Promise<boolean> {
     console.log(chalk.cyan("\nPerforming startup environment checks..."));
     try {
@@ -75,8 +76,9 @@ async function performStartupChecks(
             // Ensure .kai/logs exists (using path from config)
             await fs.ensureKaiDirectoryExists(config.chatsDir);
 
-            // Ensure .gitignore rules exist
-            await fs.ensureGitignoreRules(projectRoot);
+            // --- Use GitService to ensure rules ---
+            await gitService.ensureGitignoreRules(projectRoot);
+            // --- End use GitService ---
         } else {
             // This case should only be reachable if user declined init on non-empty dir
              console.log(chalk.yellow("  Skipping .kai/logs and .gitignore checks as initialization was declined."));
@@ -93,7 +95,6 @@ async function performStartupChecks(
     }
 }
 
-
 async function main() {
 
     let codeProcessor: CodeProcessor | null = null;
@@ -105,14 +106,16 @@ async function main() {
     try {
         // --- Instantiate Core Services Needed Early ---
         config = new Config();
-        // --- Pass config to services that need it ---
         const ui = new UserInterface(config);
         const fs = new FileSystem();
         const commandService = new CommandService();
-        const gitService = new GitService(commandService);
+        // --- Inject fs into GitService ---
+        const gitService = new GitService(commandService, fs);
+        // --- Instantiate ProjectContextBuilder with GitService ---
+        const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config);
         // --- End Core Service Instantiation ---
 
-        // --- Perform Startup Checks (Pass UI and Config) ---
+        // --- Perform Startup Checks (Pass instances) ---
         const startupOk = await performStartupChecks(projectRoot, fs, gitService, ui, config);
         if (!startupOk) {
             process.exit(1); // Exit if startup checks fail or user declines needed setup
@@ -128,18 +131,18 @@ async function main() {
 
         const { mode } = interactionResult; // Get mode first
 
-        // --- Instantiate CodeProcessor (needs all services) ---
+        // --- Instantiate CodeProcessor (needs all services & contextBuilder) ---
         // Pass the *same instances* of services created earlier
-        codeProcessor = new CodeProcessor(config, fs, commandService, gitService); // Pass services
+        // Note: CodeProcessor now implicitly uses contextBuilder via ConsolidationService
+        codeProcessor = new CodeProcessor(config, fs, commandService, gitService); // contextBuilder is no longer directly passed
         // --- End CodeProcessor Instantiation ---
 
         // --- Handle selected mode ---
         if (mode === 'Start/Continue Conversation') {
-            // Type assertion because we know the mode
             const startResult = interactionResult as Extract<UserInteractionResult, { mode: 'Start/Continue Conversation' }>;
             const { conversationName: convName, isNewConversation, selectedModel } = startResult;
 
-            targetIdentifier = convName; // Store the single name
+            targetIdentifier = convName;
 
             if (selectedModel && config.gemini.model_name !== selectedModel) {
                 console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
@@ -148,18 +151,19 @@ async function main() {
                 console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
             }
 
-            if (!targetIdentifier) { // Check the stored identifier
+            if (!targetIdentifier) {
                 console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
                 throw new Error("Conversation name is required for this mode.");
             }
-            await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false);
+            // --- Pass contextBuilder to startConversation ---
+            await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false, contextBuilder);
+            // --- End pass contextBuilder ---
 
         } else if (mode === 'Consolidate Changes...') {
-            // Type assertion
             const consolidateResult = interactionResult as Extract<UserInteractionResult, { mode: 'Consolidate Changes...' }>;
             const { conversationName: convName, selectedModel } = consolidateResult;
 
-            targetIdentifier = convName; // Store the single name
+            targetIdentifier = convName;
 
             if (selectedModel && config.gemini.model_name !== selectedModel) {
                 console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
@@ -168,20 +172,21 @@ async function main() {
                 console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
             }
 
-            if (!targetIdentifier) { // Check the stored identifier
+            if (!targetIdentifier) {
                 console.error(chalk.red("Internal Error: Conversation name missing for Consolidation mode."));
                 throw new Error("Conversation name is required for consolidation.");
             }
             console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(targetIdentifier)}...`));
-            await codeProcessor.processConsolidationRequest(targetIdentifier);
+            // --- Pass contextBuilder to processConsolidationRequest ---
+            await codeProcessor.processConsolidationRequest(targetIdentifier, contextBuilder);
+            // --- End pass contextBuilder ---
             console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
 
         } else if (mode === 'Delete Conversation...') {
-            // Type assertion
             const deleteResult = interactionResult as Extract<UserInteractionResult, { mode: 'Delete Conversation...' }>;
             const { conversationNamesToDelete } = deleteResult;
 
-            targetIdentifier = conversationNamesToDelete; // Store the array
+            targetIdentifier = conversationNamesToDelete;
 
             if (!targetIdentifier || !Array.isArray(targetIdentifier) || targetIdentifier.length === 0) {
                 console.error(chalk.red("Internal Error: Conversation names missing for Delete mode after confirmation."));
@@ -194,12 +199,14 @@ async function main() {
             let failCount = 0;
 
             for (const nameToDelete of targetIdentifier) {
-                const conversationFileName = `${nameToDelete}.jsonl`;
+                // Convert user-facing name (potentially with spaces) to snake_case for file operations
+                const snakeName = toSnakeCase(nameToDelete);
+                const conversationFileName = `${snakeName}.jsonl`;
                 const conversationFilePath = path.join(config.chatsDir, conversationFileName);
-                const editorFileName = `${nameToDelete}_edit.txt`;
+                const editorFileName = `${snakeName}_edit.txt`;
                 const editorFilePath = path.join(config.chatsDir, editorFileName);
 
-                console.log(chalk.yellow(`  Deleting: ${chalk.cyan(nameToDelete)}...`));
+                console.log(chalk.yellow(`  Deleting: ${chalk.cyan(nameToDelete)} (${chalk.grey(snakeName)})...`));
                 let conversationDeleted = false;
                 let editorDeleted = false;
                 let editorSkipped = false;
@@ -210,36 +217,52 @@ async function main() {
                     conversationDeleted = true;
                 } catch (deleteError) {
                     if ((deleteError as NodeJS.ErrnoException).code === 'ENOENT') {
+                        // Log error but don't increment failCount if conversation file is just missing
                         console.error(chalk.red(`    ❌ Error: Conversation file not found: ${conversationFilePath}.`));
                     } else {
                         console.error(chalk.red(`    ❌ Error deleting conversation file ${conversationFilePath}:`), deleteError);
-                        failCount++;
-                        continue;
+                        failCount++; // Increment failCount only for actual deletion errors
+                        continue; // Skip trying to delete editor file if conversation delete failed unexpectedly
                     }
                 }
 
                 try {
-                    await fs.access(editorFilePath);
+                    // Always try to delete the editor file if it exists
+                    await fs.access(editorFilePath); // Check existence first
                     await fs.deleteFile(editorFilePath);
                     console.log(chalk.green(`    ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
                     editorDeleted = true;
                 } catch (editorError) {
                     if ((editorError as NodeJS.ErrnoException).code === 'ENOENT') {
+                        // It's normal for the editor file not to exist, don't log unless conversation was deleted
                         if (conversationDeleted) {
                             console.log(chalk.gray(`    ⓘ No temporary editor file found to delete for ${nameToDelete}.`));
                         }
                         editorSkipped = true;
                     } else {
+                        // Log a warning for unexpected errors deleting the editor file, but don't increment failCount
                         console.warn(chalk.yellow(`    ! Warning: Could not delete temporary editor file ${editorFilePath}:`), editorError);
                     }
                 }
 
-                if (conversationDeleted || editorDeleted || editorSkipped) {
-                    successCount++;
+                // Increment success if either file was actually deleted or if the editor file was expectedly skipped
+                if (conversationDeleted || editorDeleted || (editorSkipped && !conversationDeleted)) { // Adjust success logic slightly
+                    if (!conversationDeleted && !editorDeleted && editorSkipped) {
+                         // Only log success if the only action was skipping a non-existent editor file
+                         // and the conversation file was also not found (already logged as error above).
+                         // This avoids double-counting success for missing files.
+                    } else {
+                        successCount++;
+                    }
+                } else if (!conversationDeleted && !editorDeleted && !editorSkipped) {
+                     // If both conversation file and editor file were missing
+                     // No action was taken, don't count as success or failure here
+                     // The error for missing conversation file was logged earlier.
                 }
             }
 
-            console.log(chalk.blue(`\nDeletion Summary: ${successCount} succeeded, ${failCount} failed.`));
+            console.log(chalk.blue(`\nDeletion Summary: ${successCount} completed (files deleted/skipped), ${failCount} failed (unexpected errors).`));
+
 
         } else {
             console.log(chalk.yellow(`Unknown mode selected. Exiting.`));
@@ -254,7 +277,7 @@ async function main() {
             try {
                 if (interactionResult?.mode !== 'Delete Conversation...') {
                      if (typeof targetIdentifier === 'string' && (interactionResult?.mode === 'Start/Continue Conversation' || interactionResult?.mode === 'Consolidate Changes...')) {
-                        const logFileName = `${toSnakeCase(targetIdentifier)}.jsonl`;
+                        const logFileName = `${toSnakeCase(targetIdentifier)}.jsonl`; // Use snake_case for logging
                         const logFilePath = path.join(config.chatsDir, logFileName);
                         await codeProcessor.aiClient.logConversation(logFilePath, { type: 'error', error: `Main execution error: ${(error as Error).message}` });
                      } else {

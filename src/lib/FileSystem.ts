@@ -101,112 +101,46 @@ class FileSystem {
         }
     }
 
-    /**
-     * Ensures .gitignore exists and contains the rule to ignore '.kai/logs/'.
-     * Creates the file with defaults if missing, appends the rule if missing from an existing file.
-     * Called *after* user confirmation if needed (when no .git exists).
-     * @param projectRoot The root directory of the project.
-     */
-    async ensureGitignoreRules(projectRoot: string): Promise<void> {
-        console.log(chalk.dim("  Ensuring .gitignore configuration..."));
-        const gitignorePath = path.join(projectRoot, '.gitignore');
-        const kaiLogsIgnoreLine = '.kai/logs/'; // Trailing slash ignores directory + contents
-        const kaiLogsComment = '# Kai specific logs (auto-added)';
-        const defaultNewGitignoreContent = `# Common Node ignores\nnode_modules/\n.DS_Store\n\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
+    // --- *** REMOVED ensureGitignoreRules method *** ---
+    // This functionality is now in GitService.
 
-        try {
-            let gitignoreContent = await this.readFile(gitignorePath); // Returns null if ENOENT
+    // --- *** REMOVED readGitignoreForContext method *** ---
+    // This functionality is now in GitService as getIgnoreRules.
 
-            if (gitignoreContent === null) {
-                // --- .gitignore does NOT exist - CREATE IT ---
-                console.log(chalk.yellow(`    .gitignore not found. Creating one with rule '${kaiLogsIgnoreLine}'...`));
-                try {
-                    await this.writeFile(gitignorePath, defaultNewGitignoreContent);
-                    console.log(chalk.green(`    Successfully created .gitignore.`));
-                } catch (writeError) {
-                    console.error(chalk.red(`    Error creating .gitignore file at ${gitignorePath}:`), writeError);
-                    // Throw or handle more gracefully? Log and continue for now.
-                }
-            } else {
-                // --- .gitignore DOES exist - CHECK & APPEND if needed ---
-                console.log(chalk.dim(`    Found existing .gitignore file. Checking for rule...`));
-                const lines = gitignoreContent.split('\n').map(line => line.trim());
-                const ruleExists = lines.includes(kaiLogsIgnoreLine);
-
-                if (!ruleExists) {
-                    console.log(chalk.yellow(`    Rule '${kaiLogsIgnoreLine}' not found in .gitignore. Appending it...`));
-                    try {
-                        const contentToAppend = (gitignoreContent.endsWith('\n') ? '' : '\n')
-                                                + `\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
-                        await fs.appendFile(gitignorePath, contentToAppend, 'utf-8');
-                        console.log(chalk.green(`    Successfully appended '${kaiLogsIgnoreLine}' to .gitignore.`));
-                    } catch (appendError) {
-                        console.error(chalk.red(`    Error appending '${kaiLogsIgnoreLine}' to .gitignore at ${gitignorePath}:`), appendError);
-                    }
-                } else {
-                    console.log(chalk.dim(`    Rule '${kaiLogsIgnoreLine}' already present.`));
-                }
-            }
-        } catch (readError) {
-            // Catch errors from readFile *other* than ENOENT
-            console.error(chalk.red(`    Error processing .gitignore file at ${gitignorePath}:`), readError);
-        }
-        console.log(chalk.dim("  .gitignore configuration ensure complete."));
-    }
+    // --- Project file reading methods ---
 
     /**
-     * Reads .gitignore rules for in-memory filtering during context building.
-     * Does NOT create or modify the file itself. Always includes default ignores.
-     * @param projectRoot The root directory of the project.
-     * @returns An `ignore` instance populated with rules.
+     * Recursively lists all text files in a directory, respecting ignore rules provided by the caller.
+     * @param dirPath The directory to start searching from.
+     * @param projectRoot The root of the project, used for relative path calculations in ignore rules.
+     * @param ig An `ignore` instance, usually obtained from GitService.getIgnoreRules().
+     * @returns A promise resolving to an array of absolute file paths.
+     * @throws Error if `ig` is not provided.
      */
-    private async readGitignoreForContext(projectRoot: string): Promise<Ignore> {
-        const ig = ignore();
-        const gitignorePath = path.join(projectRoot, '.gitignore');
-        const kaiLogsIgnoreLine = '.kai/logs/';
-
-        // --- Step 1: Always add essential *in-memory* ignores ---
-        ig.add(['.git', 'node_modules', '.gitignore', kaiLogsIgnoreLine]);
-
-        // --- Step 2: Read the actual file IF it exists ---
-        try {
-            const gitignoreContent = await this.readFile(gitignorePath); // Returns null if ENOENT
-            if (gitignoreContent !== null) {
-                console.log(chalk.dim(`  Applying rules from existing .gitignore for context building.`));
-                ig.add(gitignoreContent);
-            } else {
-                 console.log(chalk.dim(`  No .gitignore file found, using default ignores for context building.`));
-            }
-        } catch (readError) {
-            // Catch errors from readFile *other* than ENOENT
-            console.error(chalk.red(`  Warning: Error reading .gitignore file at ${gitignorePath} for context building:`), readError);
-        }
-
-        // --- Step 3: Return the in-memory ignore object ---
-        return ig;
-    }
-
-    // --- Project file reading methods (MODIFIED getProjectFiles) ---
-
-    // getProjectFiles, readFileContents, isTextFile (remain unchanged except call to readGitignoreForContext)
     async getProjectFiles(dirPath: string, projectRoot?: string, ig?: Ignore): Promise<string[]> {
         projectRoot = projectRoot || dirPath;
-        // --- MODIFICATION: Call the read-only version ---
-        ig = ig || await this.readGitignoreForContext(projectRoot);
-        // --- END MODIFICATION ---
+        // The caller (e.g., ProjectContextBuilder) is responsible for obtaining
+        // the Ignore object from GitService and passing it here.
+        if (!ig) {
+             // If no ignore object is passed, we cannot respect .gitignore rules.
+             throw new Error("getProjectFiles requires an Ignore object from GitService.getIgnoreRules() to be passed by the caller.");
+        }
 
         let files: string[] = [];
         const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
         for (const entry of entries) {
             const fullPath = path.join(dirPath, entry.name);
+            // Important: Use relative path from projectRoot for ignore checks
             const relativePath = path.relative(projectRoot, fullPath);
 
-            if (ig.ignores(entry.name) || ig.ignores(relativePath)) {
+            // Check against the provided ignore rules using the relative path
+            if (ig.ignores(relativePath)) {
                 continue;
             }
 
             if (entry.isDirectory()) {
+                // Recursively call with the same projectRoot and ig object
                 files = files.concat(await this.getProjectFiles(fullPath, projectRoot, ig));
             } else if (await this.isTextFile(fullPath)) {
                 files.push(fullPath);
@@ -232,7 +166,8 @@ class FileSystem {
         const textExtensions = ['.ts', '.js', '.json', '.yaml', '.yml', '.txt', '.md', '.html', '.css', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.sh', '.rb', '.php', '.go', '.rs', '.swift', '.kt', '.kts', '.gitignore', '.npmignore', 'LICENSE', '.env', '.xml', '.svg', '.jsx', '.tsx'];
         const ext = path.extname(filePath).toLowerCase();
         const base = path.basename(filePath);
-        return textExtensions.includes(ext) || ['Dockerfile', 'Makefile', 'README'].includes(base);
+        // Added '.' check for dotfiles without extensions that might be text (like .env, .gitignore)
+        return textExtensions.includes(ext) || ['Dockerfile', 'Makefile', 'README'].includes(base) || (base.startsWith('.') && !ext);
     }
     // --- End project file reading methods ---
 
@@ -302,9 +237,7 @@ class FileSystem {
             await this.ensureDirExists(dir);
             await fs.appendFile(filePath, logEntry, 'utf-8');
         } catch (error) {
-            // --- FIX: Corrected console.error call ---
             console.error(`Error appending to JSONL file ${filePath}:`, error);
-            // --- END FIX ---
             throw error;
         }
     }

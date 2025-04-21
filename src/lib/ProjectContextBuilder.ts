@@ -1,30 +1,44 @@
 // src/lib/ProjectContextBuilder.ts
-// @ts-ignore
 import path from 'path';
 import chalk from 'chalk';
 import { FileSystem } from './FileSystem';
 import { Config } from './Config';
-import { countTokens } from './utils'; // Import from utils
+import { countTokens } from './utils';
+import { GitService } from './GitService'; // <-- Import GitService
 
 export class ProjectContextBuilder {
     private fs: FileSystem;
     private projectRoot: string;
-    private config: Config; // Keep config in case other settings are needed in the future
+    private config: Config;
+    private gitService: GitService; // <-- Add GitService instance variable
 
-    constructor(fileSystem: FileSystem, projectRoot: string, config: Config) {
+    // Update constructor to accept GitService
+    constructor(
+        fileSystem: FileSystem,
+        gitService: GitService, // <-- Add gitService parameter
+        projectRoot: string,
+        config: Config
+    ) {
         this.fs = fileSystem;
+        this.gitService = gitService; // <-- Assign injected GitService
         this.projectRoot = projectRoot;
-        this.config = config; // Store config
+        this.config = config;
     }
 
     /**
-     * Reads project files, applies ignores, optimizes content, and builds the context string.
+     * Reads project files, applies ignores (using GitService), optimizes content, and builds the context string.
      * Includes ALL detected text files without enforcing token limits.
      * @returns An object containing the context string and its total token count.
      */
     async build(): Promise<{ context: string; tokenCount: number }> {
         console.log(chalk.blue('\nBuilding project context (including all text files)...'));
-        const filePaths = await this.fs.getProjectFiles(this.projectRoot);
+
+        // --- Get ignore rules from GitService ---
+        const ignoreRules = await this.gitService.getIgnoreRules(this.projectRoot);
+        // --- End getting ignore rules ---
+
+        // Pass the ignore rules object to getProjectFiles
+        const filePaths = await this.fs.getProjectFiles(this.projectRoot, this.projectRoot, ignoreRules); // Pass ignoreRules
         const fileContents = await this.fs.readFileContents(filePaths);
 
         let contextString = "Code Base Context:\n";
@@ -47,31 +61,19 @@ export class ProjectContextBuilder {
                 continue;
             }
 
-            // --- MODIFICATION START ---
-            // Calculate token count for the individual file's content
             const fileTokenCount = countTokens(content);
-            // --- MODIFICATION END ---
-
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
             const fileBlock = fileHeader + content + fileFooter;
-            // No token check here - just append the file block
             contextString += fileBlock;
             includedFiles++;
-
-            // --- MODIFICATION START ---
-            // Update the log message to include the file's token count
             console.log(chalk.dim(`  Included ${relativePath} (${fileTokenCount} tokens)`));
-            // --- MODIFICATION END ---
         }
 
-        // Calculate the final token count of the full context
         const finalTokenCount = countTokens(contextString);
 
         console.log(chalk.blue(`Context built with ${includedFiles} files. ${excludedFiles} files excluded/skipped.`));
         console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
-        // Note: The 'max_prompt_tokens' setting in config.yaml is no longer used to limit context size here.
-        // The full context will be sent, and potential truncation will happen at the API level if it exceeds the model's limit.
 
         return { context: contextString, tokenCount: finalTokenCount };
     }
@@ -82,10 +84,11 @@ export class ProjectContextBuilder {
      * @returns Optimized code string.
      */
     private optimizeWhitespace(code: string): string {
-        code = code.replace(/[ \t]+$/gm, ''); // Remove trailing whitespace per line
-        code = code.replace(/\r\n/g, '\n');   // Normalize line endings to LF
-        code = code.replace(/\n{3,}/g, '\n\n'); // Collapse multiple blank lines to max one blank line
-        code = code.trim();                 // Remove leading/trailing whitespace from the whole string
+        // (implementation remains unchanged)
+        code = code.replace(/[ \t]+$/gm, '');
+        code = code.replace(/\r\n/g, '\n');
+        code = code.replace(/\n{3,}/g, '\n\n');
+        code = code.trim();
         return code;
     }
 }

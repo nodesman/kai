@@ -1,26 +1,25 @@
 // src/lib/GitService.ts
 import chalk from 'chalk';
-import { CommandService } from './CommandService'; // Import the new service
+import path from 'path'; // Import path
+import ignore, { Ignore } from 'ignore'; // Import ignore
+import { CommandService } from './CommandService';
+import { FileSystem } from './FileSystem'; // <-- Import FileSystem
 
 export class GitService {
-    private commandService: CommandService; // Instance variable for the service
+    private commandService: CommandService;
+    private fs: FileSystem; // <-- Add FileSystem instance variable
 
-    // Inject CommandService via the constructor
-    constructor(commandService: CommandService) {
+    // Inject CommandService AND FileSystem via the constructor
+    constructor(commandService: CommandService, fileSystem: FileSystem) { // <-- Add fs parameter
         this.commandService = commandService;
+        this.fs = fileSystem; // <-- Assign injected FileSystem
     }
 
-    /**
-     * Checks if the specified directory is a Git repository.
-     * @param projectRoot The absolute path to the project root directory.
-     * @returns A promise resolving to `true` if it's a Git repo, `false` otherwise.
-     * @throws {Error} If the Git command itself fails (e.g., Git not found).
-     */
+    // --- isGitRepository, initializeRepository (remain unchanged) ---
     async isGitRepository(projectRoot: string): Promise<boolean> {
         console.log(chalk.dim("  Checking if project is a Git repository..."));
         const checkCommand = 'git rev-parse --is-inside-work-tree';
         try {
-            // Use run and check stdout. If it succeeds and stdout is 'true', it's a repo.
             const { stdout } = await this.commandService.run(checkCommand, { cwd: projectRoot });
             const isRepo = stdout.trim() === 'true';
             console.log(chalk.dim(`  Is Git repository? ${isRepo}`));
@@ -32,69 +31,49 @@ export class GitService {
             if (isGitNotFound) {
                  const gitNotFoundMsg = `Git command not found ('${checkCommand}' failed). Please ensure Git is installed and in your system PATH.`;
                  console.error(chalk.red(`\nError checking Git repository status:`), gitNotFoundMsg);
-                 throw new Error(gitNotFoundMsg); // Critical failure
+                 throw new Error(gitNotFoundMsg);
             } else if (isNotRepoError) {
-                // This is expected if it's not a repo, return false.
                 console.log(chalk.dim("  Is Git repository? false (Not a git repository error detected)"));
                 return false;
             } else {
-                // Handle other unexpected errors from the check command
                 let genericFailMsg = `Failed to verify Git repository status using '${checkCommand}'. Error: ${error.message || 'Unknown error'}`;
                  if (error.code && error.code !== 0) {
                      genericFailMsg += ` Exit Code: ${error.code}. Stderr: ${error.stderr?.trim() || 'N/A'}`;
                  }
                 console.error(chalk.red(`\nError during Git check ('${checkCommand}'):`), genericFailMsg);
-                throw new Error(genericFailMsg); // Critical failure
+                throw new Error(genericFailMsg);
             }
         }
     }
 
-     /**
-      * Initializes a Git repository in the specified directory.
-      * Should only be called after user confirmation if the directory wasn't already a repo.
-      * @param projectRoot The absolute path to the project root directory.
-      * @throws {Error} If Git initialization fails.
-      */
-     async initializeRepository(projectRoot: string): Promise<void> {
-         console.log(chalk.yellow("  Attempting to initialize Git repository..."));
-         const initCommand = 'git init';
-         try {
-             await this.commandService.run(initCommand, { cwd: projectRoot });
-             console.log(chalk.green("  Successfully initialized Git repository."));
-         } catch (initError: any) {
-             console.error(chalk.red(`\nError during 'git init':`), initError.message || initError);
-             let initFailMsg = `Failed to initialize Git repository. Error: ${initError.message || 'Unknown error'}`;
-             if (initError.code === 'ENOENT' || initError.message?.includes('command not found')) {
-                 initFailMsg = `Failed to initialize Git: Git command not found ('${initCommand}' failed). Please ensure Git is installed and in your system PATH.`;
-             } else if (initError.stderr) {
-                 initFailMsg += ` Stderr: ${initError.stderr.trim()}`;
-             } else if (initError.code) {
-                 initFailMsg += ` Exit Code: ${initError.code}`;
-             }
-             throw new Error(initFailMsg); // Throw specific error for init failure
-         }
-     }
-
-    /**
-     * Ensures the project directory is a Git repository.
-     * *** DEPRECATED in favor of isGitRepository check and explicit initializeRepository call after confirmation. ***
-     * This method remains for potential internal use but shouldn't handle auto-init anymore.
-     * @param projectRoot The absolute path to the project root directory.
-     * @throws {Error} If Git is not found.
-     */
-    async ensureGitRepository(projectRoot: string): Promise<void> {
-        console.warn(chalk.grey("Warning: ensureGitRepository called. Use isGitRepository and initializeRepository directly for better control."));
-        await this.isGitRepository(projectRoot); // Just perform the check, relies on isGitRepository throwing if git not found
+    async initializeRepository(projectRoot: string): Promise<void> {
+        console.log(chalk.yellow("  Attempting to initialize Git repository..."));
+        const initCommand = 'git init';
+        try {
+            await this.commandService.run(initCommand, { cwd: projectRoot });
+            console.log(chalk.green("  Successfully initialized Git repository."));
+        } catch (initError: any) {
+            console.error(chalk.red(`\nError during 'git init':`), initError.message || initError);
+            let initFailMsg = `Failed to initialize Git repository. Error: ${initError.message || 'Unknown error'}`;
+            if (initError.code === 'ENOENT' || initError.message?.includes('command not found')) {
+                initFailMsg = `Failed to initialize Git: Git command not found ('${initCommand}' failed). Please ensure Git is installed and in your system PATH.`;
+            } else if (initError.stderr) {
+                initFailMsg += ` Stderr: ${initError.stderr.trim()}`;
+            } else if (initError.code) {
+                initFailMsg += ` Exit Code: ${initError.code}`;
+            }
+            throw new Error(initFailMsg);
+        }
     }
 
-    /**
-     * Checks if the Git working directory is clean (no uncommitted changes).
-     * Assumes the directory IS a Git repository (isGitRepository should be true).
-     * Used primarily before operations like consolidation.
-     * @param projectRoot The absolute path to the project root directory.
-     * @throws {Error} If the working directory is not clean or the Git command fails.
-     */
-    async checkCleanStatus(projectRoot: string): Promise<void> {
+    // --- ensureGitRepository (remains deprecated/unchanged) ---
+    async ensureGitRepository(projectRoot: string): Promise<void> {
+        console.warn(chalk.grey("Warning: ensureGitRepository called. Use isGitRepository and initializeRepository directly for better control."));
+        await this.isGitRepository(projectRoot);
+    }
+
+    // --- checkCleanStatus (remains unchanged) ---
+     async checkCleanStatus(projectRoot: string): Promise<void> {
         console.log(chalk.blue("  Checking Git working directory status..."));
         const statusCommand = 'git status --porcelain';
         try {
@@ -113,7 +92,6 @@ export class GitService {
             }
         } catch (error: any) {
             const isGitNotFound = error.code === 'ENOENT' || error.message?.includes('command not found');
-             // If it's *not* a repo, this check shouldn't have been called - indicates logic error elsewhere.
              const isNotRepoError = error.stderr?.includes('not a git repository');
 
             if (isGitNotFound) {
@@ -135,24 +113,107 @@ export class GitService {
         }
     }
 
-    // REMOVED: getLatestSemverTag method was here
-
-
+    // --- MOVED FROM FileSystem: ensureGitignoreRules ---
     /**
-     * Creates an annotated Git tag.
-     * (Kept for potential future use, e.g., a manual tagging command)
-     * @param projectRoot The absolute path to the project root directory.
-     * @param tagName The name for the tag.
-     * @param message The annotation message for the tag.
-     * @throws {Error} If the Git tag command fails.
+     * Ensures .gitignore exists and contains the rule to ignore '.kai/logs/'.
+     * Creates the file with defaults if missing, appends the rule if missing from an existing file.
+     * Called *after* user confirmation if needed (when no .git exists).
+     * Uses the injected FileSystem service for file operations.
+     * @param projectRoot The root directory of the project.
      */
+    async ensureGitignoreRules(projectRoot: string): Promise<void> {
+        console.log(chalk.dim("  Ensuring .gitignore configuration (via GitService)..."));
+        const gitignorePath = path.join(projectRoot, '.gitignore');
+        const kaiLogsIgnoreLine = '.kai/logs/'; // Trailing slash ignores directory + contents
+        const kaiLogsComment = '# Kai specific logs (auto-added by GitService)'; // Update comment slightly
+        const defaultNewGitignoreContent = `# Common Node ignores\nnode_modules/\n.DS_Store\n\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
+
+        try {
+            // Use injected fs instance to read
+            let gitignoreContent = await this.fs.readFile(gitignorePath); // Returns null if ENOENT
+
+            if (gitignoreContent === null) {
+                // --- .gitignore does NOT exist - CREATE IT ---
+                console.log(chalk.yellow(`    .gitignore not found. Creating one with rule '${kaiLogsIgnoreLine}'...`));
+                try {
+                    // Use injected fs instance to write
+                    await this.fs.writeFile(gitignorePath, defaultNewGitignoreContent);
+                    console.log(chalk.green(`    Successfully created .gitignore.`));
+                } catch (writeError) {
+                    console.error(chalk.red(`    Error creating .gitignore file at ${gitignorePath}:`), writeError);
+                }
+            } else {
+                // --- .gitignore DOES exist - CHECK & APPEND if needed ---
+                console.log(chalk.dim(`    Found existing .gitignore file. Checking for rule...`));
+                const lines = gitignoreContent.split('\n').map(line => line.trim());
+                const ruleExists = lines.includes(kaiLogsIgnoreLine);
+
+                if (!ruleExists) {
+                    console.log(chalk.yellow(`    Rule '${kaiLogsIgnoreLine}' not found in .gitignore. Appending it...`));
+                    try {
+                        const contentToAppend = (gitignoreContent.endsWith('\n') ? '' : '\n')
+                                                + `\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
+                        // Use injected fs instance to append (requires re-reading and writing)
+                        const currentContent = await this.fs.readFile(gitignorePath) || ''; // Read again to be safe
+                        await this.fs.writeFile(gitignorePath, currentContent + contentToAppend);
+
+                        console.log(chalk.green(`    Successfully appended '${kaiLogsIgnoreLine}' to .gitignore.`));
+                    } catch (appendError) {
+                        console.error(chalk.red(`    Error appending '${kaiLogsIgnoreLine}' to .gitignore at ${gitignorePath}:`), appendError);
+                    }
+                } else {
+                    console.log(chalk.dim(`    Rule '${kaiLogsIgnoreLine}' already present.`));
+                }
+            }
+        } catch (readError) {
+            // Catch errors from readFile *other* than ENOENT
+            console.error(chalk.red(`    Error processing .gitignore file at ${gitignorePath}:`), readError);
+        }
+        console.log(chalk.dim("  .gitignore configuration ensure complete."));
+    }
+
+    // --- MOVED FROM FileSystem: readGitignoreForContext (renamed slightly) ---
+    /**
+     * Reads .gitignore rules for in-memory filtering during context building.
+     * Does NOT create or modify the file itself. Always includes default ignores.
+     * Uses the injected FileSystem service to read the file.
+     * @param projectRoot The root directory of the project.
+     * @returns An `ignore` instance populated with rules.
+     */
+    async getIgnoreRules(projectRoot: string): Promise<Ignore> { // Renamed
+        const ig = ignore();
+        const gitignorePath = path.join(projectRoot, '.gitignore');
+        const kaiLogsIgnoreLine = '.kai/logs/';
+
+        // --- Step 1: Always add essential *in-memory* ignores ---
+        ig.add(['.git', 'node_modules', '.gitignore', kaiLogsIgnoreLine]);
+
+        // --- Step 2: Read the actual file IF it exists using injected fs ---
+        try {
+            // Use injected fs instance
+            const gitignoreContent = await this.fs.readFile(gitignorePath); // Returns null if ENOENT
+            if (gitignoreContent !== null) {
+                console.log(chalk.dim(`  Applying rules from existing .gitignore for context building.`));
+                ig.add(gitignoreContent);
+            } else {
+                 console.log(chalk.dim(`  No .gitignore file found, using default ignores for context building.`));
+            }
+        } catch (readError) {
+            // Catch errors from readFile *other* than ENOENT
+            console.error(chalk.red(`  Warning: Error reading .gitignore file at ${gitignorePath} for context building:`), readError);
+        }
+
+        // --- Step 3: Return the in-memory ignore object ---
+        return ig;
+    }
+
+
+    // --- createAnnotatedTag (remains unchanged) ---
     async createAnnotatedTag(projectRoot: string, tagName: string, message: string): Promise<void> {
-        // Basic validation for tag name (Git has stricter rules, but this catches obvious issues)
         if (!tagName || tagName.includes(' ')) {
             throw new Error(`Invalid tag name provided: "${tagName}"`);
         }
-        // Escape the message for the command line (simple quoting for now)
-        const escapedMessage = message.replace(/"/g, '\\"'); // Basic double quote escaping
+        const escapedMessage = message.replace(/"/g, '\\"');
         const tagCommand = `git tag -a "${tagName}" -m "${escapedMessage}"`;
 
         console.log(chalk.blue(`  Attempting to create Git tag: ${tagName}...`));
@@ -166,10 +227,8 @@ export class GitService {
             if (tagError.code === 'ENOENT') {
                 tagFailMsg = `Failed to create tag: Git command not found ('${tagCommand}' failed). Ensure Git is installed.`;
             } else if (tagError.stderr) {
-                // Check for common tag errors like "tag already exists"
                 if (tagError.stderr.includes('already exists')) {
                     tagFailMsg = `Failed to create Git tag: Tag '${tagName}' already exists.`;
-                     // Throw "already exists" error if called manually
                      throw new Error(tagFailMsg);
                 } else {
                     tagFailMsg += ` Stderr: ${tagError.stderr.trim()}`;
