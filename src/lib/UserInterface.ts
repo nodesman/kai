@@ -1,6 +1,6 @@
 // File: src/lib/UserInterface.ts
 import inquirer from 'inquirer';
-import { spawn } from 'child_process';
+import { spawn, SpawnOptionsWithoutStdio } from 'child_process'; // Import SpawnOptions
 import path from 'path';
 import fs from 'fs/promises'; // Use fs.promises for async operations
 import crypto from 'crypto'; // For checking file changes
@@ -13,7 +13,6 @@ import chalk from 'chalk'; // Import chalk for logging
 const HISTORY_SEPARATOR = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
 
 // Define the expected return type for getUserInteraction
-// --- MODIFICATION: Update return type for Delete mode ---
 interface UserInteractionResultBase {
     mode: 'Start/Continue Conversation' | 'Consolidate Changes...';
     conversationName: string | null; // Used for conversation ops
@@ -24,28 +23,27 @@ interface UserInteractionResultBase {
 interface DeleteInteractionResult {
     mode: 'Delete Conversation...';
     conversationNamesToDelete: string[]; // Array of names to delete
-    // conversationName, isNewConversation, selectedModel are not relevant here
+}
+
+// Define the structure for the fallback error
+interface FallbackError {
+    type: 'fallback';
+    editor: string;
+    args: string[];
 }
 
 type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult;
-// --- END MODIFICATION ---
 
 class UserInterface {
     fs: FileSystem;
-    config: Config; // Add config
+    config: Config;
 
-    constructor(config: Config) { // Accept config
+    constructor(config: Config) {
         this.fs = new FileSystem();
-        this.config = config; // Store config
+        this.config = config;
     }
 
-    /**
-     * Asks the user for confirmation before initializing Git, creating .kai/logs,
-     * and configuring .gitignore in a directory that is not currently a Git repo.
-     * @param directoryPath The path of the directory where initialization would occur.
-     * @param isDirectorySafe A boolean indicating if the directory is empty or contains only safe files.
-     * @returns `true` if the user confirms, `false` otherwise.
-     */
+    // --- confirmInitialization (Unchanged) ---
     async confirmInitialization(directoryPath: string, isDirectorySafe: boolean): Promise<boolean> {
         const message = isDirectorySafe
             ? `The directory '${directoryPath}' is not a Git repository but appears empty or safe.\nDo you want Kai to initialize Git, create the '.kai/logs' directory, and configure '.gitignore'?`
@@ -56,17 +54,14 @@ class UserInterface {
                 type: 'confirm',
                 name: 'confirm',
                 message: message,
-                default: false, // Default to NO for safety, especially if directory isn't "safe"
+                default: false,
             },
         ]);
         return confirm;
     }
 
-
     // --- selectOrCreateConversation (Unchanged) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
-        // Ensure dir exists *before* listing - moved to startup check in kai.ts
-        // await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
         const choices = [
@@ -107,9 +102,6 @@ class UserInterface {
         }
     }
 
-    // --- REMOVED selectConversationToDelete method ---
-    // This is replaced by the multi-select logic directly in getUserInteraction
-
     // --- formatHistoryForSublime (Unchanged) ---
     formatHistoryForSublime(messages: Message[]): string {
         let historyBlock = '';
@@ -145,11 +137,12 @@ class UserInterface {
         return promptTrimmed ? promptTrimmed : null;
     }
 
-    // --- getPromptViaSublimeLoop (Unchanged) ---
+    // --- getPromptViaSublimeLoop (MODIFIED FOR IDE DETECTION) ---
     async getPromptViaSublimeLoop(
         conversationName: string,
         currentMessages: Message[],
-        editorFilePath: string
+        editorFilePath: string,
+        isFallbackAttempt = false // Added flag to prevent infinite loops
     ): Promise<{ newPrompt: string | null; conversationFilePath: string; editorFilePath: string }> {
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
@@ -164,39 +157,93 @@ class UserInterface {
             throw writeError;
         }
 
-        console.log(`\nOpening conversation "${conversationName}" in Sublime Text...`);
-        console.log(`(Type your prompt above the '${HISTORY_SEPARATOR}', save, and close Sublime to send)`);
+        // --- Editor Detection Logic ---
+        let editorCommand = 'subl'; // Default to Sublime Text
+        let editorArgs = ['-w', editorFilePath];
+        let editorName = 'Sublime Text';
+
+        if (process.platform === 'darwin' && !isFallbackAttempt) { // Only detect IDE if not already a fallback
+            const bundleId = process.env.__CFBundleIdentifier;
+            if (bundleId === 'com.jetbrains.WebStorm') {
+                editorCommand = 'webstorm';
+                editorArgs = ['--wait', editorFilePath];
+                editorName = 'WebStorm';
+                console.log(chalk.blue(`Detected running inside WebStorm (macOS). Using '${editorCommand}' command...`));
+            } else if (bundleId === 'com.jetbrains.CLion') {
+                editorCommand = 'clion';
+                editorArgs = ['--wait', editorFilePath];
+                editorName = 'CLion';
+                console.log(chalk.blue(`Detected running inside CLion (macOS). Using '${editorCommand}' command...`));
+            }
+             // Add more else if for other JetBrains IDEs using __CFBundleIdentifier
+             // else if (bundleId === 'com.jetbrains.intellij') { editorCommand = 'idea'; ... }
+        }
+        // TODO: Add detection for other platforms (Windows, Linux) if possible
+        // --- End Editor Detection Logic ---
+
+        console.log(`\nOpening conversation "${conversationName}" in ${editorName}...`);
+        console.log(`(Type your prompt above the '${HISTORY_SEPARATOR}', save, and close the editor tab/window to send)`);
         console.log(`(Close without saving OR save without changes to exit conversation)`);
 
-        const sublProcess = spawn('subl', ['-w', editorFilePath], { stdio: 'inherit' });
+        let exitCode: number | null = null;
+        let processError: Error | FallbackError | null = null;
 
-        const exitCode = await new Promise<number | null>((resolve, reject) => {
-            sublProcess.on('close', (code) => resolve(code));
-            sublProcess.on('error', (error) => {
-                if ((error as any).code === 'ENOENT') {
-                    console.error(chalk.red("\n❌ Error: 'subl' command not found. Make sure Sublime Text is installed and 'subl' is in your system's PATH."));
-                    reject(new Error("'subl' command not found.'"));
-                } else {
-                    console.error(chalk.red("\n❌ Error spawning Sublime Text:"), error);
-                    reject(error);
-                }
+        try {
+            const editorProcess = spawn(editorCommand, editorArgs, { stdio: 'inherit' });
+
+            exitCode = await new Promise<number | null>((resolve, reject) => {
+                editorProcess.on('close', (code) => resolve(code));
+                editorProcess.on('error', (error) => {
+                    if ((error as any).code === 'ENOENT') {
+                        const errorMsg = `❌ Error: '${editorCommand}' command not found.`;
+                        if ((editorCommand === 'webstorm' || editorCommand === 'clion') && !isFallbackAttempt) { // Check if IDE launcher failed and not already a fallback
+                            console.error(chalk.red(`\n${errorMsg} Ensure the JetBrains IDE command-line launcher is created (Tools -> Create Command-line Launcher...) and the launcher script's directory is in your system's PATH.`));
+                            console.warn(chalk.yellow(`Falling back to 'subl'...`));
+                            // Reject with a special object to trigger fallback
+                            reject({ type: 'fallback', editor: 'subl', args: ['-w', editorFilePath] } as FallbackError);
+                        } else { // Sublime failed or it was already a fallback attempt
+                            console.error(chalk.red(`\n${errorMsg} Make sure ${editorName} is installed and '${editorCommand}' is in your system's PATH.`));
+                            reject(new Error(`'${editorCommand}' command not found.'`)); // Reject with standard error
+                        }
+                    } else {
+                        console.error(chalk.red(`\n❌ Error spawning ${editorName}:`), error);
+                        reject(error); // Reject with the original spawn error
+                    }
+                });
             });
-        });
+        } catch (err: any) {
+             // Catch the rejection from the promise (including fallback object)
+             processError = err;
+        }
+
+         // --- Handle Fallback ---
+         if (processError && (processError as FallbackError).type === 'fallback') {
+             console.log(chalk.blue(`Attempting to open with fallback editor: ${(processError as FallbackError).editor}...`));
+             // Recursive call with fallback flag set to true
+             return this.getPromptViaSublimeLoop(conversationName, currentMessages, editorFilePath, true);
+         } else if (processError) {
+              // If it was a standard error caught, re-throw it to be handled by the main catch block
+              throw processError;
+         }
+         // --- End Handle Fallback ---
 
         if (exitCode !== 0) {
-            console.warn(chalk.yellow(`\nSublime Text process closed with non-zero code: ${exitCode}. Assuming exit.`));
+            console.warn(chalk.yellow(`\n${editorName} process closed with non-zero code: ${exitCode}. Assuming exit.`));
             return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
+        // --- File reading and prompt extraction (remains the same) ---
         let modifiedContent: string;
         try {
-            await fs.access(editorFilePath);
-            modifiedContent = await this.fs.readFile(editorFilePath) || '';
+            await fs.access(editorFilePath); // Check existence first
+            modifiedContent = await this.fs.readFile(editorFilePath) || ''; // Read content
         } catch (readError) {
             if ((readError as NodeJS.ErrnoException).code === 'ENOENT') {
-                console.warn(chalk.yellow(`\nEditor file ${editorFilePath} not found after closing Sublime. Assuming exit.`));
+                // This case might happen if the --wait flag didn't work as expected or the file was deleted manually
+                console.warn(chalk.yellow(`\nEditor file ${editorFilePath} not found after closing ${editorName}. Assuming exit.`));
                 return { newPrompt: null, conversationFilePath, editorFilePath };
             }
+            // Rethrow other read errors
             console.error(chalk.red(`\nError reading editor file ${editorFilePath} after closing:`), readError);
             throw readError;
         }
@@ -204,7 +251,7 @@ class UserInterface {
         const modifiedHash = crypto.createHash('sha256').update(modifiedContent).digest('hex');
 
         if (initialHash === modifiedHash) {
-            console.log(chalk.blue("\nNo changes detected in Sublime Text. Exiting conversation."));
+            console.log(chalk.blue(`\nNo changes detected in ${editorName}. Exiting conversation.`));
             return { newPrompt: null, conversationFilePath, editorFilePath };
         }
 
@@ -219,7 +266,7 @@ class UserInterface {
         return { newPrompt: newPrompt, conversationFilePath, editorFilePath };
     }
 
-    // --- getUserInteraction (MODIFIED FOR MULTI-DELETE) ---
+    // --- getUserInteraction (Unchanged) ---
     async getUserInteraction(): Promise<UserInteractionResult | null> {
         try {
             const { mode } = await inquirer.prompt<{ mode: UserInteractionResult['mode'] }>([
@@ -230,14 +277,12 @@ class UserInterface {
                     choices: [
                         'Start/Continue Conversation',
                         'Consolidate Changes...',
-                        'Delete Conversation...', // Stays the same here
+                        'Delete Conversation...',
                     ],
                 },
             ]);
 
-            // --- Handle Delete Conversation Mode ---
             if (mode === 'Delete Conversation...') {
-                // Ensure dir exists before listing
                 await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
                 const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
 
@@ -248,16 +293,12 @@ class UserInterface {
 
                 const { conversationsToDelete } = await inquirer.prompt<{ conversationsToDelete: string[] }>([
                     {
-                        type: 'checkbox', // Use checkbox for multi-select
+                        type: 'checkbox',
                         name: 'conversationsToDelete',
                         message: 'Select conversations to DELETE (use spacebar, press Enter when done):',
                         choices: existingConversations,
                         loop: false,
                         validate: (answer) => {
-                            // Optional: Could add validation (e.g., ensure at least one is selected)
-                            // if (answer.length < 1) {
-                            //     return 'You must choose at least one conversation.';
-                            // }
                             return true;
                         },
                     },
@@ -268,7 +309,6 @@ class UserInterface {
                     return null;
                 }
 
-                // Ask for confirmation
                 const { confirmDelete } = await inquirer.prompt([
                     {
                         type: 'confirm',
@@ -279,16 +319,14 @@ class UserInterface {
                 ]);
 
                 if (confirmDelete) {
-                    return { mode, conversationNamesToDelete: conversationsToDelete }; // Return the array
+                    return { mode, conversationNamesToDelete: conversationsToDelete };
                 } else {
                     console.log(chalk.yellow("Deletion cancelled."));
-                    return null; // User aborted confirmation
+                    return null;
                 }
             }
 
-            // --- Handle Other Modes (Start/Continue, Consolidate) ---
-            // Model selection is only relevant for conversation/consolidation
-            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25"; // Default
+            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25";
             const { modelChoice } = await inquirer.prompt([
                 {
                     type: 'list',
@@ -307,8 +345,7 @@ class UserInterface {
             let conversationName: string | null = null;
             let isNewConversation = false;
 
-            // Ensure dir exists before allowing selection/creation
-             await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
+            await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
             conversationDetails = await this.selectOrCreateConversation();
             if (mode === 'Consolidate Changes...' && conversationDetails.isNew) {
                 console.error(chalk.red("Error: Cannot consolidate changes for a newly created (empty) conversation."));
@@ -317,31 +354,41 @@ class UserInterface {
             conversationName = conversationDetails.name;
             isNewConversation = conversationDetails.isNew;
 
-            // Return based on mode (already handled Delete above)
             if (mode === 'Start/Continue Conversation') {
-                 if (!conversationName) { // Add null check for safety
+                 if (!conversationName) {
                     console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
                     return null;
                  }
                 return { mode, conversationName: conversationName, isNewConversation: isNewConversation, selectedModel: selectedModel };
             } else if (mode === 'Consolidate Changes...') {
-                 // Ensure conversationName is not null before returning
                  if (!conversationName) {
                     console.error(chalk.red("Internal Error: Conversation name missing for Consolidation mode."));
                     return null;
                  }
                 return { mode, conversationName: conversationName, isNewConversation: false, selectedModel: selectedModel };
             } else {
-                // Should not be reached as Delete is handled, but good practice
                 console.warn(chalk.yellow(`Unhandled mode selection: ${mode}`));
                 return null;
             }
 
         } catch (error) {
+             // Catch block remains largely the same, but the error might originate from the editor spawn failure
             if ((error as any).isTtyError) {
                 console.error(chalk.red("\nPrompt couldn't be rendered in this environment."));
             } else {
-                console.error(chalk.red('\nError during user interaction:'), error);
+                 // Check if it's the fallback error object we created (it shouldn't reach here if handled correctly)
+                 if (error && (error as FallbackError).type === 'fallback') {
+                     console.error(chalk.red('\nInternal Error: Fallback error was not handled correctly.'));
+                 }
+                 // Check for the standard editor command not found error
+                 else if (error instanceof Error && error.message.includes('command not found')) {
+                     console.error(chalk.red(`\nEditor Interaction Error: ${error.message}`));
+                     console.error(chalk.yellow('Please ensure your chosen editor command (subl, webstorm, clion, etc.) is configured correctly in your PATH.'));
+                 }
+                 // Handle other general errors
+                 else {
+                    console.error(chalk.red('\nError during user interaction:'), error);
+                 }
             }
             return null;
         }
