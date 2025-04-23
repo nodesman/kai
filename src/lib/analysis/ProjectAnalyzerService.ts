@@ -15,6 +15,9 @@ import { countTokens } from '../utils'; // Needed if we add token limits later
 // Keep thresholds for classifying large files
 const LARGE_FILE_SIZE_THRESHOLD_BYTES = 100 * 1024; // 100 KB
 const LARGE_FILE_LOC_THRESHOLD = 5000; // 5000 lines
+const MAX_FILE_SIZE_FOR_BATCH_BYTES = 150 * 1024; // Max individual file size to include in batching (150KB)
+const BATCH_TOKEN_TARGET_PERCENTAGE = 0.75; // Target 75% of max prompt tokens for safety buffer
+
 
 export class ProjectAnalyzerService {
     private config: Config;
@@ -70,8 +73,8 @@ export class ProjectAnalyzerService {
             console.log(chalk.blue(`           Identified ${filesToSummarize.length} text files for AI analysis.`));
             console.log(chalk.blue(`           Identified ${allEntries.length - filesToSummarize.length} binary/large files (will be listed).`));
 
-            // === Phase 2: Simple Summary Generation (for 'text_analyze' files) ===
-            console.log(chalk.blue("\n  Phase 2: Generating summaries for suitable files..."));
+            // === Phase 2: Summary Generation using Batching (for 'text_analyze' files) ===
+            console.log(chalk.blue("\n  Phase 2: Generating summaries for suitable files using batching..."));
             let { analyzedCount, errorCount } = await this._runSummaryGeneration(filesToSummarize, allEntries);
             console.log(chalk.blue(`\nSummary generation finished. Summarized: ${analyzedCount}, Errors during summary: ${errorCount}.`));
             overallSummary = `Analysis Pass Completed: ${analyzedCount} files summarized, ${allEntries.length - filesToSummarize.length} binary/large files listed.`;
@@ -179,79 +182,212 @@ export class ProjectAnalyzerService {
         };
     }
 
-    /** Phase 2: Generates summaries for files marked as 'text_analyze'. */
+    /** Phase 2: Generates summaries for files marked as 'text_analyze' using BATCHING. */
     private async _runSummaryGeneration(
         filesToSummarize: AnalysisCacheEntry[],
         allEntries: AnalysisCacheEntry[] // Pass the main list to update
     ): Promise<{ analyzedCount: number; errorCount: number }> {
         let analyzedCount = 0;
         let errorCount = 0;
+        const timestamp = new Date().toISOString(); // Use a consistent timestamp for this run
+        const maxBatchTokens = (this.config.gemini.max_prompt_tokens || 32000) * BATCH_TOKEN_TARGET_PERCENTAGE;
+        const SIZE_TO_TOKEN_RATIO = 0.3; // Rough estimate: 1 char ~= 0.3 tokens average (adjust!)
+        const BASE_PROMPT_TOKEN_ESTIMATE = 200; // Estimate for the batch prompt overhead
 
         if (filesToSummarize.length === 0) {
              console.log(chalk.yellow("    No files suitable for AI summary generation found."));
              return { analyzedCount, errorCount };
         }
 
-        // Using simple iteration for M2, batching can be re-introduced later if needed
-        for (const entryToSummarize of filesToSummarize) {
-            const absolutePath = path.resolve(this.projectRoot, entryToSummarize.filePath);
-            console.log(chalk.dim(`    Summarizing: ${entryToSummarize.filePath}...`));
+        // --- Batching Logic ---
+        let currentBatchFiles: AnalysisCacheEntry[] = [];
+        let currentBatchContent = "";
+        let currentBatchTokenEstimate = BASE_PROMPT_TOKEN_ESTIMATE; // Start with base prompt estimate
 
+        for (let i = 0; i < filesToSummarize.length; i++) {
+            const fileInfo = filesToSummarize[i];
+
+            // Re-check size here just before adding (though already filtered in phase 1)
+            if (fileInfo.size > MAX_FILE_SIZE_FOR_BATCH_BYTES) {
+                 console.log(chalk.grey(`    Skipping large file from batching phase: ${fileInfo.filePath}`));
+                 continue; // Skip if somehow a large file got here
+            }
+
+            const estimatedFileTokens = fileInfo.size * SIZE_TO_TOKEN_RATIO; // Rough estimate for checking limit
+            const fileHeader = `\n---\nFile: ${fileInfo.filePath}\n\`\`\`\n`;
+            const fileFooter = "\n```\n";
+            const estimatedOverhead = countTokens(fileHeader + fileFooter); // More accurate overhead count
+            const estimatedTotalCost = estimatedFileTokens + estimatedOverhead;
+
+            // Check if adding this file exceeds the token limit for the batch
+            if (currentBatchFiles.length > 0 && (currentBatchTokenEstimate + estimatedTotalCost) > maxBatchTokens) {
+                // Process the current batch *before* adding the new file
+                console.log(chalk.cyan(`    Batch full (${currentBatchFiles.length} files, ~${currentBatchTokenEstimate.toFixed(0)} tokens). Processing...`));
+                const batchResult = await this._processBatch(currentBatchFiles, currentBatchContent, allEntries, timestamp);
+                analyzedCount += batchResult.successCount;
+                errorCount += batchResult.errorCount;
+
+                // Reset for the next batch
+                currentBatchFiles = [];
+                currentBatchContent = "";
+                currentBatchTokenEstimate = BASE_PROMPT_TOKEN_ESTIMATE;
+            }
+
+            // Add the current file to the (potentially new) batch
+            // Need to read content now for the actual prompt string
+            const absolutePath = path.resolve(this.projectRoot, fileInfo.filePath);
             try {
-                // Content should be readable as it passed Phase 1 classification
                 const content = await this.fsUtil.readFile(absolutePath);
-                if (content === null) { // Defensive check
-                     console.warn(chalk.yellow(`      Warning: Could not read content for ${entryToSummarize.filePath} during summary phase. Skipping summary.`));
+                if (content === null) {
+                     console.warn(chalk.yellow(`    Warning: Could not read file ${fileInfo.filePath} when adding to batch. Skipping.`));
                      errorCount++;
                      continue;
                 }
+                const fileBlock = fileHeader + content + fileFooter;
+                const actualFileBlockTokens = countTokens(fileBlock); // Use actual token count now
 
-                // Get summary using Flash model
-                const summaryPrompt = AnalysisPrompts.summarizeFilePrompt(entryToSummarize.filePath, content);
-                let summary = "[Summary Error]"; // Default on error
+                // Final check with actual tokens before adding
+                if (currentBatchFiles.length > 0 && (currentBatchTokenEstimate + actualFileBlockTokens) > maxBatchTokens) {
+                     // Process the previous batch first if adding this specific file overflows
+                     console.log(chalk.cyan(`    Batch full just before adding ${fileInfo.filePath} (${currentBatchFiles.length} files, ~${currentBatchTokenEstimate.toFixed(0)} tokens). Processing...`));
+                     const batchResult = await this._processBatch(currentBatchFiles, currentBatchContent, allEntries, timestamp);
+                     analyzedCount += batchResult.successCount;
+                     errorCount += batchResult.errorCount;
+                     // Reset for the new batch starting with the current file
+                     currentBatchFiles = [];
+                     currentBatchContent = "";
+                     currentBatchTokenEstimate = BASE_PROMPT_TOKEN_ESTIMATE;
+                }
 
-                try {
-                        summary = await this.aiClient.getResponseTextFromAI(
-                            [{ role: 'user', content: summaryPrompt }],
-                            true // USE FLASH MODEL
-                        );
-
-                        // --- Find the entry in allEntries and update its summary ---
-                        const entryIndex = allEntries.findIndex(e => e.filePath === entryToSummarize.filePath);
-                         if (entryIndex !== -1) {
-                             allEntries[entryIndex].summary = summary; // Update the main list
-                             analyzedCount++;
-                         } else {
-                             // This should not happen if logic is correct
-                             console.error(chalk.red(`      INTERNAL ERROR: Could not find entry for ${entryToSummarize.filePath} in allEntries list!`));
-                         }
-                        // --- End update ---
-
-                } catch (aiError) {
-                    console.error(chalk.red(`      AI summary failed for ${entryToSummarize.filePath}:`), aiError);
-                    errorCount++;
-                        // Find entry and mark summary as error
-                        const entryIndex = allEntries.findIndex(e => e.filePath === entryToSummarize.filePath);
-                         if (entryIndex !== -1) allEntries[entryIndex].summary = summary; // Update with error marker
-                        continue;
-                    }
+                currentBatchFiles.push(fileInfo);
+                currentBatchContent += fileBlock;
+                currentBatchTokenEstimate += actualFileBlockTokens; // Update estimate accurately
+                console.log(chalk.dim(`      Added to batch: ${fileInfo.filePath} (${actualFileBlockTokens} tokens). Batch total estimate: ${currentBatchTokenEstimate.toFixed(0)}`));
 
             } catch (readError) {
-                console.error(chalk.red(`      Error reading file content for summary ${entryToSummarize.filePath}:`), readError);
-                errorCount++;
-                // Mark summary as error in the main list
-                const entryIndex = allEntries.findIndex(e => e.filePath === entryToSummarize.filePath);
-                if (entryIndex !== -1) {
-                    allEntries[entryIndex].summary = "[Content Read Error]";
-                }
-            } // End for loop
+                 console.warn(chalk.yellow(`    Warning: Error reading file ${fileInfo.filePath} for batching. Skipping. Error: ${(readError as Error).message}`));
+                 errorCount++;
+            }
+        } // End for loop iterating through filesToSummarize
+
+        // Process the final batch if it has files
+        if (currentBatchFiles.length > 0) {
+            console.log(chalk.cyan(`    Processing final batch (${currentBatchFiles.length} files, ~${currentBatchTokenEstimate.toFixed(0)} tokens)...`));
+            const batchResult = await this._processBatch(currentBatchFiles, currentBatchContent, allEntries, timestamp);
+            analyzedCount += batchResult.successCount;
+            errorCount += batchResult.errorCount;
         }
+        // --- End Batching Logic ---
 
         return { analyzedCount, errorCount };
     }
 
+    /** Processes a single batch of files by calling the AI and parsing the response. Updates summaries in allEntries. */
+    private async _processBatch(
+        batchFiles: AnalysisCacheEntry[], // Use the full entry now
+        batchContent: string,
+        allEntries: AnalysisCacheEntry[], // Main list to update
+        timestamp: string
+    ): Promise<{ successCount: number, errorCount: number }> {
+        let successCount = 0;
+        let batchErrorCount = 0;
+        const filePathsInBatch = batchFiles.map(f => f.filePath);
 
-    // REMOVED: _processBatch and _parseBatchResponse methods (not used in M2 simple summary)
+        try {
+            const prompt = AnalysisPrompts.batchSummarizePrompt(batchContent, filePathsInBatch);
+            const responseJsonString = await this.aiClient.getResponseTextFromAI(
+                [{ role: 'user', content: prompt }],
+                true // USE FLASH MODEL for batches
+            );
+
+            // Parse the JSON response
+            const parsedSummaries = this._parseBatchResponse(responseJsonString, filePathsInBatch);
+
+            // Update summaries in the main allEntries list
+            for (const fileInfo of batchFiles) {
+                const summary = parsedSummaries[fileInfo.filePath]; // Get summary from parsed response
+                const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+
+                if (entryIndex === -1) {
+                     console.error(chalk.red(`      INTERNAL ERROR: Could not find entry for ${fileInfo.filePath} in allEntries list during batch update!`));
+                     batchErrorCount++;
+                     continue;
+                }
+
+                if (summary) {
+                     allEntries[entryIndex].summary = summary;
+                     allEntries[entryIndex].lastAnalyzed = timestamp; // Update timestamp on successful summary
+                     successCount++;
+                } else {
+                     // AI missed summary or parsing failed for this file
+                     console.warn(chalk.yellow(`      Warning: AI response missing or failed parsing summary for ${fileInfo.filePath}`));
+                     allEntries[entryIndex].summary = allEntries[entryIndex].summary || "[Summary not generated by AI]"; // Keep existing error or set new one
+                     batchErrorCount++;
+                }
+            }
+        } catch (batchProcessingError) {
+            console.error(chalk.red(`    Error processing batch: ${(batchProcessingError as Error).message}`));
+            batchErrorCount = batchFiles.length; // Mark all files in batch as failed
+            // Update all entries in this batch within allEntries to show batch error
+            for (const fileInfo of batchFiles) {
+                const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+                if (entryIndex !== -1) {
+                     allEntries[entryIndex].summary = "[Batch Processing Error]";
+                }
+            }
+        }
+
+        return { successCount, errorCount: batchErrorCount };
+    }
+
+    /** Parses the JSON response from the batch analysis prompt */
+    private _parseBatchResponse(
+        rawJsonText: string,
+        expectedFilePaths: string[]
+    ): { [filePath: string]: string | null } {
+        const summaries: { [filePath: string]: string | null } = {};
+        // Initialize all expected paths with null
+        expectedFilePaths.forEach(p => summaries[p] = null);
+
+        try {
+             let cleanJsonText = rawJsonText.trim();
+             // Handle optional markdown code fences ```json ... ``` or ``` ... ```
+             const jsonMatch = cleanJsonText.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+             if (jsonMatch && jsonMatch[1]) {
+                 cleanJsonText = jsonMatch[1].trim();
+             } else if (!cleanJsonText.startsWith('{') || !cleanJsonText.endsWith('}')) {
+                  // If not fenced and not starting/ending with {}, assume it's not valid JSON object as requested
+                  throw new Error("Response does not appear to be a JSON object and is not wrapped in markdown fences.");
+             }
+
+             const parsed = JSON.parse(cleanJsonText);
+
+             if (typeof parsed !== 'object' || parsed === null || typeof parsed.summaries !== 'object' || parsed.summaries === null) {
+                 throw new Error("Parsed response missing 'summaries' object key or 'summaries' is not an object.");
+             }
+
+             // Populate summaries from the parsed response
+             for (const filePath in parsed.summaries) {
+                 if (summaries.hasOwnProperty(filePath)) { // Check if the key is one we asked for AND initialized
+                     if (typeof parsed.summaries[filePath] === 'string') {
+                         summaries[filePath] = parsed.summaries[filePath];
+                     } else {
+                         console.warn(chalk.yellow(`      Warning: Invalid summary type for ${filePath} in AI response (expected string). Setting null.`));
+                         // Keep it null
+                     }
+                 } else {
+                      console.warn(chalk.yellow(`      Warning: AI returned summary for unexpected file path ignored: ${filePath}`));
+                 }
+             }
+             return summaries;
+
+        } catch (e) {
+            console.error(chalk.red(`      Failed to parse batch analysis JSON response. Raw text: <<<${rawJsonText}>>>`), e);
+            // Return the initialized object with nulls, indicating parsing failure for all
+            return summaries;
+        }
+    }
+
 
     /**
      * Lists project files, prioritizing `phind`, falling back to `find`,
