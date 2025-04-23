@@ -430,7 +430,7 @@ export class ProjectAnalyzerService {
         // Check if 'phind' exists
         try {
             // Using a simple shell check that works on Linux/macOS/Git Bash
-            await this.commandService.run('command -v phind >/dev/null 2>&1', { cwd: this.projectRoot, shell: true });
+            await this.commandService.run('command -v phind', { cwd: this.projectRoot }); // Removed unnecessary shell: true
             commandName = 'phind';
             // Use options to exclude ignored files and limit output like 'find'
             // phind options: -0 null terminate, --no-config, --no-ignore (we apply ignore later), -tf list only files
@@ -457,7 +457,7 @@ export class ProjectAnalyzerService {
 
         // --- Filter using .gitignore and .kaiignore (handled by GitService/FileSystem) ---
         console.log(chalk.dim(`    Filtering ${rawFileList.length} raw files using ignore rules...`));
-        const ignoreRules = await this.gitService.getCombinedIgnoreRules(this.projectRoot); // Use combined rules
+        const ignoreRules = await this.gitService.getIgnoreRules(this.projectRoot); // Use correct method name
 
         const filteredList = rawFileList.filter(rawPath => {
             // Normalize path for consistency (remove leading ./, use POSIX separators)
