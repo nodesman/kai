@@ -62,43 +62,41 @@ async function performStartupChecks(
             if (proceedWithSetup) {
                  await gitService.initializeRepository(projectRoot);
                  isRepo = true; // Mark as repo after successful init
+                 // Ensure gitignore rules after successful init
+                 await gitService.ensureGitignoreRules(projectRoot);
             }
         } else {
             console.log(chalk.green("  ✓ Git repository detected."));
-        }
-
-        // --- .kai/logs and .gitignore Check (Run only if proceeding) ---
-        if (proceedWithSetup) {
-            // Ensure .kai/logs exists (using path potentially read from config later)
-             // Config instance isn't passed anymore, read default path directly for now
-             const defaultLogsDir = path.resolve(projectRoot, ".kai/logs"); // Assume default for check
-             await fs.ensureKaiDirectoryExists(defaultLogsDir);
-
-            // --- Use GitService to ensure rules ---
+            // Ensure gitignore rules even if repo exists
             await gitService.ensureGitignoreRules(projectRoot);
-            // --- End use GitService ---
-        } else {
-            // This case should only be reachable if user declined init on non-empty dir
-             console.log(chalk.yellow("  Skipping .kai/logs and .gitignore checks as initialization was declined."));
-             return false; // Setup was not fully completed due to user choice
         }
 
-        // --- Scaffold config.yaml if missing ---
-        const configPath = path.resolve(projectRoot, 'config.yaml');
+        // --- Ensure .kai directory and Scaffold config.yaml if missing ---
+        const configDir = path.resolve(projectRoot, '.kai');
+        const configPath = path.resolve(configDir, 'config.yaml');
+        await fs.ensureDirExists(configDir); // Ensure .kai directory exists FIRST
+
         if (!fsSync.existsSync(configPath)) {
-            console.log(chalk.yellow(`  'config.yaml' not found. Creating a default one...`));
+            console.log(chalk.yellow(`  'config.yaml' not found in '.kai/'. Creating a default one...`));
             try {
                 // Use the imported constant
                 fsSync.writeFileSync(configPath, DEFAULT_CONFIG_YAML, 'utf8');
-                console.log(chalk.green(`  Successfully created default config.yaml.`));
+                console.log(chalk.green(`  Successfully created default config.yaml in '.kai/'.`));
             } catch (writeError) {
                 console.error(chalk.red(`  ❌ Error creating default config.yaml at ${configPath}:`), writeError);
                 console.warn(chalk.yellow("  Continuing startup despite config creation error..."));
             }
         } else {
-            console.log(chalk.dim(`  Found existing config.yaml. Skipping default creation.`));
+            console.log(chalk.dim(`  Found existing config.yaml in '.kai/'. Skipping default creation.`));
         }
         // --- End Scaffold config.yaml ---
+
+
+        // --- Ensure .kai/logs exists (using path potentially read from config later) ---
+        // Now that .kai exists, ensure logs exists within it
+        const defaultLogsDir = path.resolve(configDir, "logs"); // Assume default inside .kai
+        await fs.ensureKaiDirectoryExists(defaultLogsDir);
+
 
         console.log(chalk.green("Startup checks complete."));
         return true; // All checks passed or were successfully completed/confirmed
@@ -147,6 +145,7 @@ async function main() {
             config,
             fs,
             commandService,
+            gitService, // <-- ADD GitService instance
             new AIClient(config) // Analyzer needs its own AI client instance for summaries
         );
         // --- END Analyzer Instantiation ---
@@ -180,7 +179,7 @@ async function main() {
                      // CRITICAL CHECK: Verify cache exists *after* analysis attempt
                      if (await fs.readAnalysisCache(cachePath) === null) {
                          console.error(chalk.red(`  Analysis finished but failed to create a valid cache file at ${cachePath}. Cannot proceed.`));
-                         console.error(chalk.red(`  Please check analysis logs/errors and ensure the command '${config.analysis.phind_command}' works correctly.`));
+                         console.error(chalk.red(`  Please check analysis logs/errors. Ensure 'phind' or 'find' works and '.gitignore' is filtering correctly.`)); // Updated error hint
                          process.exit(1); // Exit if analysis failed to produce the required cache
                      }
                       console.log(chalk.green(`  Analysis complete. Proceeding in 'analysis_cache' mode.`));

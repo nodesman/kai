@@ -26,8 +26,6 @@ interface GeminiConfig {
     // safetySettings?: SafetySetting[];
 }
 
-// *** REMOVED hidden prompt fields ***
-
 interface ProjectConfig {
     root_dir?: string;
     prompts_dir?: string;
@@ -38,7 +36,7 @@ interface ProjectConfig {
 // *** ADDED: Analysis Config Interface ***
 interface AnalysisConfig {
     cache_file_path?: string;
-    phind_command?: string; // Command to list files
+    // phind_command?: string; // REMOVED - Determined automatically
 }
 
 // *** ADDED: Context Config Interface ***
@@ -46,29 +44,24 @@ interface ContextConfig {
     mode?: 'full' | 'analysis_cache'; // Mode is either explicitly set or undefined (needs determination)
 }
 
-
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: GeminiConfig;
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
     analysis: Required<AnalysisConfig>; // Add analysis section
-    context: ContextConfig; // Add context section (mode is optional)
+    context: ContextConfig; // Add context section (mode is optional until resolved)
     chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
 // Type for the raw data loaded from YAML (all fields optional)
-// *** REMOVED hidden prompt fields ***
 type YamlConfigData = {
     gemini?: Partial<GeminiConfig>;
     project?: Partial<ProjectConfig>;
-    analysis?: Partial<AnalysisConfig>; // Added analysis
+    analysis?: Partial<AnalysisConfig>; // phind_command is removed from AnalysisConfig itself
     context?: Partial<ContextConfig>; // Added context
 };
-// *** END REMOVAL ***
-
 
 // --- Config Class ---
-// Renamed class to avoid conflict with IConfig interface
 class ConfigLoader /* implements IConfig */ { // Let TS infer implementation details
     gemini: GeminiConfig;
     project: Required<ProjectConfig>; // Use Required utility type
@@ -78,7 +71,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     private configFilePath: string; // Store path for saving
 
     constructor() {
-        this.configFilePath = path.resolve(process.cwd(), 'config.yaml'); // Store path
+        // Resolve path relative to project root inside .kai directory
+        this.configFilePath = path.resolve(process.cwd(), '.kai', 'config.yaml'); // Store path
         const loadedConfig = this.loadConfig();
         this.gemini = loadedConfig.gemini;
         this.project = loadedConfig.project;
@@ -89,7 +83,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     }
 
     private loadConfig(): IConfig {
-        const configPath = path.resolve(process.cwd(), 'config.yaml');
+        // Load from .kai directory
+        const configPath = path.resolve(process.cwd(), '.kai', 'config.yaml');
         let yamlConfig: YamlConfigData = {};
 
         // 1. Load API Key from Environment Variable
@@ -112,7 +107,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                     console.warn(chalk.yellow(`Warning: config.yaml at ${configPath} is empty or invalid. Using defaults.`));
                 }
             } else {
-                console.warn(chalk.yellow(`Warning: config.yaml not found at ${configPath}. Using defaults.`));
+                 console.warn(chalk.yellow(`Warning: config.yaml not found at ${configPath}. Using defaults. Will be created if needed.`));
             }
         } catch (e) {
             console.error(chalk.red(`Error loading or parsing config.yaml at ${configPath}:`), e);
@@ -141,7 +136,6 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             interactive_prompt_review: yamlConfig.gemini?.interactive_prompt_review ?? defaultInteractivePromptReview,
         };
 
-        // *** REMOVED defaults and loading for hidden prompt paths ***
         const finalProjectConfig: Required<ProjectConfig> = {
             root_dir: yamlConfig.project?.root_dir || "generated_project",
             prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
@@ -152,7 +146,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         // *** ADDED: Default and Loading for Analysis Config ***
         const finalAnalysisConfig: Required<AnalysisConfig> = {
             cache_file_path: yamlConfig.analysis?.cache_file_path || ".kai/project_analysis.json",
-            phind_command: yamlConfig.analysis?.phind_command || "find . -type f" // Default to find for now
+            // phind_command removed
         };
 
         // *** ADDED: Default and Loading for Context Config ***
@@ -168,10 +162,6 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         // Calculate absolute chats directory path (DO NOT CREATE IT HERE)
         const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
 
-        // --- REMOVED: Automatic directory creation block ---
-        // The directory existence will be handled during startup checks in kai.ts
-        // --- END REMOVED ---
-
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
@@ -182,7 +172,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     }
 
     /**
-     * Saves the current configuration state back to config.yaml.
+     * Saves the current configuration state back to config.yaml (in .kai/).
      * Note: This will overwrite the existing file and might lose comments.
      * The context mode will be either 'full' or 'analysis_cache' after determination.
      */
@@ -199,7 +189,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             },
             analysis: {
                 cache_file_path: this.analysis.cache_file_path,
-                phind_command: this.analysis.phind_command,
+                // phind_command removed
             },
             context: {
                 // Save the mode if it's defined (will be 'full' or 'analysis_cache' after determination)
@@ -218,6 +208,10 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         };
 
         try {
+            // Ensure .kai directory exists before writing
+            const configDir = path.dirname(this.configFilePath);
+            await fsSync.promises.mkdir(configDir, { recursive: true }); // Use async mkdir for safety
+
             // Convert the object to YAML string
             // Filter out keys with undefined values before dumping
             const filteredConfig = Object.entries(configToSave).reduce((acc, [key, value]) => {
@@ -240,7 +234,6 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 }
                 return acc;
             }, {} as Record<string, any>);
-
 
             const yamlString = yaml.dump(filteredConfig, { indent: 2, skipInvalid: true });
             // Use synchronous write for simplicity during this critical update phase

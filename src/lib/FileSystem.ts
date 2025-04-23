@@ -1,11 +1,11 @@
 // File: src/lib/FileSystem.ts
 import fs, { Stats } from 'fs/promises'; // Ensure using promises, import Stats type
 import path from 'path';
-import ignore, { Ignore } from 'ignore'; // Import Ignore type as well
+import ignore, { Ignore } from 'ignore'; // Import ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
 
 // --- ADDED: Import Analysis Cache Types ---
-// Import both types for clarity, although only AnalysisCacheEntry[] is used in M1 cache file
+// Import M2 structure
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 
 // Define items typically ignored when checking for "emptiness"
@@ -99,22 +99,21 @@ class FileSystem {
     }
 
     /**
-     * Ensures the specific .kai/logs directory exists.
-     * Separated from Config loading, called after potential user confirmation.
-     * @param kaiLogsDir The absolute path to the .kai/logs directory.
+     * Ensures the specified directory exists. Used for logs, cache, etc.
+     * @param dir The absolute path to the directory.
      */
-    async ensureKaiDirectoryExists(kaiLogsDir: string): Promise<void> {
+    async ensureDirExists(dir: string): Promise<void> {
         try {
              // Check if it exists first to avoid unnecessary log message
-             await fs.access(kaiLogsDir);
-             console.log(chalk.dim(`  Log directory already exists: ${kaiLogsDir}`));
+             await fs.access(dir);
+             // console.log(chalk.dim(`  Directory already exists: ${dir}`)); // Maybe too verbose
         } catch (error) {
              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                 console.log(chalk.yellow(`  Log directory not found. Creating: ${kaiLogsDir}...`));
-                 await fs.mkdir(kaiLogsDir, { recursive: true });
-                 console.log(chalk.green(`  Successfully created log directory: ${kaiLogsDir}`));
+                 console.log(chalk.yellow(`  Directory not found. Creating: ${dir}...`));
+                 await fs.mkdir(dir, { recursive: true });
+                 console.log(chalk.green(`  Successfully created directory: ${dir}`));
              } else {
-                 console.error(chalk.red(`Error checking/creating log directory ${kaiLogsDir}:`), error);
+                 console.error(chalk.red(`Error checking/creating directory ${dir}:`), error);
                  throw error; // Rethrow critical errors
              }
         }
@@ -125,6 +124,15 @@ class FileSystem {
 
     // --- *** REMOVED readGitignoreForContext method *** ---
     // This functionality is now in GitService as getIgnoreRules.
+
+    /**
+     * Ensures the specific .kai/logs directory exists.
+     * Convenience method calling ensureDirExists.
+     * @param kaiLogsDir The absolute path to the .kai/logs directory.
+     */
+    async ensureKaiDirectoryExists(kaiLogsDir: string): Promise<void> {
+         await this.ensureDirExists(kaiLogsDir); // Reuse the generic ensureDirExists
+    }
 
     // --- Project file reading methods ---
 
@@ -190,32 +198,21 @@ class FileSystem {
     }
     // --- End project file reading methods ---
 
-    // --- JSONL/Directory methods (remain unchanged) ---
-    async ensureDirExists(dirPath: string): Promise<void> {
-        try {
-            await fs.access(dirPath);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                // Log moved out, only perform mkdir here
-                await fs.mkdir(dirPath, { recursive: true });
-            } else {
-                console.error(`Error checking/creating directory ${dirPath}:`, error);
-                throw error;
-            }
-        }
-    }
+    // --- JSONL/Directory methods ---
 
     async listJsonlFiles(dirPath: string): Promise<string[]> {
-        // Ensure dir exists before listing, but use the dedicated method for consistency
-        await this.ensureKaiDirectoryExists(dirPath); // Ensure .kai/logs exists if needed
+        // Ensure the directory exists first using the generic method
+        // It's the caller's responsibility (like UserInterface) to ensure this is the *correct* dir (e.g., config.chatsDir)
+        await this.ensureDirExists(dirPath);
+
+        // Proceed with listing
         try {
-            // await this.ensureDirExists(dirPath); // redundant if ensureKaiDirectoryExists was called
             const files = await fs.readdir(dirPath);
             return files
                 .filter(file => file.endsWith('.jsonl'))
                 .map(file => path.basename(file, '.jsonl'));
         } catch (error) {
-            // EnsureKaiDirectoryExists handles ENOENT, so this catch is for other readdir errors
+            // EnsureDirExists handles ENOENT, so this catch is for other readdir errors
              console.error(chalk.red(`Error listing files in ${dirPath}:`), error);
              return []; // Return empty on error
         }
@@ -262,12 +259,12 @@ class FileSystem {
     }
     // --- END JSONL/Directory methods ---
 
-    // --- ADDED: Analysis Cache Methods (Milestone 1 - Simple Array) ---
+    // --- ADDED: Analysis Cache Methods (Milestone 2 - Object Structure) ---
 
     /**
-     * Reads the project analysis cache file (expects { overallSummary, entries } structure for M2).
+     * Reads the project analysis cache file (expects M2 structure: { overallSummary, entries }).
      * @param cachePath The absolute path to the cache file.
-     * @returns The parsed cache data (ProjectAnalysisCache), or null if the file doesn't exist or is invalid.
+     * @returns The parsed cache data (ProjectAnalysisCache object), or null if the file doesn't exist or is invalid.
      */
     async readAnalysisCache(cachePath: string): Promise<ProjectAnalysisCache | null> {
         console.log(chalk.dim(`Attempting to read analysis cache: ${cachePath}`));
@@ -279,22 +276,24 @@ class FileSystem {
             }
             const data: unknown = JSON.parse(content); // Parse as unknown first
 
-            // --- M2 Validation: Check for new structure ---
+            // --- Validation for M2 structure: { overallSummary: string|null, entries: [...] } ---
             if (
                 typeof data !== 'object' ||
                 data === null ||
-                (typeof (data as any).overallSummary !== 'string' && (data as any).overallSummary !== null) || // Allow null for M2
-                !Array.isArray((data as any).entries)
+                (typeof (data as ProjectAnalysisCache).overallSummary !== 'string' && (data as ProjectAnalysisCache).overallSummary !== null) ||
+                !Array.isArray((data as ProjectAnalysisCache).entries)
             ) {
-                console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} does not match expected structure { overallSummary: string|null, entries: [...] }. Ignoring.`));
+                 console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} does not match expected M2 structure { overallSummary: string|null, entries: [...] }. Ignoring.`));
+                // You might choose to delete the invalid cache file here
+                // try { await this.deleteFile(cachePath); console.log(chalk.yellow(`Deleted invalid cache file: ${cachePath}`)); } catch {}
                 return null;
             }
 
-            // Optional: Add more detailed validation of array elements ((data as any).entries) if needed later
-            console.log(chalk.dim(`Successfully read and parsed analysis cache (${(data as any).entries.length} entries).`));
-            return data as ProjectAnalysisCache; // Type assertion to the new structure
-            // --- END M2 Validation ---
+             // Optional: Add more detailed validation of individual entries in the array
+             // e.g., check if each entry has filePath, type, size, summary, lastAnalyzed
 
+            console.log(chalk.dim(`Successfully read and parsed M2 analysis cache (${(data as ProjectAnalysisCache).entries.length} entries).`));
+            return data as ProjectAnalysisCache; // Type assertion to the new structure
 
         } catch (error) {
             console.error(chalk.red(`Error reading or parsing analysis cache file ${cachePath}:`), error);
@@ -303,16 +302,25 @@ class FileSystem {
     }
 
     /**
-     * Writes the project analysis data (object structure for M2) to the cache file.
+     * Writes the project analysis data (M2 object structure) to the cache file.
      * @param cachePath The absolute path to the cache file.
      * @param cacheData The analysis data (ProjectAnalysisCache) to write.
      */
     async writeAnalysisCache(cachePath: string, cacheData: ProjectAnalysisCache): Promise<void> {
-        // Log based on entries array length in the new structure
-        console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.entries.length} entries)`));
-        const content = JSON.stringify(cacheData, null, 2); // Pretty-print JSON
-        await this.writeFile(cachePath, content);
-        console.log(chalk.dim(`Successfully wrote analysis cache.`));
+        // Validate structure before writing (basic)
+        if (!cacheData || typeof cacheData !== 'object' || !Array.isArray(cacheData.entries)) {
+             console.error(chalk.red(`Attempted to write invalid cache data structure to ${cachePath}. Aborting write.`));
+             return; // Prevent writing bad data
+        }
+        try {
+             console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.entries.length} entries)`));
+             const content = JSON.stringify(cacheData, null, 2); // Pretty-print JSON
+             await this.writeFile(cachePath, content);
+             console.log(chalk.dim(`Successfully wrote analysis cache.`));
+        } catch (error) {
+             console.error(chalk.red(`Error writing analysis cache file ${cachePath}:`), error);
+             // Decide if this should re-throw or just log
+        }
     }
     // --- END Analysis Cache Methods ---
 }

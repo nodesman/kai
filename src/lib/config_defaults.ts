@@ -3,7 +3,8 @@
 /**
  * Default content for config.yaml when scaffolded by Kai.
  */
-export const DEFAULT_CONFIG_YAML = `# Kai Configuration File (Generated Default)
+export const DEFAULT_CONFIG_YAML = `# Kai Configuration File (Located in .kai/config.yaml)
+# Generated Default
 
 project:
   # root_dir: "." # Default location for generated project artifacts (if used)
@@ -14,7 +15,7 @@ project:
 # --- Analysis & Context Caching (Optional) ---
 # analysis:
 #   cache_file_path: ".kai/project_analysis.json" # Location for the analysis cache
-#   phind_command: "find . -type f" # Command to list project files (e.g., 'fd --type f' or your 'phind .')
+#   # phind_command is no longer configurable; Kai checks for 'phind' then falls back to 'find'.
 
 # --- Context Mode (Determined automatically on first run if not set) ---
 # The 'context.mode' setting will be added here automatically after the first run.

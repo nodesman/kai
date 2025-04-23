@@ -6,6 +6,7 @@ import { Config } from './Config';
 import { countTokens } from './utils';
 import { GitService } from './GitService';
 // --- ADDED: Import Analysis Cache Types ---
+// Import ProjectAnalysisCache, AnalysisCacheEntry depends on the M1 or M2 structure being targeted
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 
 export class ProjectContextBuilder {
@@ -55,9 +56,10 @@ export class ProjectContextBuilder {
             const cachePath = path.resolve(this.projectRoot, this.config.analysis.cache_file_path);
             const cacheData = await this.fs.readAnalysisCache(cachePath);
 
-            // --- M2: Updated check for new cache structure ---
-            if (cacheData && cacheData.entries && cacheData.entries.length > 0) {
-                return this._formatCacheAsContext(cacheData);
+            // Check if cache exists and has entries (adjust based on M1/M2 structure)
+            // For M1, cacheData is ProjectAnalysisCache (AnalysisCacheEntry[])
+            if (cacheData && Array.isArray(cacheData) && cacheData.length > 0) { // M1 check: is array and not empty
+                return this._formatCacheAsContext(cacheData); // Pass array for M1 formatting
             } else {
                 // If mode is explicitly 'analysis_cache' but cache is missing/empty, it's an error state.
                 // The startup logic should have prevented this by forcing analysis or exiting.
@@ -156,28 +158,19 @@ export class ProjectContextBuilder {
         return totalTokenCount;
     }
 
-    /** Formats the loaded analysis cache data (object structure for M2) into a context string. */
+    /** Formats the loaded analysis cache data (M1: array) into a context string. */
     private _formatCacheAsContext(cacheData: ProjectAnalysisCache): { context: string; tokenCount: number } {
-        // --- Format the M2 structure ---
-        let contextString = `Project Analysis Overview:\n${cacheData.overallSummary || "(No overall summary provided)"}\n\nFile Details:\n`;
-        // Access the 'entries' array from the ProjectAnalysisCache object
-        const entries = cacheData.entries; // Access the entries array
+        // --- M1 Formatting ---
+        let contextString = `Project Analysis Summary:\n`; // Simple header for M1
+        const entries = cacheData; // For M1, cacheData is the array itself
         for (const entry of entries) {
-            contextString += `\n---\nFile: ${entry.filePath}`;
-            // Add type/size info, especially if no summary exists
-            if (entry.type !== 'text_analyze' || entry.summary === null) {
-                 contextString += ` [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB`;
-                 if (entry.loc !== null) contextString += `, LOC: ${entry.loc}`;
-                 contextString += `)`;
-            } else if (entry.loc !== null) { // Add LOC for analyzed files too
-                 contextString += ` (LOC: ${entry.loc})`;
-            }
-            contextString += `\nSummary: ${entry.summary || '(Not summarized)'}\n`;
+            contextString += `\n---\nFile: ${entry.filePath} (LOC: ${entry.loc})\n`;
+            contextString += `Summary: ${entry.summary || '(Error generating summary)'}\n`;
         }
-        // --- End formatting ---
+        // --- End M1 formatting ---
 
         const finalTokenCount = countTokens(contextString); // Count tokens of the formatted string
-        console.log(chalk.blue(`Analysis cache context built with ${cacheData.entries.length} entries.`));
+        console.log(chalk.blue(`Analysis cache context built with ${entries.length} entries.`));
         console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
         return { context: contextString, tokenCount: finalTokenCount };
     }
