@@ -32,7 +32,7 @@ interface DeleteInteractionResult {
 // Added specific result type for changing mode
 interface ChangeModeInteractionResult {
     mode: 'Change Context Mode';
-    newMode: 'full' | 'analysis_cache'; // The mode the user wants to switch to
+    newMode: 'full' | 'analysis_cache' | 'dynamic'; // Added dynamic mode
 }
 
 // Define the structure for the fallback error
@@ -369,13 +369,14 @@ class UserInterface {
                          choices: [
                              { name: 'Full Codebase (reads all files)', value: 'full' },
                              { name: 'Analysis Cache (uses summaries)', value: 'analysis_cache' },
+                             { name: 'Dynamic (AI selects relevant files)', value: 'dynamic' }, // <-- ADDED Dynamic option
                          ],
                      },
                  ]);
                  // Return specific result type for changing mode
                  return {
                      mode: 'Change Context Mode',
-                     newMode: newModeChoice as 'full' | 'analysis_cache',
+                     newMode: newModeChoice as 'full' | 'analysis_cache' | 'dynamic',
                  };
              }
 

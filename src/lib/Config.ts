@@ -41,7 +41,7 @@ interface AnalysisConfig {
 
 // *** ADDED: Context Config Interface ***
 interface ContextConfig {
-    mode?: 'full' | 'analysis_cache'; // Mode is either explicitly set or undefined (needs determination)
+    mode?: 'full' | 'analysis_cache' | 'dynamic'; // Added 'dynamic' mode
 }
 
 // Main Config structure used internally (interfaces, not class for simpler structure)
@@ -151,11 +151,11 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
 
         // *** ADDED: Default and Loading for Context Config ***
         const finalContextConfig: ContextConfig = {
-            // Default to undefined if not explicitly 'full' or 'analysis_cache'
-            // This signals the need for first-run determination
-            mode: ['full', 'analysis_cache'].includes(yamlConfig.context?.mode ?? '')
-                  ? yamlConfig.context!.mode! as 'full' | 'analysis_cache' // Use validated value if present
+            // Default to undefined if not explicitly 'full', 'analysis_cache', or 'dynamic'
+            mode: ['full', 'analysis_cache', 'dynamic'].includes(yamlConfig.context?.mode ?? '')
+                  ? yamlConfig.context!.mode! as 'full' | 'analysis_cache' | 'dynamic' // Use validated value if present
                   : undefined // Default to undefined signal
+
         };
         // *** END ADDED ***
 
@@ -174,7 +174,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     /**
      * Saves the current configuration state back to config.yaml (in .kai/).
      * Note: This will overwrite the existing file and might lose comments.
-     * The context mode will be either 'full' or 'analysis_cache' after determination.
+     * The context mode will be either 'full', 'analysis_cache', or 'dynamic' after determination/selection.
      */
     async saveConfig(): Promise<void> {
         console.log(chalk.dim(`Attempting to save configuration to ${this.configFilePath}...`));
@@ -189,10 +189,9 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             },
             analysis: {
                 cache_file_path: this.analysis.cache_file_path,
-                // phind_command removed
             },
             context: {
-                // Save the mode if it's defined (will be 'full' or 'analysis_cache' after determination)
+                // Save the mode if it's defined (will be 'full', 'analysis_cache', or 'dynamic' after determination/selection)
                 mode: this.context.mode,
             },
             gemini: { // Only save non-sensitive, configurable Gemini settings

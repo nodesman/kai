@@ -169,7 +169,9 @@ export class ConversationManager {
             // Fetch fresh context using the builder
             console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
             // Use the injected contextBuilder instance
-            const { context: currentContextString } = await this.contextBuilder.build();
+            // NOTE: Consolidation currently ALWAYS uses the default buildContext (full or cache)
+            // It does NOT yet support the 'dynamic' context mode.
+            const { context: currentContextString } = await this.contextBuilder.buildContext();
 
             // Delegate to the *injected* consolidation service
             await this.consolidationService.process(
@@ -199,7 +201,7 @@ export class ConversationManager {
         }
     }
 
-    /** Builds context and calls the AI for a standard user prompt. */
+    /** Builds context (dynamically or standard) and calls the AI for a standard user prompt. */
     private async _callAIWithContext(
         conversation: Conversation,
         userPrompt: string,
@@ -207,19 +209,32 @@ export class ConversationManager {
     ): Promise<void> {
         conversation.addMessage('user', userPrompt); // Add user message first
 
+        let contextResult: { context: string; tokenCount: number };
+        const currentMode = this.config.context.mode;
+
         try {
-            // Use the injected contextBuilder instance
-            const { context: currentContextString } = await this.contextBuilder.build();
+            // --- Select Context Building Strategy ---
+            console.log(chalk.blue(`\nBuilding context using mode: ${currentMode}...`));
+            if (currentMode === 'dynamic') {
+                 const history = conversation.getMessages(); // Get current history
+                 // Pass user message and history to build dynamic context
+                 contextResult = await this.contextBuilder.buildDynamicContext(userPrompt, history);
+            } else {
+                 // Use standard context building for 'full' or 'analysis_cache' modes
+                 // buildContext() internally checks mode again and fetches appropriate context
+                 contextResult = await this.contextBuilder.buildContext();
+            }
+            // --- End Context Building Strategy ---
 
             // Determine if flash model should be used (e.g., based on config or logic)
             // For now, defaulting to false (use primary model) for standard chat.
             const useFlashModel = false; // Example: could check config later
 
             // Use the injected aiClient instance
-            await this.aiClient.getResponseFromAI(
+             await this.aiClient.getResponseFromAI( // Pass the fetched context
                 conversation,
                 conversationFilePath,
-                currentContextString,
+                contextResult.context, // Pass the potentially dynamic context string
                 useFlashModel
             );
             // AIClient internally adds the assistant response to the conversation object
@@ -227,8 +242,15 @@ export class ConversationManager {
         } catch (aiError) {
             console.error(chalk.red("Error during AI interaction:"), aiError);
             // Add specific error message to conversation for user feedback
-            const errorMessage = `[System Error during AI request: ${(aiError as Error).message}. You can try again or exit.]`;
-            conversation.addMessage('system', errorMessage);
+            // Check if the error originated during context building
+             if (aiError instanceof Error && (aiError.message.includes('Cannot build context') || aiError.message.includes('Error during AI relevance check') || aiError.message.includes('User query is required for'))) {
+                 // Error likely from context building, log that specifically
+                 conversation.addMessage('system', `[System Error building context for AI request: ${(aiError as Error).message}. You can try again or exit.]`);
+             } else {
+                  // General AI request error
+                 const errorMessage = `[System Error during AI request: ${(aiError as Error).message}. You can try again or exit.]`;
+                 conversation.addMessage('system', errorMessage);
+             }
             // Log the detailed error to the file (AIClient might already do this, but being explicit here)
             try {
                 await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: `AI Interaction Error: ${(aiError as Error).message}` });
@@ -280,3 +302,5 @@ export class ConversationManager {
         }
     }
 }
+
+export { ConversationManager }; // Ensure class is exported

@@ -146,8 +146,11 @@ async function main() {
         // Provide config to instances that need it
         // Instantiate UI *after* config is ready
         ui = new UserInterface(config); // <-- Assign to declared variable
+        // Instantiate AIClient once
+        const aiClient = new AIClient(config);
         // Instantiate ContextBuilder now that config is ready
-        const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config);
+        // Inject AIClient into ContextBuilder
+        const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config, aiClient); // <-- Pass AIClient
 
         // --- Instantiate Analyzer Service (needed potentially) ---
         analyzerService = new ProjectAnalyzerService(
@@ -155,7 +158,7 @@ async function main() {
             fs,
             commandService,
             gitService,
-            new AIClient(config) // Analyzer needs its own AI client instance for summaries
+            aiClient // <-- Reuse AIClient
         );
         // --- END Analyzer Instantiation ---
 
@@ -197,15 +200,32 @@ async function main() {
                 }
             }
             // Persist the determined mode to config.yaml
-            try {
-                 await config.saveConfig();
-            } catch (saveError) {
-                 console.error(chalk.red(`  ❌ Error: Failed to save determined context mode '${config.context.mode}' to config.yaml.`), saveError);
-                 // Decide if fatal. For now, warn and continue with in-memory setting.
-                 console.warn(chalk.yellow(`  Warning: Proceeding with mode '${config.context.mode}' for this session only.`));
-            }
+             try {
+                  await config.saveConfig();
+             } catch (saveError) {
+                  console.error(chalk.red(`  ❌ Error: Failed to save determined context mode '${config.context.mode}' to config.yaml.`), saveError);
+                  // Decide if fatal. For now, warn and continue with in-memory setting.
+                  console.warn(chalk.yellow(`  Warning: Proceeding with mode '${config.context.mode}' for this session only.`));
+             }
         } else {
-            console.log(chalk.blue(`\n🔧 Context mode already set to '${config.context.mode}'.`));
+             const currentMode = config.context.mode; // Should be 'full', 'analysis_cache', or 'dynamic'
+             console.log(chalk.blue(`\n🔧 Context mode already set to '${currentMode}'.`));
+             // If mode requires cache ('analysis_cache' or 'dynamic'), ensure cache exists
+             if ((currentMode === 'analysis_cache' || currentMode === 'dynamic')) {
+                  const cachePath = path.resolve(projectRoot, config.analysis.cache_file_path);
+                  const cacheExists = await fs.readAnalysisCache(cachePath) !== null;
+                  if (!cacheExists) {
+                       console.error(chalk.red(`  Mode is '${currentMode}', but required Analysis cache (${config.analysis.cache_file_path}) is not found.`));
+                       console.log(chalk.blue(`  Running project analysis now to generate the cache...`));
+                       if (!analyzerService) throw new Error("Analyzer service not initialized.");
+                       await analyzerService.analyzeProject(); // Run analysis
+                       if (await fs.readAnalysisCache(cachePath) === null) {
+                             console.error(chalk.red(`  Analysis finished but failed to create a valid cache file. Mode '${currentMode}' cannot function. Exiting.`));
+                             process.exit(1);
+                       }
+                       console.log(chalk.green(`  Analysis complete. Proceeding in '${currentMode}' mode.`));
+                  }
+             }
         }
         // --- End Initial Context Mode Determination Logic ---
 
@@ -222,12 +242,13 @@ async function main() {
         // --- Instantiate CodeProcessor (pass UI and ContextBuilder) ---
         // Ensure CodeProcessor gets the potentially updated config
         codeProcessor = new CodeProcessor(
-            config,
+            config, // Pass the final config
             fs,
             commandService,
             gitService,
             ui, // Pass the UI instance
-            contextBuilder // Pass the ContextBuilder instance
+            contextBuilder, // Pass the ContextBuilder instance
+            aiClient // Pass the shared AIClient instance
         );
         // --- End CodeProcessor Instantiation ---
 

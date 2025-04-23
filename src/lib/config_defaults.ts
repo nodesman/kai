@@ -19,6 +19,7 @@ project:
 
 # --- Context Mode (Determined automatically on first run if not set) ---
 # The 'context.mode' setting will be added here automatically after the first run.
+# Options: "full", "analysis_cache", "dynamic"
 
 # --- Gemini Configuration ---
 gemini:

@@ -50,4 +50,41 @@ Example Response Structure:
 
 Ensure ALL file paths provided in the input context have a corresponding key in the output "summaries" object. Do NOT include explanations, comments, or any other text outside the single JSON object response.
 `.trim(),
+
+    /**
+     * Prompt for selecting relevant files based on summaries and a query.
+     * Intended for use with a faster model like Gemini Flash.
+     * @param userQuery The current user query or request.
+     * @param historySummary A brief summary of recent conversation history (optional).
+     * @param cacheSummary A formatted string listing files, types, sizes, and summaries from the cache.
+     * @param fileContentTokenBudget The approximate token budget available for loading full file content.
+     * @returns The formatted prompt string.
+     */
+    selectRelevantFilesPrompt: (
+        userQuery: string,
+        historySummary: string | null,
+        cacheSummary: string,
+        fileContentTokenBudget: number
+    ): string => `
+CONTEXT: You are an AI assistant responsible for selecting the most relevant files to include in the context for answering a user's query based on a project analysis summary.
+
+USER QUERY:
+${userQuery}
+
+${historySummary ? `RECENT CONVERSATION SUMMARY:\n${historySummary}\n` : ''}
+PROJECT ANALYSIS SUMMARY:
+${cacheSummary}
+---
+TASK: Analyze the User Query (and Conversation Summary, if provided) in the context of the Project Analysis Summary. Identify the files whose **full content** is most likely needed to address the user's query accurately and completely.
+
+Consider the file summaries, types, and sizes. The total token count of the full content of the files you select should ideally fit within a budget of approximately **${fileContentTokenBudget} tokens**. Prioritize files directly related to the query's entities and actions. Include essential configuration or utility files if relevant. Do not select binary files unless the query specifically asks about them.
+
+Respond ONLY with a list of the selected relative file paths, one path per line. Do NOT include explanations, apologies, greetings, or any other text. If no files seem particularly relevant, respond with "NONE".
+
+Example Response:
+src/controllers/UserController.ts
+src/views/user/profile.html
+src/models/User.ts
+config/routes.ts
+`.trim(),
 };

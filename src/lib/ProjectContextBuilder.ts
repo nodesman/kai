@@ -1,6 +1,7 @@
 // src/lib/ProjectContextBuilder.ts
 import path from 'path';
 import chalk from 'chalk';
+import { AIClient } from './AIClient'; // <-- ADDED: Import AIClient
 import { FileSystem } from './FileSystem';
 import { Config } from './Config';
 import { countTokens } from './utils';
@@ -8,23 +9,26 @@ import { GitService } from './GitService';
 // --- ADDED: Import Analysis Cache Types ---
 // Import ProjectAnalysisCache, AnalysisCacheEntry depends on the M1 or M2 structure being targeted
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
+import { AnalysisPrompts } from './analysis/prompts'; // Import prompts for dynamic context
 
 export class ProjectContextBuilder {
     private fs: FileSystem;
+    private gitService: GitService; // Already injected
+    private aiClient: AIClient; // <-- ADDED: AIClient instance variable
     private projectRoot: string;
-    public config: Config; // Made public or add setter if needed after instantiation in kai.ts
-    private gitService: GitService; // <-- Add GitService instance variable
+    config: Config; // Made public in a previous step? Keep public or use getter.
 
-    // Update constructor to accept GitService
+    // Update constructor to accept AIClient
     constructor(
         fileSystem: FileSystem,
         gitService: GitService, // <-- Add gitService parameter
         projectRoot: string,
-        config: Config
-        // Add any other dependencies like config if needed
+        config: Config,
+        aiClient: AIClient // <-- ADDED: Inject AIClient
     ) {
         this.fs = fileSystem;
         this.gitService = gitService; // <-- Assign injected GitService
+        this.aiClient = aiClient; // <-- Assign injected AIClient
         this.projectRoot = projectRoot;
         this.config = config;
     }
@@ -40,15 +44,20 @@ export class ProjectContextBuilder {
          return this.buildContext(); // Call the new method
      }
 
-
     /**
      * Builds the project context string based on the *final determined* context mode from config.
-     * This expects config.context.mode to be either 'full' or 'analysis_cache'.
+     * This expects config.context.mode to be 'full', 'analysis_cache', or 'dynamic'.
      * It should NOT be called when mode is still undefined.
+     * @param userQuery Optional user query (needed for dynamic mode).
+     * @param history Optional conversation history (needed for dynamic mode).
      * @returns An object containing the context string and its token count.
      * @throws Error if config.context.mode is still undefined or cache is missing when required.
+     * @throws Error if required arguments for dynamic mode are missing.
      */
-    async buildContext(): Promise<{ context: string; tokenCount: number }> {
+    async buildContext(
+        userQuery?: string,
+        history?: any[] // Replace 'any' with your actual Message type
+    ): Promise<{ context: string; tokenCount: number }> {
         const contextMode = this.config.context.mode;
 
         if (contextMode === 'analysis_cache') {
@@ -72,9 +81,16 @@ export class ProjectContextBuilder {
             }
         } else if (contextMode === 'full') {
             return this._buildFullContext();
+        } else if (contextMode === 'dynamic') {
+            if (!userQuery) {
+                 throw new Error("User query is required for 'dynamic' context mode.");
+            }
+            console.log(chalk.blue('\nBuilding dynamic project context...'));
+            // Pass history if available
+            const historySummary = history ? this._summarizeHistory(history) : null;
+            return this.buildDynamicContext(userQuery, historySummary);
         } else {
-            // This should not happen if startup logic works correctly
-            // It means the mode is still undefined when building context.
+             // This should not happen if startup logic works correctly
             throw new Error(`Internal Error: Invalid or undetermined context mode '${contextMode}' encountered during context building. Mode determination failed or was skipped.`);
         }
     }
@@ -165,19 +181,25 @@ export class ProjectContextBuilder {
     private _formatCacheAsContext(cacheData: ProjectAnalysisCache): { context: string; tokenCount: number } {
         // --- M2 Formatting ---
         let contextString = `Project Analysis Overview:\n${cacheData.overallSummary || "(No overall summary provided)"}\n\nFile Details:\n`;
-        const entries = cacheData.entries; // Access the entries array
+        // Filter out entries that shouldn't clutter the context? Or keep all? Keep all for now.
+        const entries = cacheData.entries;
 
         for (const entry of entries) {
             contextString += `\n---\nFile: ${entry.filePath}`;
             // Add type/size info, especially if no summary exists
-            if (entry.type !== 'text_analyze' || entry.summary === null) {
-                 contextString += ` [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB`;
-                 if (entry.loc !== null) contextString += `, LOC: ${entry.loc}`;
-                 contextString += `)`;
+            if (entry.type !== 'text_analyze' && entry.summary === null) { // Show details only if NOT analyzed text
+                  contextString += ` [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB`;
+                  if (entry.loc !== null) contextString += `, LOC: ${entry.loc}`;
+                  contextString += `)`;
             } else if (entry.loc !== null) { // Add LOC for analyzed files too
                  contextString += ` (LOC: ${entry.loc})`;
             }
-            contextString += `\nSummary: ${entry.summary || '(Not summarized)'}\n`;
+            // Only include summary if it exists
+            if (entry.summary) {
+                 contextString += `\nSummary: ${entry.summary}\n`;
+            } else {
+                 contextString += `\nSummary: (Not summarized)\n`; // Indicate it wasn't summarized
+            }
         }
         // --- End M2 formatting ---
 
@@ -187,6 +209,133 @@ export class ProjectContextBuilder {
         return { context: contextString, tokenCount: finalTokenCount };
     }
 
+    /**
+     * Creates a concise string summary of the analysis cache for the relevance check prompt.
+     */
+    private _formatCacheForRelevance(cacheData: ProjectAnalysisCache): string {
+         let summaryString = "Available Files Overview:\n";
+         for (const entry of cacheData.entries) {
+              // Include essential info: path, type, size, and summary if available
+              summaryString += `- ${entry.filePath} [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB)`;
+              if (entry.summary) {
+                   summaryString += ` - Summary: ${entry.summary.substring(0, 100)}${entry.summary.length > 100 ? '...' : ''}`; // Truncate summary
+              }
+              summaryString += "\n";
+         }
+         return summaryString;
+    }
+
+    /**
+     * Builds context dynamically by selecting relevant files based on summaries. (Milestone 3)
+     * @param userQuery The user's current query.
+     * @param historySummary Optional summary of recent conversation history.
+     */
+    async buildDynamicContext(
+        userQuery: string,
+        historySummary: string | null
+    ): Promise<{ context: string; tokenCount: number }> {
+        const cachePath = path.resolve(this.projectRoot, this.config.analysis.cache_file_path);
+        const cacheData = await this.fs.readAnalysisCache(cachePath);
+
+        if (!cacheData || !cacheData.entries || cacheData.entries.length === 0) {
+            console.warn(chalk.yellow("Dynamic mode requires analysis cache, but it's missing or empty. Falling back to empty context."));
+            // Or potentially fall back to _buildFullContext if small enough? For now, empty.
+            return { context: "CONTEXT: Project analysis cache is missing or empty.", tokenCount: 10 };
+        }
+
+        // 1. Calculate budget for file content
+        const maxTotalTokens = this.config.gemini.max_prompt_tokens || 32000;
+        // Estimate base prompt (query, history summary, instructions, separators, etc.) - needs refinement
+        const basePromptEstimate = countTokens(userQuery) + (historySummary ? countTokens(historySummary) : 0) + 500; // Rough estimate for system instructions, formatting etc.
+        const fileContentBudget = maxTotalTokens - basePromptEstimate;
+        if (fileContentBudget <= 0) {
+             console.warn(chalk.yellow(`Warning: Base prompt estimate (${basePromptEstimate}) exceeds max tokens (${maxTotalTokens}). Dynamic context cannot include file content.`));
+             // Return just the query/history/cache summary? Or error? Return cache summary for now.
+              return this._formatCacheAsContext(cacheData); // Fallback to cache summary context
+        }
+        console.log(chalk.dim(`  Dynamic Context: Calculated file content budget: ~${fileContentBudget} tokens.`));
+
+        // 2. Format cache for relevance check
+        const cacheSummaryForPrompt = this._formatCacheForRelevance(cacheData);
+
+        // 3. AI Relevance Check (Call 1 - Flash)
+        const relevancePrompt = AnalysisPrompts.selectRelevantFilesPrompt(userQuery, historySummary, cacheSummaryForPrompt, fileContentBudget);
+        let selectedPaths: string[] = [];
+        try {
+            console.log(chalk.dim(`  Asking AI (Flash) to select relevant files...`));
+            const response = await this.aiClient.getResponseTextFromAI(
+                [{ role: 'user', content: relevancePrompt }],
+                true // Use Flash model
+            );
+            selectedPaths = response.trim().split('\n').map(p => p.trim()).filter(p => p && p !== "NONE"); // Split by newline, trim, filter empty/NONE
+            console.log(chalk.dim(`  AI selected ${selectedPaths.length} potential files:`), selectedPaths);
+        } catch (error) {
+            console.error(chalk.red("  Error during AI relevance check:"), error);
+            // Decide how to proceed: empty context? fallback to cache summary? Fallback for now.
+            console.warn(chalk.yellow("  Falling back to analysis cache context due to relevance check error."));
+             return this._formatCacheAsContext(cacheData);
+        }
+
+        if (selectedPaths.length === 0) {
+             console.log(chalk.yellow("  AI did not select any relevant files. Using analysis cache context."));
+              return this._formatCacheAsContext(cacheData);
+        }
+
+        // 4. Load Full Files & Assemble Final Context (respecting actual token limit)
+        // Start with base prompt elements that MUST be included
+        let finalContext = `User Query: ${userQuery}\n${historySummary ? `History Summary: ${historySummary}\n` : ''}--- Relevant File Context ---\n`;
+        let currentTokenCount = countTokens(finalContext);
+        const includedFiles: string[] = [];
+
+        for (const filePath of selectedPaths) {
+            // Validate the path from AI before resolving
+            const normalizedPath = path.normalize(filePath).replace(/\\/g, '/'); // Normalize separators
+            if (!normalizedPath || normalizedPath.startsWith('..')) {
+                 console.warn(chalk.yellow(`    Skipping invalid/suspicious path from AI: ${filePath}`));
+                 continue;
+            }
+
+            const absolutePath = path.resolve(this.projectRoot, normalizedPath);
+            const content = await this.fs.readFile(absolutePath);
+            if (content === null) {
+                 console.warn(chalk.yellow(`    Skipping selected file (not found/readable): ${normalizedPath}`));
+                 continue;
+            }
+            const fileBlock = `\n---\nFile: ${normalizedPath}\n\`\`\`\n${content}\n\`\`\`\n`;
+            const blockTokens = countTokens(fileBlock);
+
+            // Check if adding this file exceeds the *absolute* limit
+            if ((currentTokenCount + blockTokens) > maxTotalTokens) {
+                console.warn(chalk.yellow(`    Skipping selected file (exceeds total token limit): ${normalizedPath}`));
+                // Potentially break here if files are ordered by relevance, or continue to try smaller files? Continue for now.
+                continue;
+            }
+
+            finalContext += fileBlock;
+            currentTokenCount += blockTokens;
+            includedFiles.push(normalizedPath);
+            console.log(chalk.dim(`    Included file content: ${normalizedPath} (${blockTokens} tokens). Total: ${currentTokenCount}`));
+        }
+
+        console.log(chalk.blue(`Dynamic context built with ${includedFiles.length} full files. Final token count: ${currentTokenCount}`));
+        return { context: finalContext, tokenCount: currentTokenCount };
+    }
+
+     /** Creates a simple summary of conversation history (implement based on Message type) */
+     private _summarizeHistory(history: any[]): string | null {
+          // Placeholder: Implement actual history summarization based on your Message structure
+          if (!history || history.length === 0) return null;
+          const recentMessages = history.slice(-4); // Take last 4 messages? Needs tuning.
+          let summary = "Recent conversation highlights:\n";
+          recentMessages.forEach((msg: any) => { // Use 'any' or your Message type
+               // Ensure msg.content exists and is a string before using substring
+               const contentPreview = typeof msg.content === 'string'
+                    ? `${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+                    : '[Non-text content]';
+               summary += `  ${msg.role}: ${contentPreview}\n`;
+          });
+          return summary;
+     }
 
     /**
      * Optimizes whitespace in a code string.
