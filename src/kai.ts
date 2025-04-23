@@ -382,7 +382,7 @@ async function main() {
              console.log(chalk.cyan(`\nChanging context mode to '${newMode}'...`));
              config.context.mode = newMode; // Update in-memory config
              await config.saveConfig(); // Persist the change
-             console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.configFilePath}.`)); // Use configFilePath property
+             console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
 
         } else if (mode === 'Analyze Project (Update Cache)') { // Kept existing mode handling
              // --- Call the Analyzer Service ---

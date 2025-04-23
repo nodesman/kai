@@ -245,6 +245,13 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             throw new Error(`Failed to save updated configuration: ${(error as Error).message}`);
         }
     }
+
+    /**
+     * Gets the resolved absolute path to the configuration file.
+     */
+    public getConfigFilePath(): string {
+        return this.configFilePath;
+    }
 }
 
 // Export the class implementation as 'Config'
