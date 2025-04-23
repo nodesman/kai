@@ -88,7 +88,8 @@ export class ProjectContextBuilder {
             }
             console.log(chalk.blue('\nBuilding dynamic project context...'));
             // Pass the already summarized history
-            return this.buildDynamicContext(userQuery, historySummary);
+             // Ensure we pass string | null, not undefined, using nullish coalescing on the parameter
+             return this.buildDynamicContext(userQuery, historySummary ?? null);
         } else {
              // This should not happen if startup logic works correctly
             throw new Error(`Internal Error: Invalid or undetermined context mode '${contextMode}' encountered during context building. Mode determination failed or was skipped.`);
