@@ -6,7 +6,8 @@ import { DEFAULT_CONFIG_YAML } from './lib/config_defaults'; // Keep config defa
 import path from 'path';
 import inquirer from 'inquirer';
 import { Config } from './lib/Config';
-import { UserInterface, UserInteractionResult } from './lib/UserInterface'; // <-- Ensure this is imported
+// Ensure UserInteractionResult and any new specific result types are imported
+import { UserInterface, UserInteractionResult, ChangeModeInteractionResult } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
 import { CommandService } from './lib/CommandService';
@@ -362,17 +363,40 @@ async function main() {
             console.log(chalk.blue(`\nDeletion Summary: ${successCount} completed (files deleted/skipped), ${failCount} failed (unexpected errors).`));
             // --- End Delete Logic ---
 
-        } else if (mode === 'Analyze Project (Update Cache)') { // Added new mode handling
+        } else if (mode === 'Re-run Project Analysis') {
+             // --- Call the Analyzer Service ---
+             if (!analyzerService) {
+                  console.error(chalk.red("Internal Error: Analyzer service not initialized."));
+                  throw new Error("Analyzer service is required for this mode.");
+             }
+             console.log(chalk.cyan("\nManually re-running project analysis..."));
+             await analyzerService.analyzeProject(); // Call analysis
+             console.log(chalk.cyan("Analysis complete."));
+             // --- End Analyzer Call ---
+
+        } else if (mode === 'Change Context Mode') {
+             // --- Update Config and Save ---
+             if (!config) throw new Error("Config not initialized."); // Guard
+             const changeModeResult = interactionResult as ChangeModeInteractionResult;
+             const { newMode } = changeModeResult;
+             console.log(chalk.cyan(`\nChanging context mode to '${newMode}'...`));
+             config.context.mode = newMode; // Update in-memory config
+             await config.saveConfig(); // Persist the change
+             console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.configFilePath}.`)); // Use configFilePath property
+
+        } else if (mode === 'Analyze Project (Update Cache)') { // Kept existing mode handling
              // --- Call the Analyzer Service ---
              if (!analyzerService) { // Should have been initialized above
                   console.error(chalk.red("Internal Error: Analyzer service not initialized."));
                   throw new Error("Analyzer service is required for this mode.");
              }
-             await analyzerService.analyzeProject(); // Call the simple M1 analysis
+             console.log(chalk.cyan("\nManually updating analysis cache...")); // Message adjusted slightly
+             await analyzerService.analyzeProject(); // Call the simple analysis
+             console.log(chalk.cyan("Analysis cache update complete."));
              // --- End Analyzer Call ---
 
         } else {
-            console.log(chalk.yellow(`Unknown mode selected. Exiting.`));
+            console.log(chalk.yellow(`Unknown mode selected: ${mode}. Exiting.`));
         }
 
     } catch (error) {

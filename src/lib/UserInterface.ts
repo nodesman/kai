@@ -14,7 +14,11 @@ const HISTORY_SEPARATOR = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
 
 // Define the expected return type for getUserInteraction
 interface UserInteractionResultBase {
-    mode: 'Start/Continue Conversation' | 'Consolidate Changes...';
+    mode:
+        | 'Start/Continue Conversation'
+        | 'Consolidate Changes...'
+        | 'Re-run Project Analysis' // Added Re-run option
+        | 'Change Context Mode'; // Added Change Mode option
     conversationName: string | null; // Used for conversation ops
     isNewConversation: boolean; // Relevant only for Start/Continue
     selectedModel: string;
@@ -25,6 +29,12 @@ interface DeleteInteractionResult {
     conversationNamesToDelete: string[]; // Array of names to delete
 }
 
+// Added specific result type for changing mode
+interface ChangeModeInteractionResult {
+    mode: 'Change Context Mode';
+    newMode: 'full' | 'analysis_cache'; // The mode the user wants to switch to
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -32,7 +42,8 @@ interface FallbackError {
     args: string[];
 }
 
-type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult;
+// Combined result types
+type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult | ChangeModeInteractionResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -137,7 +148,7 @@ class UserInterface {
         return promptTrimmed ? promptTrimmed : null;
     }
 
-    // --- getPromptViaSublimeLoop (MODIFIED FOR IDE DETECTION) ---
+    // --- getPromptViaSublimeLoop (Unchanged from provided context) ---
     async getPromptViaSublimeLoop(
         conversationName: string,
         currentMessages: Message[],
@@ -278,7 +289,7 @@ class UserInterface {
         return { newPrompt: newPrompt, conversationFilePath, editorFilePath };
     }
 
-    // --- getUserInteraction (Unchanged) ---
+    // --- getUserInteraction (MODIFIED) ---
     async getUserInteraction(): Promise<UserInteractionResult | null> {
         try {
             const { mode } = await inquirer.prompt<{ mode: UserInteractionResult['mode'] }>([
@@ -289,6 +300,9 @@ class UserInterface {
                     choices: [
                         'Start/Continue Conversation',
                         'Consolidate Changes...',
+                        'Re-run Project Analysis', // <-- ADDED Re-run option
+                        'Change Context Mode', // <-- ADDED Change Mode option
+                        // 'Analyze Project (Update Cache)', // <-- REMOVED old option
                         'Delete Conversation...',
                     ],
                 },
@@ -338,6 +352,34 @@ class UserInterface {
                 }
             }
 
+            // --- Handle Re-run Project Analysis Mode ---
+            if (mode === 'Re-run Project Analysis') {
+                // No conversation name or model needed for analysis
+                return { mode, conversationName: null, isNewConversation: false, selectedModel: '' }; // Return minimal info
+            }
+
+            // --- Handle Change Context Mode ---
+             if (mode === 'Change Context Mode') {
+                 const currentMode = this.config.context.mode || 'Undetermined'; // Get current mode
+                 const { newModeChoice } = await inquirer.prompt([
+                     {
+                         type: 'list',
+                         name: 'newModeChoice',
+                         message: `Current context mode is '${currentMode}'. Select the new mode:`,
+                         choices: [
+                             { name: 'Full Codebase (reads all files)', value: 'full' },
+                             { name: 'Analysis Cache (uses summaries)', value: 'analysis_cache' },
+                         ],
+                     },
+                 ]);
+                 // Return specific result type for changing mode
+                 return {
+                     mode: 'Change Context Mode',
+                     newMode: newModeChoice as 'full' | 'analysis_cache',
+                 };
+             }
+
+            // --- Remaining modes require Model selection ---
             let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25";
             const { modelChoice } = await inquirer.prompt([
                 {
@@ -353,6 +395,7 @@ class UserInterface {
             ]);
             selectedModel = modelChoice;
 
+            // --- Remaining modes require Conversation Selection ---
             let conversationDetails: { name: string; isNew: boolean } | null = null;
             let conversationName: string | null = null;
             let isNewConversation = false;
@@ -407,4 +450,4 @@ class UserInterface {
     }
 }
 
-export { UserInterface, UserInteractionResult };
+export { UserInterface, UserInteractionResult, ChangeModeInteractionResult }; // Export new type
