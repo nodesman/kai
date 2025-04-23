@@ -6,7 +6,7 @@ import ignore, { Ignore } from 'ignore'; // Import ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
 
 // --- ADDED: Import Analysis Cache Types ---
-// Import M1 structure
+// Import M2 structure
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 
 // Define items typically ignored when checking for "emptiness"
@@ -195,7 +195,28 @@ class FileSystem {
         const ext = path.extname(filePath).toLowerCase();
         const base = path.basename(filePath);
         // Added '.' check for dotfiles without extensions that might be text (like .env, .gitignore)
-        return textExtensions.includes(ext) || ['Dockerfile', 'Makefile', 'README'].includes(base) || (base.startsWith('.') && !ext);
+        // Check for binary types by content sniffing (basic)
+        try {
+            const buffer = Buffer.alloc(512);
+            const fd = await fsPromises.open(filePath, 'r');
+            const { bytesRead } = await fd.read(buffer, 0, 512, 0);
+            await fd.close();
+            if (bytesRead === 0) return true; // Empty file is considered text
+
+            // Check for common null bytes or control characters often found in binary files
+            for (let i = 0; i < bytesRead; i++) {
+                if (buffer[i] === 0) return false; // Null byte likely indicates binary
+            }
+
+            // If it has a known text extension OR passes the binary check, consider it text
+            return textExtensions.includes(ext) || ['Dockerfile', 'Makefile', 'README'].includes(base) || (base.startsWith('.') && !ext) || true; // Default to text if no binary indicators found
+
+        } catch (error) {
+            // If we can't read the file (e.g., permissions), default to assuming text for safety,
+            // but log the error. The analysis phase might reclassify it later.
+            console.warn(chalk.yellow(`Warning: Could not read start of file ${filePath} for text check. Assuming text. Error: ${(error as Error).message}`));
+            return true;
+        }
     }
     // --- End project file reading methods ---
 
@@ -260,7 +281,7 @@ class FileSystem {
     }
     // --- END JSONL/Directory methods ---
 
-    // --- ADDED: Analysis Cache Methods (Milestone 1 - Array Structure) ---
+    // --- ADDED: Analysis Cache Methods (Milestone 2 - Object Structure) ---
 
     /**
      * Reads the project analysis cache file (expects M2 structure: { overallSummary, entries }).

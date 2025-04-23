@@ -15,7 +15,7 @@ import { countTokens } from '../utils'; // Needed if we add token limits later
 // Keep thresholds for classifying large files
 const LARGE_FILE_SIZE_THRESHOLD_BYTES = 100 * 1024; // 100 KB
 const LARGE_FILE_LOC_THRESHOLD = 5000; // 5000 lines
-const MAX_FILE_SIZE_FOR_BATCH_BYTES = 150 * 1024; // Max individual file size to include in batching (150KB)
+const MAX_FILE_SIZE_FOR_BATCH_BYTES = 150 * 1024; // Max individual file size to include in batching (150KB) - Used in Phase 2
 const BATCH_TOKEN_TARGET_PERCENTAGE = 0.75; // Target 75% of max prompt tokens for safety buffer
 
 
@@ -182,7 +182,7 @@ export class ProjectAnalyzerService {
         };
     }
 
-    /** Phase 2: Generates summaries for files marked as 'text_analyze' using BATCHING. */
+    /** Phase 2: Generates summaries for files marked as 'text_analyze' using BATCHING. Updates summaries in allEntries. */
     private async _runSummaryGeneration(
         filesToSummarize: AnalysisCacheEntry[],
         allEntries: AnalysisCacheEntry[] // Pass the main list to update
@@ -208,9 +208,16 @@ export class ProjectAnalyzerService {
             const fileInfo = filesToSummarize[i];
 
             // Re-check size here just before adding (though already filtered in phase 1)
+            // This check is specifically for the *batching* phase, files classified 'large' won't even be in filesToSummarize
             if (fileInfo.size > MAX_FILE_SIZE_FOR_BATCH_BYTES) {
-                 console.log(chalk.grey(`    Skipping large file from batching phase: ${fileInfo.filePath}`));
-                 continue; // Skip if somehow a large file got here
+                 console.log(chalk.grey(`    Skipping file from batching phase (exceeds batch file size limit): ${fileInfo.filePath}`));
+                 // Find the entry in the main list and mark it if not already marked
+                 const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+                 if (entryIndex !== -1 && allEntries[entryIndex].summary === null) {
+                     allEntries[entryIndex].summary = "[Skipped in batching phase: File size too large]";
+                 }
+                 errorCount++; // Count this as an error/skip for summary generation
+                 continue;
             }
 
             const estimatedFileTokens = fileInfo.size * SIZE_TO_TOKEN_RATIO; // Rough estimate for checking limit
@@ -240,6 +247,11 @@ export class ProjectAnalyzerService {
                 const content = await this.fsUtil.readFile(absolutePath);
                 if (content === null) {
                      console.warn(chalk.yellow(`    Warning: Could not read file ${fileInfo.filePath} when adding to batch. Skipping.`));
+                     // Find the entry in the main list and mark it
+                     const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+                     if (entryIndex !== -1 && allEntries[entryIndex].summary === null) {
+                         allEntries[entryIndex].summary = "[Skipped in batching phase: Read error]";
+                     }
                      errorCount++;
                      continue;
                 }
@@ -259,6 +271,18 @@ export class ProjectAnalyzerService {
                      currentBatchTokenEstimate = BASE_PROMPT_TOKEN_ESTIMATE;
                 }
 
+                // Check if *this single file* exceeds the limit (after potentially processing a previous batch)
+                if (BASE_PROMPT_TOKEN_ESTIMATE + actualFileBlockTokens > maxBatchTokens) {
+                    console.warn(chalk.yellow(`    Skipping file from batching phase (single file exceeds token limit): ${fileInfo.filePath}`));
+                    const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+                     if (entryIndex !== -1 && allEntries[entryIndex].summary === null) {
+                         allEntries[entryIndex].summary = "[Skipped in batching phase: Single file too large for batch tokens]";
+                     }
+                    errorCount++;
+                    continue; // Skip this file entirely from batching
+                }
+
+
                 currentBatchFiles.push(fileInfo);
                 currentBatchContent += fileBlock;
                 currentBatchTokenEstimate += actualFileBlockTokens; // Update estimate accurately
@@ -266,6 +290,11 @@ export class ProjectAnalyzerService {
 
             } catch (readError) {
                  console.warn(chalk.yellow(`    Warning: Error reading file ${fileInfo.filePath} for batching. Skipping. Error: ${(readError as Error).message}`));
+                 // Find the entry in the main list and mark it
+                 const entryIndex = allEntries.findIndex(e => e.filePath === fileInfo.filePath);
+                 if (entryIndex !== -1 && allEntries[entryIndex].summary === null) {
+                     allEntries[entryIndex].summary = "[Skipped in batching phase: Read error]";
+                 }
                  errorCount++;
             }
         } // End for loop iterating through filesToSummarize
@@ -400,9 +429,13 @@ export class ProjectAnalyzerService {
 
         // Check if 'phind' exists
         try {
-            await this.commandService.run('command -v phind', { cwd: this.projectRoot }); // Simple POSIX check
+            // Using a simple shell check that works on Linux/macOS/Git Bash
+            await this.commandService.run('command -v phind >/dev/null 2>&1', { cwd: this.projectRoot, shell: true });
             commandName = 'phind';
-            commandToRun = 'phind .';
+            // Use options to exclude ignored files and limit output like 'find'
+            // phind options: -0 null terminate, --no-config, --no-ignore (we apply ignore later), -tf list only files
+            // Let's try without --no-ignore first to see if it respects .gitignore well enough
+            commandToRun = 'phind --no-config -tf .';
             console.log(chalk.dim(`    Found 'phind' command. Using it to list files.`));
         } catch (error) {
             // Assuming error means 'phind' is not found or check failed
@@ -422,16 +455,19 @@ export class ProjectAnalyzerService {
             throw new Error(`Failed to list project files using command: ${commandToRun}.`);
         }
 
-        // --- Filter using .gitignore ---
+        // --- Filter using .gitignore and .kaiignore (handled by GitService/FileSystem) ---
         console.log(chalk.dim(`    Filtering ${rawFileList.length} raw files using ignore rules...`));
-        const ignoreRules = await this.gitService.getIgnoreRules(this.projectRoot);
+        const ignoreRules = await this.gitService.getCombinedIgnoreRules(this.projectRoot); // Use combined rules
+
         const filteredList = rawFileList.filter(rawPath => {
-            const normalizedPath = path.normalize(rawPath).replace(/^[./\\]+/, ''); // Normalize for ignore check
+            // Normalize path for consistency (remove leading ./, use POSIX separators)
+            const normalizedPath = path.normalize(rawPath).replace(/^[./\\]+/, '').replace(/\\/g, '/');
             // Ensure the path is not empty after normalization and is not ignored
             return normalizedPath && !ignoreRules.ignores(normalizedPath);
         });
+
         console.log(chalk.dim(`    Filtered list size: ${filteredList.length}`));
-        return filteredList;
+        return filteredList.map(p => p.replace(/^[./\\]+/, '').replace(/\\/g, '/')); // Return clean relative paths
         // --- End Filter ---
     }
 
