@@ -432,16 +432,15 @@ export class ProjectAnalyzerService {
             // Using a simple shell check that works on Linux/macOS/Git Bash
             await this.commandService.run('command -v phind', { cwd: this.projectRoot }); // Removed unnecessary shell: true
             commandName = 'phind';
-            // Use options to exclude ignored files and limit output like 'find'
-            // phind options: -0 null terminate, --no-config, --no-ignore (we apply ignore later), -tf list only files
-            // Let's try without --no-ignore first to see if it respects .gitignore well enough
-            commandToRun = 'phind --no-config -tf .';
-            console.log(chalk.dim(`    Found 'phind' command. Using it to list files.`));
+            // phind correct usage: -t f . (type file, in current directory)
+            commandToRun = 'phind -t f .'; // CORRECTED phind command
+            console.log(chalk.dim(`    Found 'phind' command. Using it to list files: ${commandToRun}`));
         } catch (error) {
             // Assuming error means 'phind' is not found or check failed
             commandName = 'find';
             commandToRun = 'find . -type f'; // Stick to -type f to help exclude directories
-            console.log(chalk.dim(`    'phind' not found or check failed. Falling back to '${commandName}'.`));
+            console.log(chalk.dim(`    'phind' not found or check failed. Falling back to '${commandName}': ${commandToRun}`));
+            // REMOVED redundant re-check logic
         }
 
         // Execute the chosen command
