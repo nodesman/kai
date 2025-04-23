@@ -1,8 +1,12 @@
 // File: src/lib/FileSystem.ts
-import fs from 'fs/promises'; // Ensure using promises
+import fs, { Stats } from 'fs/promises'; // Ensure using promises, import Stats type
 import path from 'path';
 import ignore, { Ignore } from 'ignore'; // Import Ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
+
+// --- ADDED: Import Analysis Cache Types ---
+// Import both types for clarity, although only AnalysisCacheEntry[] is used in M1 cache file
+import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 
 // Define items typically ignored when checking for "emptiness"
 const SAFE_TO_IGNORE_FOR_EMPTY_CHECK = new Set([
@@ -44,6 +48,21 @@ class FileSystem {
             }
             console.error(chalk.red(`Error reading file ${filePath}:`), error);
             throw error; // Rethrow other errors
+        }
+    }
+
+    /**
+     * Gets file status information.
+     * @param filePath The path to the file.
+     * @returns A promise resolving to the Stats object, or null if the file doesn't exist.
+     */
+    async stat(filePath: string): Promise<Stats | null> {
+        try {
+            return await fs.stat(filePath);
+        } catch (error) {
+             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+             console.error(chalk.red(`Error getting stats for file ${filePath}:`), error);
+             throw error; // Rethrow other errors
         }
     }
     // --- End common FS methods ---
@@ -242,6 +261,52 @@ class FileSystem {
         }
     }
     // --- END JSONL/Directory methods ---
+
+    // --- ADDED: Analysis Cache Methods (Milestone 1 - Simple Array) ---
+
+    /**
+     * Reads the project analysis cache file (expects simple array for M1).
+     * @param cachePath The absolute path to the cache file.
+     * @returns The parsed cache data (AnalysisCacheEntry[]), or null if the file doesn't exist or is invalid.
+     */
+    async readAnalysisCache(cachePath: string): Promise<ProjectAnalysisCache | null> {
+        console.log(chalk.dim(`Attempting to read analysis cache: ${cachePath}`));
+        try {
+            const content = await this.readFile(cachePath);
+            if (content === null) {
+                console.log(chalk.dim(`Analysis cache file not found.`));
+                return null;
+            }
+            const data: unknown = JSON.parse(content); // Parse as unknown first
+
+            // --- Validation: Check for simple array structure ---
+            if (!Array.isArray(data)) {
+                console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} is not a valid JSON array (Milestone 1 expects AnalysisCacheEntry[]). Ignoring.`));
+                return null;
+            }
+
+            // Optional: Add more detailed validation of array elements if needed later
+            console.log(chalk.dim(`Successfully read and parsed analysis cache (${data.length} entries).`));
+            return data as ProjectAnalysisCache; // Type assertion to AnalysisCacheEntry[]
+
+        } catch (error) {
+            console.error(chalk.red(`Error reading or parsing analysis cache file ${cachePath}:`), error);
+            return null;
+        }
+    }
+
+    /**
+     * Writes the project analysis data (simple array for M1) to the cache file.
+     * @param cachePath The absolute path to the cache file.
+     * @param cacheData The analysis data (AnalysisCacheEntry[]) to write.
+     */
+    async writeAnalysisCache(cachePath: string, cacheData: ProjectAnalysisCache): Promise<void> {
+        console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.length} entries)`));
+        const content = JSON.stringify(cacheData, null, 2); // Pretty-print JSON
+        await this.writeFile(cachePath, content);
+        console.log(chalk.dim(`Successfully wrote analysis cache.`));
+    }
+    // --- END Analysis Cache Methods ---
 }
 
 export { FileSystem };

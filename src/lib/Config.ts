@@ -1,10 +1,11 @@
 // File: src/lib/Config.ts
-import fs from 'fs'; // Use synchronous fs for config loading
+import * as fsSync from 'fs'; // Use synchronous fs for config loading/saving
 import path from 'path';
 import yaml from 'js-yaml';
 import chalk from 'chalk';
 
 // --- Interfaces ---
+
 interface GeminiRateLimitConfig {
     requests_per_minute?: number;
 }
@@ -26,18 +27,32 @@ interface GeminiConfig {
 }
 
 // *** REMOVED hidden prompt fields ***
+
 interface ProjectConfig {
     root_dir?: string;
     prompts_dir?: string;
     prompt_template?: string;
     chats_dir?: string; // Directory for conversation logs
 }
-// *** END REMOVAL ***
+
+// *** ADDED: Analysis Config Interface ***
+interface AnalysisConfig {
+    cache_file_path?: string;
+    phind_command?: string; // Command to list files
+}
+
+// *** ADDED: Context Config Interface ***
+interface ContextConfig {
+    mode?: 'full' | 'analysis_cache'; // Mode is either explicitly set or undefined (needs determination)
+}
+
 
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: GeminiConfig;
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
+    analysis: Required<AnalysisConfig>; // Add analysis section
+    context: ContextConfig; // Add context section (mode is optional)
     chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
@@ -45,27 +60,36 @@ interface IConfig { // Renamed to IConfig to avoid conflict with Config class na
 // *** REMOVED hidden prompt fields ***
 type YamlConfigData = {
     gemini?: Partial<GeminiConfig>;
-    project?: Partial<ProjectConfig>; // No longer includes optional hidden prompts
+    project?: Partial<ProjectConfig>;
+    analysis?: Partial<AnalysisConfig>; // Added analysis
+    context?: Partial<ContextConfig>; // Added context
 };
 // *** END REMOVAL ***
 
+
 // --- Config Class ---
 // Renamed class to avoid conflict with IConfig interface
-class ConfigLoader implements IConfig {
+class ConfigLoader /* implements IConfig */ { // Let TS infer implementation details
     gemini: GeminiConfig;
     project: Required<ProjectConfig>; // Use Required utility type
+    analysis: Required<AnalysisConfig>; // Add analysis property
+    context: ContextConfig; // Add context property (mode is optional until resolved)
     chatsDir: string; // Absolute path
+    private configFilePath: string; // Store path for saving
 
     constructor() {
+        this.configFilePath = path.resolve(process.cwd(), 'config.yaml'); // Store path
         const loadedConfig = this.loadConfig();
         this.gemini = loadedConfig.gemini;
         this.project = loadedConfig.project;
+        this.analysis = loadedConfig.analysis; // Assign loaded analysis config
+        // 'context' is loaded as potentially undefined here
+        this.context = loadedConfig.context;   // Assign loaded context config
         this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 
     private loadConfig(): IConfig {
         const configPath = path.resolve(process.cwd(), 'config.yaml');
-        // REMOVED: const projectRoot = process.cwd(); (Not needed for prompt paths anymore)
         let yamlConfig: YamlConfigData = {};
 
         // 1. Load API Key from Environment Variable
@@ -79,8 +103,8 @@ class ConfigLoader implements IConfig {
         // 2. Load config.yaml
         try {
             // Use synchronous existsSync for initial check during config load
-            if (fs.existsSync(configPath)) {
-                const fileContents = fs.readFileSync(configPath, 'utf8');
+            if (fsSync.existsSync(configPath)) {
+                const fileContents = fsSync.readFileSync(configPath, 'utf8');
                 const loadedYaml = yaml.load(fileContents);
                 if (loadedYaml && typeof loadedYaml === 'object') {
                     yamlConfig = loadedYaml as YamlConfigData;
@@ -124,7 +148,22 @@ class ConfigLoader implements IConfig {
             prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
             chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Using the updated default
         };
-        // *** END REMOVAL ***
+
+        // *** ADDED: Default and Loading for Analysis Config ***
+        const finalAnalysisConfig: Required<AnalysisConfig> = {
+            cache_file_path: yamlConfig.analysis?.cache_file_path || ".kai/project_analysis.json",
+            phind_command: yamlConfig.analysis?.phind_command || "find . -type f" // Default to find for now
+        };
+
+        // *** ADDED: Default and Loading for Context Config ***
+        const finalContextConfig: ContextConfig = {
+            // Default to undefined if not explicitly 'full' or 'analysis_cache'
+            // This signals the need for first-run determination
+            mode: ['full', 'analysis_cache'].includes(yamlConfig.context?.mode ?? '')
+                  ? yamlConfig.context!.mode! as 'full' | 'analysis_cache' // Use validated value if present
+                  : undefined // Default to undefined signal
+        };
+        // *** END ADDED ***
 
         // Calculate absolute chats directory path (DO NOT CREATE IT HERE)
         const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
@@ -136,12 +175,86 @@ class ConfigLoader implements IConfig {
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
+            analysis: finalAnalysisConfig, // Return loaded analysis config
+            context: finalContextConfig,   // Return loaded context config
             chatsDir: absoluteChatsDir // Return the calculated path
         };
+    }
+
+    /**
+     * Saves the current configuration state back to config.yaml.
+     * Note: This will overwrite the existing file and might lose comments.
+     * The context mode will be either 'full' or 'analysis_cache' after determination.
+     */
+    async saveConfig(): Promise<void> {
+        console.log(chalk.dim(`Attempting to save configuration to ${this.configFilePath}...`));
+        // Construct the object to be saved from the current instance state
+        // Omit calculated fields like chatsDir and environment variables like api_key
+        const configToSave: YamlConfigData = {
+            project: {
+                root_dir: this.project.root_dir,
+                prompts_dir: this.project.prompts_dir,
+                prompt_template: this.project.prompt_template,
+                chats_dir: this.project.chats_dir, // Save the relative path
+            },
+            analysis: {
+                cache_file_path: this.analysis.cache_file_path,
+                phind_command: this.analysis.phind_command,
+            },
+            context: {
+                // Save the mode if it's defined (will be 'full' or 'analysis_cache' after determination)
+                mode: this.context.mode,
+            },
+            gemini: { // Only save non-sensitive, configurable Gemini settings
+                model_name: this.gemini.model_name,
+                subsequent_chat_model_name: this.gemini.subsequent_chat_model_name,
+                max_output_tokens: this.gemini.max_output_tokens,
+                max_prompt_tokens: this.gemini.max_prompt_tokens,
+                rate_limit: this.gemini.rate_limit,
+                generation_max_retries: this.gemini.generation_max_retries,
+                generation_retry_base_delay_ms: this.gemini.generation_retry_base_delay_ms,
+                interactive_prompt_review: this.gemini.interactive_prompt_review,
+            },
+        };
+
+        try {
+            // Convert the object to YAML string
+            // Filter out keys with undefined values before dumping
+            const filteredConfig = Object.entries(configToSave).reduce((acc, [key, value]) => {
+                if (value !== undefined && typeof value === 'object' && value !== null) {
+                    const filteredSubObject = Object.entries(value).reduce((subAcc, [subKey, subValue]) => {
+                         if (subValue !== undefined) {
+                              // @ts-ignore // Allow dynamic assignment
+                              subAcc[subKey] = subValue;
+                         }
+                         return subAcc;
+                    }, {} as Record<string, any>);
+                    // Only include sub-object if it has keys after filtering
+                    if (Object.keys(filteredSubObject).length > 0) {
+                         // @ts-ignore // Allow dynamic assignment
+                         acc[key] = filteredSubObject;
+                    }
+                } else if (value !== undefined) {
+                    // @ts-ignore // Allow dynamic assignment
+                    acc[key] = value;
+                }
+                return acc;
+            }, {} as Record<string, any>);
+
+
+            const yamlString = yaml.dump(filteredConfig, { indent: 2, skipInvalid: true });
+            // Use synchronous write for simplicity during this critical update phase
+            fsSync.writeFileSync(this.configFilePath, yamlString, 'utf8');
+            console.log(chalk.green(`Configuration successfully saved to ${this.configFilePath}.`));
+        } catch (error) {
+            console.error(chalk.red(`Error saving configuration to ${this.configFilePath}:`), error);
+            // Decide if this should be fatal or just a warning
+            throw new Error(`Failed to save updated configuration: ${(error as Error).message}`);
+        }
     }
 }
 
 // Export the class implementation as 'Config'
 export { ConfigLoader as Config };
 // Export the interface type separately if needed for type hinting elsewhere
-export type { IConfig, GeminiConfig, ProjectConfig };
+export type { IConfig, GeminiConfig, ProjectConfig, AnalysisConfig, ContextConfig };
