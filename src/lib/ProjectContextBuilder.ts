@@ -55,7 +55,8 @@ export class ProjectContextBuilder {
             const cachePath = path.resolve(this.projectRoot, this.config.analysis.cache_file_path);
             const cacheData = await this.fs.readAnalysisCache(cachePath);
 
-            if (cacheData && cacheData.length > 0) {
+            // --- M2: Updated check for new cache structure ---
+            if (cacheData && cacheData.entries && cacheData.entries.length > 0) {
                 return this._formatCacheAsContext(cacheData);
             } else {
                 // If mode is explicitly 'analysis_cache' but cache is missing/empty, it's an error state.
@@ -155,19 +156,28 @@ export class ProjectContextBuilder {
         return totalTokenCount;
     }
 
-    /** Formats the loaded analysis cache data (simple array for M1) into a context string. */
+    /** Formats the loaded analysis cache data (object structure for M2) into a context string. */
     private _formatCacheAsContext(cacheData: ProjectAnalysisCache): { context: string; tokenCount: number } {
-        // --- Format the simple array ---
-        let contextString = "Project Analysis Summary:\n";
-        // Ensure cacheData is treated as AnalysisCacheEntry[]
-        const entries = cacheData as AnalysisCacheEntry[];
+        // --- Format the M2 structure ---
+        let contextString = `Project Analysis Overview:\n${cacheData.overallSummary || "(No overall summary provided)"}\n\nFile Details:\n`;
+        // Access the 'entries' array from the ProjectAnalysisCache object
+        const entries = cacheData.entries; // Access the entries array
         for (const entry of entries) {
-            contextString += `\n---\nFile: ${entry.filePath} (LOC: ${entry.loc})\nSummary: ${entry.summary}\n`;
+            contextString += `\n---\nFile: ${entry.filePath}`;
+            // Add type/size info, especially if no summary exists
+            if (entry.type !== 'text_analyze' || entry.summary === null) {
+                 contextString += ` [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB`;
+                 if (entry.loc !== null) contextString += `, LOC: ${entry.loc}`;
+                 contextString += `)`;
+            } else if (entry.loc !== null) { // Add LOC for analyzed files too
+                 contextString += ` (LOC: ${entry.loc})`;
+            }
+            contextString += `\nSummary: ${entry.summary || '(Not summarized)'}\n`;
         }
         // --- End formatting ---
 
         const finalTokenCount = countTokens(contextString); // Count tokens of the formatted string
-        console.log(chalk.blue(`Analysis cache context built with ${cacheData.length} entries.`));
+        console.log(chalk.blue(`Analysis cache context built with ${cacheData.entries.length} entries.`));
         console.log(chalk.blue(`Final calculated context token count: ${finalTokenCount}`));
         return { context: contextString, tokenCount: finalTokenCount };
     }
