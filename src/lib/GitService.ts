@@ -115,7 +115,7 @@ export class GitService {
 
     // --- MOVED FROM FileSystem: ensureGitignoreRules ---
     /**
-     * Ensures .gitignore exists and contains the rule to ignore '.kai/logs/'.
+     * Ensures .gitignore exists and contains the rule to ignore '.kai/'.
      * Creates the file with defaults if missing, appends the rule if missing from an existing file.
      * Called *after* user confirmation if needed (when no .git exists).
      * Uses the injected FileSystem service for file operations.
@@ -124,9 +124,10 @@ export class GitService {
     async ensureGitignoreRules(projectRoot: string): Promise<void> {
         console.log(chalk.dim("  Ensuring .gitignore configuration (via GitService)..."));
         const gitignorePath = path.join(projectRoot, '.gitignore');
-        const kaiLogsIgnoreLine = '.kai/logs/'; // Trailing slash ignores directory + contents
-        const kaiLogsComment = '# Kai specific logs (auto-added by GitService)'; // Update comment slightly
-        const defaultNewGitignoreContent = `# Common Node ignores\nnode_modules/\n.DS_Store\n\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
+        // --- IGNORE ENTIRE .kai directory ---
+        const kaiIgnoreLine = '.kai/'; // Ignore the whole directory
+        const kaiComment = '# Kai internal files (logs, cache, config) - (auto-added by Kai)';
+        const defaultNewGitignoreContent = `# Common Node ignores\nnode_modules/\n.DS_Store\n\n${kaiComment}\n${kaiIgnoreLine}\n`;
 
         try {
             // Use injected fs instance to read
@@ -134,7 +135,7 @@ export class GitService {
 
             if (gitignoreContent === null) {
                 // --- .gitignore does NOT exist - CREATE IT ---
-                console.log(chalk.yellow(`    .gitignore not found. Creating one with rule '${kaiLogsIgnoreLine}'...`));
+                console.log(chalk.yellow(`    .gitignore not found. Creating one with rule '${kaiIgnoreLine}'...`));
                 try {
                     // Use injected fs instance to write
                     await this.fs.writeFile(gitignorePath, defaultNewGitignoreContent);
@@ -146,23 +147,23 @@ export class GitService {
                 // --- .gitignore DOES exist - CHECK & APPEND if needed ---
                 console.log(chalk.dim(`    Found existing .gitignore file. Checking for rule...`));
                 const lines = gitignoreContent.split('\n').map(line => line.trim());
-                const ruleExists = lines.includes(kaiLogsIgnoreLine);
+                const ruleExists = lines.includes(kaiIgnoreLine);
 
                 if (!ruleExists) {
-                    console.log(chalk.yellow(`    Rule '${kaiLogsIgnoreLine}' not found in .gitignore. Appending it...`));
+                    console.log(chalk.yellow(`    Rule '${kaiIgnoreLine}' not found in .gitignore. Appending it...`));
                     try {
                         const contentToAppend = (gitignoreContent.endsWith('\n') ? '' : '\n')
-                                                + `\n${kaiLogsComment}\n${kaiLogsIgnoreLine}\n`;
+                                                + `\n${kaiComment}\n${kaiIgnoreLine}\n`;
                         // Use injected fs instance to append (requires re-reading and writing)
                         const currentContent = await this.fs.readFile(gitignorePath) || ''; // Read again to be safe
                         await this.fs.writeFile(gitignorePath, currentContent + contentToAppend);
 
-                        console.log(chalk.green(`    Successfully appended '${kaiLogsIgnoreLine}' to .gitignore.`));
+                        console.log(chalk.green(`    Successfully appended '${kaiIgnoreLine}' to .gitignore.`));
                     } catch (appendError) {
-                        console.error(chalk.red(`    Error appending '${kaiLogsIgnoreLine}' to .gitignore at ${gitignorePath}:`), appendError);
+                        console.error(chalk.red(`    Error appending '${kaiIgnoreLine}' to .gitignore at ${gitignorePath}:`), appendError);
                     }
                 } else {
-                    console.log(chalk.dim(`    Rule '${kaiLogsIgnoreLine}' already present.`));
+                    console.log(chalk.dim(`    Rule '${kaiIgnoreLine}' already present.`));
                 }
             }
         } catch (readError) {
@@ -183,10 +184,10 @@ export class GitService {
     async getIgnoreRules(projectRoot: string): Promise<Ignore> { // Renamed
         const ig = ignore();
         const gitignorePath = path.join(projectRoot, '.gitignore');
-        const kaiLogsIgnoreLine = '.kai/logs/';
+        const kaiIgnoreLine = '.kai/'; // Use the directory ignore rule
 
         // --- Step 1: Always add essential *in-memory* ignores ---
-        ig.add(['.git', 'node_modules', '.gitignore', kaiLogsIgnoreLine]);
+        ig.add(['.git', 'node_modules', '.gitignore', kaiIgnoreLine]); // Ignore .kai/ in memory too
 
         // --- Step 2: Read the actual file IF it exists using injected fs ---
         try {
@@ -206,7 +207,6 @@ export class GitService {
         // --- Step 3: Return the in-memory ignore object ---
         return ig;
     }
-
 
     // --- createAnnotatedTag (remains unchanged) ---
     async createAnnotatedTag(projectRoot: string, tagName: string, message: string): Promise<void> {
