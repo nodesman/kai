@@ -263,31 +263,36 @@ class FileSystem {
     // --- ADDED: Analysis Cache Methods (Milestone 1 - Array Structure) ---
 
     /**
-     * Reads the project analysis cache file (expects M1 structure: AnalysisCacheEntry[]).
+     * Reads the project analysis cache file (expects M2 structure: { overallSummary, entries }).
      * @param cachePath The absolute path to the cache file.
-     * @returns The parsed cache data (ProjectAnalysisCache object), or null if the file doesn't exist or is invalid.
+     * @returns The parsed cache data (ProjectAnalysisCache), or null if the file doesn't exist or is invalid.
      */
     async readAnalysisCache(cachePath: string): Promise<ProjectAnalysisCache | null> {
         console.log(chalk.dim(`Attempting to read analysis cache: ${cachePath}`));
         try {
             const content = await this.readFile(cachePath);
             if (content === null) {
-                console.log(chalk.dim(`Analysis cache file not found: ${cachePath}`));
+                console.log(chalk.dim(`Analysis cache file not found.`));
                 return null;
             }
             const data: unknown = JSON.parse(content); // Parse as unknown first
 
-            // --- M1 Validation: Check for simple array structure ---
-            if (!Array.isArray(data)) {
-                 console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} is not a valid JSON array (M1 expects AnalysisCacheEntry[]). Ignoring.`));
+            // --- M2 Validation: Check for new structure ---
+            if (
+                typeof data !== 'object' ||
+                data === null ||
+                (typeof (data as any).overallSummary !== 'string' && (data as any).overallSummary !== null) || // Allow null for M2
+                !Array.isArray((data as any).entries)
+            ) {
+                console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} does not match expected structure { overallSummary: string|null, entries: [...] }. Ignoring.`));
                 return null;
             }
-            // --- End M1 Validation ---
+            // --- End M2 Validation ---
 
-             // Optional: Add more detailed validation of individual entries in the array
+            // Optional: Add more detailed validation of array elements ((data as any).entries) if needed later
 
-            console.log(chalk.dim(`Successfully read and parsed M1 analysis cache (${data.length} entries).`));
-            return data as ProjectAnalysisCache; // Type assertion to the array structure
+            console.log(chalk.dim(`Successfully read and parsed M2 analysis cache (${(data as any).entries.length} entries).`));
+            return data as ProjectAnalysisCache; // Type assertion to the new structure
 
         } catch (error) {
             console.error(chalk.red(`Error reading or parsing analysis cache file ${cachePath}:`), error);
@@ -296,19 +301,20 @@ class FileSystem {
     }
 
     /**
-     * Writes the project analysis data (M1: array structure) to the cache file.
+     * Writes the project analysis data (M2 object structure) to the cache file.
      * @param cachePath The absolute path to the cache file.
      * @param cacheData The analysis data (ProjectAnalysisCache) to write.
      */
     async writeAnalysisCache(cachePath: string, cacheData: ProjectAnalysisCache): Promise<void> {
-        // --- M1 Validation ---
-        if (!Array.isArray(cacheData)) {
-            console.error(chalk.red(`Attempted to write invalid cache data structure (expected array for M1) to ${cachePath}. Aborting write.`));
+        // --- M2 Validation ---
+        // Basic check for the expected object structure
+        if (typeof cacheData !== 'object' || cacheData === null || !Array.isArray(cacheData.entries)) {
+            console.error(chalk.red(`Attempted to write invalid cache data structure (expected object with 'entries' array for M2) to ${cachePath}. Aborting write.`));
             return; // Prevent writing bad data
         }
-        // --- End M1 Validation ---
+        // --- End M2 Validation ---
         try {
-             console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.length} entries)`));
+             console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.entries.length} entries)`));
              const content = JSON.stringify(cacheData, null, 2); // Pretty-print JSON
              await this.writeFile(cachePath, content);
              console.log(chalk.dim(`Successfully wrote analysis cache.`));

@@ -56,16 +56,19 @@ export class ProjectContextBuilder {
             const cachePath = path.resolve(this.projectRoot, this.config.analysis.cache_file_path);
             const cacheData = await this.fs.readAnalysisCache(cachePath);
 
-            // Check if cache exists and has entries (adjust based on M1/M2 structure)
-            // For M1, cacheData is ProjectAnalysisCache (AnalysisCacheEntry[])
-            if (cacheData && Array.isArray(cacheData) && cacheData.length > 0) { // M1 check: is array and not empty
-                return this._formatCacheAsContext(cacheData); // Pass array for M1 formatting
+            // Check if cache exists and has entries (M2 check)
+            if (cacheData && cacheData.entries && cacheData.entries.length > 0) { // M2 check: object exists, entries array exists and is not empty
+                return this._formatCacheAsContext(cacheData); // Pass object for M2 formatting
+            } else if (cacheData && cacheData.entries && cacheData.entries.length === 0) { // M2 check: cache object exists but entries are empty
+                 // Handle case where cache exists but is empty
+                 console.log(chalk.yellow(`Analysis cache is empty at ${cachePath}. Building empty context.`));
+                 return { context: 'Project Analysis Cache is empty.', tokenCount: 5 }; // Return minimal context
             } else {
-                // If mode is explicitly 'analysis_cache' but cache is missing/empty, it's an error state.
+                // If mode is explicitly 'analysis_cache' but cache is missing/invalid, it's an error state.
                 // The startup logic should have prevented this by forcing analysis or exiting.
                 // Log error and throw.
-                console.error(chalk.red(`Error: Context mode is 'analysis_cache' but cache is missing or empty at ${cachePath}.`));
-                throw new Error(`Cannot build context: Analysis cache required but missing/empty at ${cachePath}.`);
+                console.error(chalk.red(`Error: Context mode is 'analysis_cache' but cache is missing, invalid, or empty at ${cachePath}.`));
+                throw new Error(`Cannot build context: Analysis cache required but missing/invalid/empty at ${cachePath}.`);
             }
         } else if (contextMode === 'full') {
             return this._buildFullContext();
@@ -158,16 +161,25 @@ export class ProjectContextBuilder {
         return totalTokenCount;
     }
 
-    /** Formats the loaded analysis cache data (M1: array) into a context string. */
+    /** Formats the loaded analysis cache data (M2 object structure) into a context string. */
     private _formatCacheAsContext(cacheData: ProjectAnalysisCache): { context: string; tokenCount: number } {
-        // --- M1 Formatting ---
-        let contextString = `Project Analysis Summary:\n`; // Simple header for M1
-        const entries = cacheData; // For M1, cacheData is the array itself
+        // --- M2 Formatting ---
+        let contextString = `Project Analysis Overview:\n${cacheData.overallSummary || "(No overall summary provided)"}\n\nFile Details:\n`;
+        const entries = cacheData.entries; // Access the entries array
+
         for (const entry of entries) {
-            contextString += `\n---\nFile: ${entry.filePath} (LOC: ${entry.loc})\n`;
-            contextString += `Summary: ${entry.summary || '(Error generating summary)'}\n`;
+            contextString += `\n---\nFile: ${entry.filePath}`;
+            // Add type/size info, especially if no summary exists
+            if (entry.type !== 'text_analyze' || entry.summary === null) {
+                 contextString += ` [${entry.type.replace('_', ' ')}] (Size: ${(entry.size / 1024).toFixed(1)} KB`;
+                 if (entry.loc !== null) contextString += `, LOC: ${entry.loc}`;
+                 contextString += `)`;
+            } else if (entry.loc !== null) { // Add LOC for analyzed files too
+                 contextString += ` (LOC: ${entry.loc})`;
+            }
+            contextString += `\nSummary: ${entry.summary || '(Not summarized)'}\n`;
         }
-        // --- End M1 formatting ---
+        // --- End M2 formatting ---
 
         const finalTokenCount = countTokens(contextString); // Count tokens of the formatted string
         console.log(chalk.blue(`Analysis cache context built with ${entries.length} entries.`));
