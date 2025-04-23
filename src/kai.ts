@@ -247,8 +247,8 @@ async function main() {
             commandService,
             gitService,
             ui, // Pass the UI instance
-            contextBuilder, // Pass the ContextBuilder instance
-            aiClient // Pass the shared AIClient instance
+            contextBuilder // Pass the ContextBuilder instance
+            // REMOVED: aiClient argument - CodeProcessor creates its own
         );
         // --- End CodeProcessor Instantiation ---
 

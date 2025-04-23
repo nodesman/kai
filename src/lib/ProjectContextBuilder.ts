@@ -10,6 +10,7 @@ import { GitService } from './GitService';
 // Import ProjectAnalysisCache, AnalysisCacheEntry depends on the M1 or M2 structure being targeted
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 import { AnalysisPrompts } from './analysis/prompts'; // Import prompts for dynamic context
+import { Message } from './models/Conversation'; // Import Message type
 
 export class ProjectContextBuilder {
     private fs: FileSystem;
@@ -49,14 +50,14 @@ export class ProjectContextBuilder {
      * This expects config.context.mode to be 'full', 'analysis_cache', or 'dynamic'.
      * It should NOT be called when mode is still undefined.
      * @param userQuery Optional user query (needed for dynamic mode).
-     * @param history Optional conversation history (needed for dynamic mode).
+     * @param historySummary Optional conversation history summary (needed for dynamic mode).
      * @returns An object containing the context string and its token count.
      * @throws Error if config.context.mode is still undefined or cache is missing when required.
      * @throws Error if required arguments for dynamic mode are missing.
      */
     async buildContext(
         userQuery?: string,
-        history?: any[] // Replace 'any' with your actual Message type
+        historySummary?: string | null // Corrected: Expects string | null, not Message[]
     ): Promise<{ context: string; tokenCount: number }> {
         const contextMode = this.config.context.mode;
 
@@ -86,8 +87,7 @@ export class ProjectContextBuilder {
                  throw new Error("User query is required for 'dynamic' context mode.");
             }
             console.log(chalk.blue('\nBuilding dynamic project context...'));
-            // Pass history if available
-            const historySummary = history ? this._summarizeHistory(history) : null;
+            // Pass the already summarized history
             return this.buildDynamicContext(userQuery, historySummary);
         } else {
              // This should not happen if startup logic works correctly
@@ -321,21 +321,7 @@ export class ProjectContextBuilder {
         return { context: finalContext, tokenCount: currentTokenCount };
     }
 
-     /** Creates a simple summary of conversation history (implement based on Message type) */
-     private _summarizeHistory(history: any[]): string | null {
-          // Placeholder: Implement actual history summarization based on your Message structure
-          if (!history || history.length === 0) return null;
-          const recentMessages = history.slice(-4); // Take last 4 messages? Needs tuning.
-          let summary = "Recent conversation highlights:\n";
-          recentMessages.forEach((msg: any) => { // Use 'any' or your Message type
-               // Ensure msg.content exists and is a string before using substring
-               const contentPreview = typeof msg.content === 'string'
-                    ? `${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
-                    : '[Non-text content]';
-               summary += `  ${msg.role}: ${contentPreview}\n`;
-          });
-          return summary;
-     }
+     // REMOVED: _summarizeHistory method (moved to ConversationManager)
 
     /**
      * Optimizes whitespace in a code string.

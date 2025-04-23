@@ -217,8 +217,9 @@ export class ConversationManager {
             console.log(chalk.blue(`\nBuilding context using mode: ${currentMode}...`));
             if (currentMode === 'dynamic') {
                  const history = conversation.getMessages(); // Get current history
-                 // Pass user message and history to build dynamic context
-                 contextResult = await this.contextBuilder.buildDynamicContext(userPrompt, history);
+                 // --- FIX: Summarize history before passing ---
+                 const historySummary = this._summarizeHistory(history);
+                 contextResult = await this.contextBuilder.buildDynamicContext(userPrompt, historySummary);
             } else {
                  // Use standard context building for 'full' or 'analysis_cache' modes
                  // buildContext() internally checks mode again and fetches appropriate context
@@ -301,6 +302,21 @@ export class ConversationManager {
             }
         }
     }
+
+    /** Creates a simple summary of conversation history for dynamic context */
+    private _summarizeHistory(history: Message[]): string | null {
+         // Placeholder: Implement actual history summarization based on your Message structure
+         if (!history || history.length === 0) return null;
+         const recentMessages = history.slice(-4); // Take last 4 messages? Needs tuning.
+         let summary = "Recent conversation highlights:\n";
+         recentMessages.forEach((msg: Message) => {
+              const contentPreview = typeof msg.content === 'string'
+                   ? `${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+                   : '[Non-text content]';
+              summary += `  ${msg.role}: ${contentPreview}\n`;
+         });
+         return summary;
+    }
 }
 
-export { ConversationManager }; // Ensure class is exported
+ // REMOVED: Redundant export statement
