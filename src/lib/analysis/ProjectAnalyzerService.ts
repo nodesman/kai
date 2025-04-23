@@ -64,6 +64,11 @@ export class ProjectAnalyzerService {
                 try {
                     const stats = await this.fsUtil.stat(absolutePath);
                     if (!stats || stats.size === 0) continue; // Skip if stat fails or empty
+                    // --- ADDED: Explicitly skip directories ---
+                    if (stats.isDirectory()) {
+                        console.log(chalk.grey(`    Skipping directory: ${relativePath}`));
+                        continue;
+                    }
                     if (stats.size > MAX_FILE_SIZE_FOR_BATCH_BYTES) {
                          console.log(chalk.grey(`    Skipping large file from batching (${(stats.size / 1024).toFixed(1)} KB): ${relativePath}`));
                          continue;
