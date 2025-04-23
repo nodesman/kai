@@ -1,11 +1,12 @@
 // File: src/lib/FileSystem.ts
-import fs, { Stats } from 'fs/promises'; // Ensure using promises, import Stats type
+import fsPromises from 'fs/promises'; // Use promises API
+import { Stats } from 'fs'; // Import Stats type from base 'fs'
 import path from 'path';
 import ignore, { Ignore } from 'ignore'; // Import ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
 
 // --- ADDED: Import Analysis Cache Types ---
-// Import M2 structure
+// Import M1 structure
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
 
 // Define items typically ignored when checking for "emptiness"
@@ -25,22 +26,22 @@ class FileSystem {
 
     // --- Common FS methods (remain unchanged) ---
     async access(filePath: string): Promise<void> {
-        await fs.access(filePath);
+        await fsPromises.access(filePath);
     }
 
     async deleteFile(filePath: string): Promise<void> {
-        await fs.unlink(filePath);
+        await fsPromises.unlink(filePath);
     }
 
     async writeFile(filePath: string, content: string): Promise<void> {
         const dir = path.dirname(filePath);
         await this.ensureDirExists(dir);
-        await fs.writeFile(filePath, content, 'utf-8');
+        await fsPromises.writeFile(filePath, content, 'utf-8');
     }
 
     async readFile(filePath: string): Promise<string | null> {
         try {
-            const content = await fs.readFile(filePath, 'utf-8');
+            const content = await fsPromises.readFile(filePath, 'utf-8');
             return content;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -58,7 +59,7 @@ class FileSystem {
      */
     async stat(filePath: string): Promise<Stats | null> {
         try {
-            return await fs.stat(filePath);
+            return await fsPromises.stat(filePath);
         } catch (error) {
              if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
              console.error(chalk.red(`Error getting stats for file ${filePath}:`), error);
@@ -75,7 +76,7 @@ class FileSystem {
      */
     async isDirectoryEmptyOrSafe(dirPath: string): Promise<boolean> {
         try {
-            const entries = await fs.readdir(dirPath, { withFileTypes: true });
+            const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
             for (const entry of entries) {
                 if (!SAFE_TO_IGNORE_FOR_EMPTY_CHECK.has(entry.name)) {
                     // Found a file/directory that is not on the safe list
@@ -105,12 +106,12 @@ class FileSystem {
     async ensureDirExists(dir: string): Promise<void> {
         try {
              // Check if it exists first to avoid unnecessary log message
-             await fs.access(dir);
+             await fsPromises.access(dir);
              // console.log(chalk.dim(`  Directory already exists: ${dir}`)); // Maybe too verbose
         } catch (error) {
              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                  console.log(chalk.yellow(`  Directory not found. Creating: ${dir}...`));
-                 await fs.mkdir(dir, { recursive: true });
+                 await fsPromises.mkdir(dir, { recursive: true });
                  console.log(chalk.green(`  Successfully created directory: ${dir}`));
              } else {
                  console.error(chalk.red(`Error checking/creating directory ${dir}:`), error);
@@ -154,7 +155,7 @@ class FileSystem {
         }
 
         let files: string[] = [];
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
 
         for (const entry of entries) {
             const fullPath = path.join(dirPath, entry.name);
@@ -207,7 +208,7 @@ class FileSystem {
 
         // Proceed with listing
         try {
-            const files = await fs.readdir(dirPath);
+            const files = await fsPromises.readdir(dirPath);
             return files
                 .filter(file => file.endsWith('.jsonl'))
                 .map(file => path.basename(file, '.jsonl'));
@@ -220,7 +221,7 @@ class FileSystem {
 
     async readJsonlFile(filePath: string): Promise<any[]> {
         try {
-            await fs.access(filePath);
+            await fsPromises.access(filePath);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return [];
@@ -251,7 +252,7 @@ class FileSystem {
             // Use ensureDirExists here, assuming the log file might be elsewhere
             // But typically it will be in .kai/logs which should already exist
             await this.ensureDirExists(dir);
-            await fs.appendFile(filePath, logEntry, 'utf-8');
+            await fsPromises.appendFile(filePath, logEntry, 'utf-8');
         } catch (error) {
             console.error(`Error appending to JSONL file ${filePath}:`, error);
             throw error;
@@ -259,10 +260,10 @@ class FileSystem {
     }
     // --- END JSONL/Directory methods ---
 
-    // --- ADDED: Analysis Cache Methods (Milestone 2 - Object Structure) ---
+    // --- ADDED: Analysis Cache Methods (Milestone 1 - Array Structure) ---
 
     /**
-     * Reads the project analysis cache file (expects M2 structure: { overallSummary, entries }).
+     * Reads the project analysis cache file (expects M1 structure: AnalysisCacheEntry[]).
      * @param cachePath The absolute path to the cache file.
      * @returns The parsed cache data (ProjectAnalysisCache object), or null if the file doesn't exist or is invalid.
      */
@@ -276,24 +277,17 @@ class FileSystem {
             }
             const data: unknown = JSON.parse(content); // Parse as unknown first
 
-            // --- Validation for M2 structure: { overallSummary: string|null, entries: [...] } ---
-            if (
-                typeof data !== 'object' ||
-                data === null ||
-                (typeof (data as ProjectAnalysisCache).overallSummary !== 'string' && (data as ProjectAnalysisCache).overallSummary !== null) ||
-                !Array.isArray((data as ProjectAnalysisCache).entries)
-            ) {
-                 console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} does not match expected M2 structure { overallSummary: string|null, entries: [...] }. Ignoring.`));
-                // You might choose to delete the invalid cache file here
-                // try { await this.deleteFile(cachePath); console.log(chalk.yellow(`Deleted invalid cache file: ${cachePath}`)); } catch {}
+            // --- M1 Validation: Check for simple array structure ---
+            if (!Array.isArray(data)) {
+                 console.warn(chalk.yellow(`Warning: Analysis cache file at ${cachePath} is not a valid JSON array (M1 expects AnalysisCacheEntry[]). Ignoring.`));
                 return null;
             }
+            // --- End M1 Validation ---
 
              // Optional: Add more detailed validation of individual entries in the array
-             // e.g., check if each entry has filePath, type, size, summary, lastAnalyzed
 
-            console.log(chalk.dim(`Successfully read and parsed M2 analysis cache (${(data as ProjectAnalysisCache).entries.length} entries).`));
-            return data as ProjectAnalysisCache; // Type assertion to the new structure
+            console.log(chalk.dim(`Successfully read and parsed M1 analysis cache (${data.length} entries).`));
+            return data as ProjectAnalysisCache; // Type assertion to the array structure
 
         } catch (error) {
             console.error(chalk.red(`Error reading or parsing analysis cache file ${cachePath}:`), error);
@@ -302,18 +296,19 @@ class FileSystem {
     }
 
     /**
-     * Writes the project analysis data (M2 object structure) to the cache file.
+     * Writes the project analysis data (M1: array structure) to the cache file.
      * @param cachePath The absolute path to the cache file.
      * @param cacheData The analysis data (ProjectAnalysisCache) to write.
      */
     async writeAnalysisCache(cachePath: string, cacheData: ProjectAnalysisCache): Promise<void> {
-        // Validate structure before writing (basic)
-        if (!cacheData || typeof cacheData !== 'object' || !Array.isArray(cacheData.entries)) {
-             console.error(chalk.red(`Attempted to write invalid cache data structure to ${cachePath}. Aborting write.`));
-             return; // Prevent writing bad data
+        // --- M1 Validation ---
+        if (!Array.isArray(cacheData)) {
+            console.error(chalk.red(`Attempted to write invalid cache data structure (expected array for M1) to ${cachePath}. Aborting write.`));
+            return; // Prevent writing bad data
         }
+        // --- End M1 Validation ---
         try {
-             console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.entries.length} entries)`));
+             console.log(chalk.dim(`Writing analysis cache to: ${cachePath} (${cacheData.length} entries)`));
              const content = JSON.stringify(cacheData, null, 2); // Pretty-print JSON
              await this.writeFile(cachePath, content);
              console.log(chalk.dim(`Successfully wrote analysis cache.`));

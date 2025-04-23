@@ -112,6 +112,7 @@ async function performStartupChecks(
 async function main() {
 
     let codeProcessor: CodeProcessor | null = null;
+    let ui: UserInterface | null = null; // Declare UI here
     let targetIdentifier: string | string[] | null = null;
     let interactionResult: UserInteractionResult | null = null;
     let config: Config | undefined = undefined;
@@ -121,22 +122,29 @@ async function main() {
     try {
         // --- Instantiate Core Services Needed Early (before config determination) ---
         // Instantiate services that don't strictly depend on finalized config first
-        const ui = new UserInterface(); // UI needs config later
+        // REMOVED: ui instantiation here
         const fs = new FileSystem();
         const commandService = new CommandService();
         const gitService = new GitService(commandService, fs);
         // Cannot create ContextBuilder yet as it needs final config
 
         // --- Perform Startup Checks (Doesn't need config directly anymore) ---
-        const startupOk = await performStartupChecks(projectRoot, fs, gitService, ui);
+        // We pass a placeholder UI here, which will be replaced after config loads.
+        // This is a temporary measure. Ideally, startup checks needing UI would be moved
+        // or the UI dependency removed from performStartupChecks.
+        // For now, let's assume performStartupChecks doesn't critically need a fully configured UI *yet*.
+        const placeholderUI = new UserInterface(new Config()); // Create a placeholder config
+        const startupOk = await performStartupChecks(projectRoot, fs, gitService, placeholderUI);
         if (!startupOk) {
             process.exit(1);
         }
 
+
         // Instantiate Config *after* potentially creating default config.yaml
         config = new Config();
         // Provide config to instances that need it
-        ui.config = config;
+        // Instantiate UI *after* config is ready
+        ui = new UserInterface(config); // <-- Assign to declared variable
         // Instantiate ContextBuilder now that config is ready
         const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config);
 
@@ -145,7 +153,7 @@ async function main() {
             config,
             fs,
             commandService,
-            gitService, // <-- ADD GitService instance
+            gitService,
             new AIClient(config) // Analyzer needs its own AI client instance for summaries
         );
         // --- END Analyzer Instantiation ---
@@ -200,6 +208,7 @@ async function main() {
         }
         // --- End Initial Context Mode Determination Logic ---
 
+        if (!ui) throw new Error("UI was not initialized correctly."); // Type guard
         interactionResult = await ui.getUserInteraction();
 
         if (!interactionResult) {
