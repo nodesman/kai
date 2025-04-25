@@ -85,7 +85,13 @@
     *   **Priority:** High
 *   **[ ] Task:** Implement "Requirement Linting"
     *   **Details:** Create logic (possibly AI-driven via another prompt/function call) to check the *user's input* and the *intermediate specification* for sufficient detail, consistency, and clarity before finalization. Flags issues back to the user via `InteractionManager`.
-    *   **Depends on:** `RequirementAgentService`
+    *   **Refined Details:** Implement logic (likely AI-driven via a dedicated prompt/function call) to perform an initial check on the user's *opening problem statement*:
+        *   **Sufficiency Check:** Does it have the minimal detail required to *start* the System 1 clarification process? (e.g., Is the goal software-related? Is there *some* context?).
+        *   **Scope Check:** Is the request within the intended v1.0 scope (feature addition, bug fix, specific tool creation) vs. overly broad business strategy?
+        *   **Clarity Check:** Are there immediate, show-stopping ambiguities?
+    *   **If Initial Check Fails:** Report back to the user via `InteractionManager`, explaining why Kai cannot proceed and requesting a more specific starting point.
+    *   **If Initial Check Passes:** Proceed with the standard System 1 clarification loop, potentially using further "linting" checks on the *intermediate* specification as it's built.
+    *   **Depends on:** `RequirementAgentService`, `InteractionManager`
     *   **Priority:** Medium
 *   **[ ] Task:** Integrate HTML Input Processing (Optional but discussed)
     *   **Details:** If desired, add capability for System 1 to accept HTML mockups, parse them, and incorporate the structure/elements into the clarification process and the final UI description within the `Specification`.
@@ -151,6 +157,21 @@
     *   **Priority:** Medium -> **Done** (Assumed you've done some initial testing)
 *   **[ ] Task:** Investigate C++/Embedded Support (Tracked Separately)
     *   **Priority:** Very Low
+*   **[ ] Task: Explore Enhanced Code Analysis Capabilities**
+    *   **Details:** Investigate evolving analysis beyond the current descriptive cache (`project_analysis.json`). Aim for deeper understanding of the *code itself* (structure, quality, patterns) as discussed in `docs/concepts/analysis_philosophy.md`. This is distinct from high-level strategic/business analysis. **See `docs/concepts/enhanced_code_analysis.md` for detailed scope.**
+        *   *Potential Scope Includes:*
+            *   Dependency analysis (imports/exports).
+            *   Code complexity metrics (e.g., cyclomatic).
+            *   Basic code smell detection (long methods, large classes).
+            *   Architectural pattern recognition within the code (e.g., MVC).
+            *   Technology stack/framework identification.
+    *   **Depends on:** Foundational `ProjectAnalyzerService` (M2), Stable System 1 & System 2.
+    *   **Priority:** Very Low (Long-term Research)
+*   **[ ] Task: Explore Strategic Business-to-Software Analysis ("Analysis v2.0" as discussed)**
+    *   **Details:** Investigate the long-term feasibility and approach for Kai to handle high-level, ambiguous user goals like "solve my business problem". This involves reasoning about business needs, platform choices (web vs. mobile), technology stacks, potential architectures, and bridging the gap to a concrete software specification. **This capability was explicitly deferred from v1.0 due to complexity/focus concerns. See `docs/concepts/strategic_analysis_v2.md` for details and rationale.**
+    *   **Depends on:** Mature System 1 & System 2 capabilities, potentially significant advancements in LLM reasoning for ambiguity and strategy.
+    *   **Priority:** Very Low (Highly Exploratory, Post v1.0+)
+
 
 ---
 
@@ -165,4 +186,3 @@
 ## Done
 
 *(Move tasks here when completed)*
-```
