@@ -18,10 +18,10 @@ These documents explain the underlying philosophy and key ideas behind Kai's fea
 
 Recent discussions clarified the design and intent behind the planned agentic workflows (System 1: Requirements, System 2: TDD). These files capture those clarifications:
 
-*   **[Q1: System 1+2 vs Consolidation for Modifications?](explanations/q1.md):** Details why the structured S1+S2 approach (with TDD) is preferred over the existing Consolidation Mode for modifying code, focusing on reliability, precision, and verifiability.
-*   **[Q2: Does System 1 Analyze Existing Code?](explanations/q2.md):** Confirms that System 1's analysis *must* consider existing code context (provided via `ProjectContextBuilder`) when handling modification requests to generate accurate specifications.
-*   **[Q3: Is System 2 Only a Scaffolder? Analysis Roles?](explanations/q3.md):** Clarifies that System 2 is designed for both scaffolding *and* modification, explains how its TDD loop handles changes, and distinguishes its cognitive analysis from the context-building analysis (`ProjectAnalyzerService`).
-*   **[Q4: Responsibility Distribution (System 1 vs System 2)?](explanations/q4.md):** Outlines the distinct roles: System 1 defines **WHAT** (the `Specification`, including test scenarios), while System 2 handles **HOW** (the TDD implementation loop, generating code/diffs step-by-step).
+*   **[System 1+2 vs Consolidation for Modifications?](explanations/s1s2-vs-consolidation-modifications.md):** Details why the structured S1+S2 approach (with TDD) is preferred over the existing Consolidation Mode for modifying code, focusing on reliability, precision, and verifiability.
+*   **[Does System 1 Analyze Existing Code?](explanations/s1-analysis-existing-code.md):** Confirms that System 1's analysis *must* consider existing code context (provided via `ProjectContextBuilder`) when handling modification requests to generate accurate specifications.
+*   **[Is System 2 Only a Scaffolder? Analysis Roles?](explanations/s2-scaffolding-vs-modification-analysis.md):** Clarifies that System 2 is designed for both scaffolding *and* modification, explains how its TDD loop handles changes, and distinguishes its cognitive analysis from the context-building analysis (`ProjectAnalyzerService`).
+*   **[Responsibility Distribution (System 1 vs System 2)?](explanations/s1-s2-responsibility-distribution.md):** Outlines the distinct roles: System 1 defines **WHAT** (the `Specification`, including test scenarios), while System 2 handles **HOW** (the TDD implementation loop, generating code/diffs step-by-step).
 
 ### Architectural Decision Records (ADRs)
 
