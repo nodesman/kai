@@ -15,6 +15,13 @@
 
 ---
 
+## Guiding Principles
+
+*   **UI Technology:** Future UI development (if undertaken beyond CLI/TUI) should strongly favor web technologies (e.g., hosted via Node.js or packaged with Electron) over native desktop frameworks like Java Swing/FX or C++/Qt. This maintains consistency with the Node.js core, leverages web development ecosystems, and avoids introducing additional language dependencies (like JVM or C++ toolchains) for the end-user.
+
+---
+
+
 ## Backlog (To Do)
 
 *(Tasks prioritized roughly)*
@@ -158,3 +165,4 @@
 ## Done
 
 *(Move tasks here when completed)*
+```
