@@ -18,6 +18,7 @@ import { toSnakeCase } from "./lib/utils";
 // *** ADDED Imports for Analysis Feature ***
 import { ProjectAnalyzerService } from './lib/analysis/ProjectAnalyzerService';
 import { AIClient } from './lib/AIClient'; // Needed for Analyzer instantiation
+import { WebService } from './lib/WebService'; // <-- ADDED WebService import
 // *** END Imports for Analysis Feature ***
 
 // performStartupChecks adjusted signature, Config is instantiated later now
@@ -119,6 +120,22 @@ async function main() {
     let config: Config | undefined = undefined;
     let analyzerService: ProjectAnalyzerService | null = null; // Define analyzer service variable
     const projectRoot = process.cwd();
+
+    // --- Basic Argument Parsing for 'show kanban' ---
+    const args = process.argv.slice(2); // Get arguments passed to the script
+    if (args.length === 2 && args[0] === 'show' && args[1] === 'kanban') {
+        console.log(chalk.cyan('Detected "show kanban" command...'));
+        const webService = new WebService(projectRoot);
+        try {
+            await webService.showKanban();
+            // Keep Kai running so the server stays alive until Ctrl+C
+            return; // Exit main function after starting server
+        } catch (webError) {
+            console.error(chalk.red('Failed to show Kanban board:'), webError);
+            process.exit(1);
+        }
+    }
+    // --- End Basic Argument Parsing ---
 
     try {
         // --- Instantiate Core Services Needed Early (before config determination) ---
