@@ -7,6 +7,17 @@ import open from 'open'; // Use import for v8
 import chalk from 'chalk';
 import { FileSystem } from './FileSystem'; // Reuse FileSystem for reading
 
+// Define structure for parsed sections
+interface KanbanSection {
+    type: 'kanban-board' | 'principles' | 'epics' | 'other';
+    title: string; // e.g., "Backlog", "Guiding Principles", "Epics & Features"
+    content: string; // Raw markdown content of the section
+}
+
+interface KanbanColumn {
+    title: string;
+    content: string; // HTML content for the column cards
+}
 const DEFAULT_PORT = 4242; // Port "KaiKai" :)
 
 export class WebService {
@@ -24,28 +35,72 @@ export class WebService {
      * @param markdownContent The raw Markdown content of Kanban.md.
      * @returns An array of objects, each representing a column with its title and markdown content.
      */
-    private parseKanbanMarkdown(markdownContent: string): { title: string; content: string }[] {
+    private parseKanbanColumns(markdownContent: string): KanbanColumn[] {
         const lines = markdownContent.split('\n');
-        const columns: { title: string; content: string }[] = [];
+        const columns: KanbanColumn[] = [];
         let currentColumn: { title: string; content: string } | null = null;
 
         for (const line of lines) {
             if (line.startsWith('## ')) {
                 // Start new column
                 const title = line.substring(3).trim();
-                currentColumn = { title: title, content: '' };
+                currentColumn = { title: title, content: '' }; // Store raw markdown here
                 columns.push(currentColumn);
             } else if (currentColumn) {
                 // Append line to the content of the current column
                 currentColumn.content += line + '\n';
             }
         }
-        // Trim trailing newline from last column's content
-        if (currentColumn) {
-            currentColumn.content = currentColumn.content.trimEnd();
-        }
+        // Trim and parse markdown content to HTML for each column AFTER gathering all lines
+        columns.forEach(col => {
+            col.content = col.content.trimEnd();
+            // Note: Marked parsing will happen when generating the final HTML
+        });
+
         return columns;
     }
+
+     /**
+     * Parses the entire Kanban.md into distinct sections based on H2 headers or specific titles.
+     * @param markdownContent The raw Markdown content of Kanban.md.
+     * @returns An array of parsed sections.
+     */
+    private parseKanbanSections(markdownContent: string): KanbanSection[] {
+        const sections: KanbanSection[] = [];
+        const lines = markdownContent.split('\n');
+        let currentSection: KanbanSection | null = null;
+
+        for (const line of lines) {
+            // Look for H1 or H2 headers to define sections
+            const h1Match = line.match(/^#\s+(.*)/);
+            const h2Match = line.match(/^##\s+(.*)/);
+            const titleMatch = h1Match || h2Match;
+
+            if (titleMatch) {
+                const title = titleMatch[1].trim();
+                let type: KanbanSection['type'] = 'other'; // Default to other
+
+                // Check for specific titles or column headers
+                if (['Backlog (To Do)', 'In Progress', 'Done'].includes(title)) {
+                    type = 'kanban-board';
+                } else if (title === 'Guiding Principles') {
+                    type = 'principles';
+                } else if (title === 'Epics & Features') {
+                    type = 'epics';
+                }
+                // Create a new section
+                currentSection = { title, content: '', type };
+                sections.push(currentSection);
+            } else if (currentSection) {
+                // Append content to the current section
+                currentSection.content += line + '\n';
+            }
+        }
+        // Trim trailing newline from each section's content
+        sections.forEach(sec => sec.content = sec.content.trimEnd());
+        return sections;
+    }
+
 
     private async findFreePort(startPort: number): Promise<number> {
         let port = startPort;
@@ -106,21 +161,43 @@ export class WebService {
 
         console.log(chalk.blue('Converting Markdown to HTML...'));
         let htmlContent: string;
-        let boardHtml = ''; // To build the Kanban board structure
+        let kanbanBoardHtml = ''; // HTML for the Kanban Board columns
+        let principlesHtml = ''; // HTML for the Guiding Principles section
+        let epicsHtml = ''; // HTML for the Epics & Features section
 
         try {
-            const columns = this.parseKanbanMarkdown(markdownContent);
+            // Parse the markdown into logical sections
+            const sections = this.parseKanbanSections(markdownContent);
 
-            for (const column of columns) {
-                // Use marked to parse only the *content* of the column
-                const columnContentHtml = await marked.parse(column.content);
-                boardHtml += `
+            // Process sections into their respective HTML parts
+            for (const section of sections) {
+                if (section.type === 'kanban-board') {
+                    // For board columns, parse the content to HTML now
+                    const columnContentHtml = await marked.parse(section.content);
+                    kanbanBoardHtml += `
             <div class="kanban-column">
-                <h2>${column.title}</h2>
+                <h2>${section.title}</h2>
                 <div class="kanban-column-content">
                     ${columnContentHtml}
                 </div>
             </div>`;
+                } else if (section.type === 'principles') {
+                    principlesHtml = await marked.parse(section.content);
+                } else if (section.type === 'epics') {
+                    epicsHtml = await marked.parse(section.content);
+                }
+                // Ignore 'other' sections for now
+            }
+
+             // --- Fallback if specific sections weren't found (optional, for robustness) ---
+            if (!kanbanBoardHtml && !principlesHtml && !epicsHtml) {
+                console.warn(chalk.yellow("Could not parse specific sections (Kanban, Principles, Epics). Rendering entire Markdown as a single board."));
+                 // Simple fallback: treat the whole thing as one big column (or render raw markdown)
+                 // For simplicity, let's just render the raw markdown in the first tab in this edge case.
+                 kanbanBoardHtml = `<div class="kanban-column"><h2>Fallback Content</h2><div class="kanban-column-content">${await marked.parse(markdownContent)}</div></div>`;
+            } else {
+                 // Ensure there's at least *some* content in the main board tab if others are missing
+                 if (!kanbanBoardHtml) kanbanBoardHtml = "<p>No standard Kanban columns found.</p>";
             }
 
             // Basic HTML structure with embedded CSS for slightly better readability
@@ -131,9 +208,9 @@ export class WebService {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kanban Board</title>
+    <title>Kai Project Dashboard</title>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; background-color: #f8f9fa; color: #343a40; }
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 1400px; /* Wider max-width */ margin: auto; background-color: #f8f9fa; color: #343a40; }
         h1, h2, h3 { border-bottom: 1px solid #dee2e6; padding-bottom: 0.3em; color: #0056b3; }
         h1 { font-size: 2em; }
         h2 { font-size: 1.5em; margin-top: 1.5em; }
@@ -141,12 +218,42 @@ export class WebService {
         code { background-color: #e9ecef; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
         pre { background-color: #e9ecef; padding: 15px; border-radius: 5px; overflow-x: auto; }
         pre code { background-color: transparent; padding: 0; }
-        ul, ol { margin-left: 20px; }
+        ul, ol { margin-left: 20px; padding-left: 0; } /* Adjusted padding */
         li { margin-bottom: 0.5em; }
-        strong { color: #28a745; }
+        strong { color: #28a745; } /* Keep green for emphasis */
+        /* Make bold elements stand out more */
+        b, strong { font-weight: 600; color: #196f3d; }
         table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
         th, td { border: 1px solid #dee2e6; padding: 8px; text-align: left; }
         th { background-color: #e9ecef; }
+
+        /* Tab Styles */
+        .tab-container { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; border-radius: 8px 8px 0 0; margin-top: 20px; }
+        .tab-container button { background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; font-size: 1em; border-right: 1px solid #ccc; }
+        .tab-container button:last-child { border-right: none; }
+        .tab-container button:hover { background-color: #ddd; }
+        .tab-container button.active { background-color: #ccc; font-weight: bold; }
+
+        .tab-content { display: none; padding: 15px 12px; border: 1px solid #ccc; border-top: none; background-color: #fff; border-radius: 0 0 8px 8px; min-height: 400px; /* Ensure content area has height */ }
+        /* Specific styling for the Kanban Board tab content */
+        #KanbanBoard {
+             padding: 0; /* Remove padding if the board itself has it */
+             border: none; /* Remove border if the board itself has it */
+             background-color: transparent; /* Use body background */
+        }
+
+        /* Ensure content within non-board tabs is styled normally */
+        #GuidingPrinciples, #EpicsFeatures {
+             background-color: #fff; /* White background for text content */
+             border: 1px solid #ccc;
+             border-top: none;
+             border-radius: 0 0 8px 8px;
+             padding: 15px 12px;
+        }
+        /* Styling for lists within Principles and Epics */
+        #GuidingPrinciples ul, #EpicsFeatures ul { list-style: disc; margin-left: 20px; }
+        #GuidingPrinciples li, #EpicsFeatures li { margin-bottom: 0.8em; background-color: transparent; border: none; box-shadow: none; padding: 0; }
+        #GuidingPrinciples li p, #EpicsFeatures li p { margin: 0 0 0.3em 0; } /* Minor spacing below paragraphs in lists */
 
         /* Kanban Styles */
         .kanban-board {
@@ -154,28 +261,69 @@ export class WebService {
             gap: 15px; /* Space between columns */
             overflow-x: auto; /* Allow horizontal scrolling if needed */
             padding-bottom: 15px; /* Space for scrollbar */
-            border-top: 2px solid #adb5bd; /* Separator above board */
-            margin-top: 20px;
+            /* Removed top border */
+            margin-top: 0; /* Removed top margin */
         }
-        .kanban-column {
+        #KanbanBoard .kanban-column { /* Target columns only within the board tab */
             flex: 1; /* Each column takes equal space */
             min-width: 280px; /* Minimum width for readability */
+            max-width: 450px; /* Max width to prevent excessive stretching */
             background-color: #e9ecef; /* Light grey background */
             border-radius: 8px;
             padding: 10px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            /* Add height and overflow for scrolling within columns */
+            height: calc(100vh - 200px); /* Adjust height based on viewport minus header/tabs */
+            overflow-y: auto;
         }
-        .kanban-column h2 { margin-top: 0; font-size: 1.3em; color: #495057; border-bottom: 1px solid #ced4da; }
-        .kanban-column-content ul { list-style: none; padding: 0; margin: 0; }
-        .kanban-column-content li { background-color: #fff; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-        .kanban-column-content li p { margin: 0; } /* Remove default paragraph margins inside cards */
+        #KanbanBoard .kanban-column h2 { margin-top: 0; font-size: 1.3em; color: #495057; border-bottom: 1px solid #ced4da; position: sticky; top: 0; background-color: #e9ecef; padding-bottom: 5px; z-index: 1; } /* Sticky header */
+        #KanbanBoard .kanban-column-content ul { list-style: none; padding: 0; margin: 0; }
+        #KanbanBoard .kanban-column-content li { background-color: #fff; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        #KanbanBoard .kanban-column-content li p { margin: 0 0 0.5em 0; } /* Add some space below paragraphs within cards */
+         #KanbanBoard .kanban-column-content li > strong { display: block; margin-bottom: 0.3em; font-size: 1.05em; } /* Style the task title */
+         #KanbanBoard .kanban-column-content li > ul { margin-top: 0.5em; padding-left: 15px; } /* Indent sub-bullets (details) */
+         #KanbanBoard .kanban-column-content li > ul li { background: none; border: none; box-shadow: none; padding: 0; margin-bottom: 0.2em; font-size: 0.95em; } /* Style sub-bullets */
+
+        /* Clear floats after the tabs */
+        .tab-container::after { content: ""; display: table; clear: both; }
     </style>
 </head>
 <body>
-    <h1>Kanban Board</h1>
-    <div class="kanban-board">
-        ${boardHtml}
+    <h1>Kai Project Dashboard</h1>
+
+    <!-- Tab links -->
+    <div class="tab-container">
+        <button class="tab-button active" onclick="openTab(event, 'KanbanBoard')">Kanban Board</button>
+        <button class="tab-button" onclick="openTab(event, 'EpicsFeatures')">Epics & Features</button>
+        <button class="tab-button" onclick="openTab(event, 'GuidingPrinciples')">Guiding Principles</button>
     </div>
+
+    <!-- Tab content -->
+    <div id="KanbanBoard" class="tab-content" style="display: block;">
+        <div class="kanban-board">
+             ${kanbanBoardHtml}
+        </div>
+    </div>
+
+    <div id="EpicsFeatures" class="tab-content">
+        ${epicsHtml || "<p>Epics & Features section not found in Kanban.md</p>"}
+    </div>
+
+    <div id="GuidingPrinciples" class="tab-content">
+        ${principlesHtml || "<p>Guiding Principles section not found in Kanban.md</p>"}
+    </div>
+
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tabbuttons;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) { tabcontent[i].style.display = "none"; }
+            tabbuttons = document.getElementsByClassName("tab-button");
+            for (i = 0; i < tabbuttons.length; i++) { tabbuttons[i].className = tabbuttons[i].className.replace(" active", ""); }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+    </script>
 </body>
 </html>`;
         } catch (error) {
