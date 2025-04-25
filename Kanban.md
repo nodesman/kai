@@ -12,12 +12,46 @@
 *   **E4: Consolidation Service** (Maintenance & Integration)
 *   **E5: Evaluation & Testing** (Testing the Kai system itself)
 *   **E6: Future Exploration** (Lower priority research)
+*   **E7: Utilities** (Standalone helpful tools within Kai)
 
 ---
 
 ## Backlog (To Do)
 
 *(Tasks prioritized roughly)*
+
+### E7: Utilities
+
+*   **[ ] Task: Implement Large File Breakdown - User Interaction & Analysis**
+    *   **Details:**
+        *   Allow user to select a file via relative path (`LargeFileBreakdownService.promptForFilePath`).
+        *   Read file content (`FileSystem.readFile`).
+        *   Perform basic checks (exists, size, text).
+        *   Develop AI prompt (`analyze_file_structure`) to identify logical blocks (functions, classes, sections) in the file content, returning structured data (e.g., { blockName: string, startLine: number, endLine: number, type: 'function'|'class'|'section' }).
+        *   Call AI using `AIClient.generateContent` (with function calling if needed).
+        *   Present the identified blocks to the user via `UserInterface` (e.g., using `inquirer` checkbox).
+    *   **Depends on:** `UserInterface`, `FileSystem`, `AIClient`
+    *   **Priority:** High (Foundation for breakdown utility)
+*   **[ ] Task: Implement Large File Breakdown - Extraction & New File Generation**
+    *   **Details:**
+        *   Based on user selection of blocks, precisely extract the code for each selected block from the original content.
+        *   Prompt user for new file names/locations for each extracted block (suggest defaults).
+        *   Write the extracted code to the new files using `FileSystem.writeFile`.
+    *   **Depends on:** Breakdown - User Interaction & Analysis Task
+    *   **Priority:** Medium
+*   **[ ] Task: Implement Large File Breakdown - Original File Refactoring (AI)**
+    *   **Details:**
+        *   Develop AI prompt (`refactor_original_file`) that takes the original file content, the list of extracted blocks (with their new file paths), and generates a *diff* for the original file.
+        *   The diff should remove the extracted code and add necessary imports/includes/calls to use the code from the new files. *This is language-dependent and relies heavily on AI.*
+        *   Call AI using `AIClient`.
+    *   **Depends on:** Breakdown - Extraction & New File Generation Task
+    *   **Priority:** Medium-High (Core refactoring step, difficult)
+*   **[ ] Task: Implement Large File Breakdown - Review & Apply**
+    *   **Details:**
+        *   Present the proposed changes (new files content + original file diff) to the user for review (adapt `ConsolidationReviewer` or create similar UI).
+        *   If approved, apply the changes using `FileSystem.writeFile` and `FileSystem.applyDiffToFile` (requires `applyDiffToFile` implementation).
+    *   **Depends on:** Breakdown - Original File Refactoring Task, `FileSystem.applyDiffToFile`
+    *   **Priority:** Medium
 
 ### E1: Core Infrastructure & Shared Services
 

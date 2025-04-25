@@ -6,8 +6,8 @@ import { DEFAULT_CONFIG_YAML } from './lib/config_defaults'; // Keep config defa
 import path from 'path';
 import inquirer from 'inquirer';
 import { Config } from './lib/Config';
-// Ensure UserInteractionResult and any new specific result types are imported
-import { UserInterface, UserInteractionResult, ChangeModeInteractionResult } from './lib/UserInterface';
+// Ensure UserInteractionResult and ALL specific result types are imported
+import { UserInterface, UserInteractionResult, ChangeModeInteractionResult, SelectUtilityResult } from './lib/UserInterface';
 import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
 import { CommandService } from './lib/CommandService';
@@ -17,6 +17,8 @@ import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
 // *** ADDED Imports for Analysis Feature ***
 import { ProjectAnalyzerService } from './lib/analysis/ProjectAnalyzerService';
+// *** ADDED Imports for Utilities Feature ***
+import { LargeFileBreakdownService } from './lib/utilities/LargeFileBreakdownService';
 import { AIClient } from './lib/AIClient'; // Needed for Analyzer instantiation
 // *** END Imports for Analysis Feature ***
 
@@ -118,6 +120,7 @@ async function main() {
     let interactionResult: UserInteractionResult | null = null;
     let config: Config | undefined = undefined;
     let analyzerService: ProjectAnalyzerService | null = null; // Define analyzer service variable
+    let breakdownService: LargeFileBreakdownService | null = null; // Define breakdown service variable
     const projectRoot = process.cwd();
 
     try {
@@ -161,6 +164,18 @@ async function main() {
             aiClient // <-- Reuse AIClient
         );
         // --- END Analyzer Instantiation ---
+
+        // --- Instantiate Breakdown Service ---
+        // Pass necessary dependencies
+        breakdownService = new LargeFileBreakdownService(
+            config,
+            fs,
+            aiClient,
+            ui,
+            gitService,
+            commandService
+        );
+        // --- END Breakdown Instantiation ---
 
 
         // --- Initial Context Mode Determination Logic ---
@@ -415,6 +430,16 @@ async function main() {
              await analyzerService.analyzeProject(); // Call the simple analysis
              console.log(chalk.cyan("Analysis cache update complete."));
              // --- End Analyzer Call ---
+
+        } else if (mode === 'Utilities...') {
+            const utilityResult = interactionResult as SelectUtilityResult; // Use specific type
+            if (utilityResult.selectedUtility === 'Break Down Large File...') {
+                if (!breakdownService) throw new Error("Breakdown service not initialized.");
+                await breakdownService.startBreakdownProcess();
+            } else {
+                console.log(chalk.yellow(`Unknown utility selected: ${utilityResult.selectedUtility}. Exiting.`));
+            }
+            // --- End Utilities Logic ---
 
         } else {
             console.log(chalk.yellow(`Unknown mode selected: ${mode}. Exiting.`));

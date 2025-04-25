@@ -18,7 +18,8 @@ interface UserInteractionResultBase {
         | 'Start/Continue Conversation'
         | 'Consolidate Changes...'
         | 'Re-run Project Analysis' // Added Re-run option
-        | 'Change Context Mode'; // Added Change Mode option
+        | 'Change Context Mode' // Added Change Mode option
+        | 'Utilities...'; // Added Utilities option
     conversationName: string | null; // Used for conversation ops
     isNewConversation: boolean; // Relevant only for Start/Continue
     selectedModel: string;
@@ -35,6 +36,12 @@ interface ChangeModeInteractionResult {
     newMode: 'full' | 'analysis_cache' | 'dynamic'; // Added dynamic mode
 }
 
+// Added specific result type for selecting a utility
+interface SelectUtilityResult {
+    mode: 'Utilities...';
+    selectedUtility: 'Break Down Large File...'; // Add more utilities here later
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -43,7 +50,7 @@ interface FallbackError {
 }
 
 // Combined result types
-type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult | ChangeModeInteractionResult;
+type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult | ChangeModeInteractionResult | SelectUtilityResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -302,6 +309,7 @@ class UserInterface {
                         'Consolidate Changes...',
                         'Re-run Project Analysis', // <-- ADDED Re-run option
                         'Change Context Mode', // <-- ADDED Change Mode option
+                        'Utilities...', // <-- ADDED Utilities option
                         // 'Analyze Project (Update Cache)', // <-- REMOVED old option
                         'Delete Conversation...',
                     ],
@@ -380,6 +388,25 @@ class UserInterface {
                  };
              }
 
+            // --- Handle Utilities Menu ---
+            if (mode === 'Utilities...') {
+                 const { utilityChoice } = await inquirer.prompt([
+                     {
+                         type: 'list',
+                         name: 'utilityChoice',
+                         message: 'Select a utility:',
+                         choices: [
+                             'Break Down Large File...',
+                             // Add more utilities later
+                             new inquirer.Separator(),
+                             '<< Back',
+                         ],
+                     },
+                 ]);
+                 if (utilityChoice === '<< Back') return null; // Go back to main menu implicitly
+                 return { mode: 'Utilities...', selectedUtility: utilityChoice };
+            }
+
             // --- Remaining modes require Model selection ---
             let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25";
             const { modelChoice } = await inquirer.prompt([
@@ -451,4 +478,4 @@ class UserInterface {
     }
 }
 
-export { UserInterface, UserInteractionResult, ChangeModeInteractionResult }; // Export new type
+export { UserInterface, UserInteractionResult, ChangeModeInteractionResult, SelectUtilityResult }; // Export new types
