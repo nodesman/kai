@@ -4,32 +4,57 @@ Welcome to the documentation for the Kai AI Coding Assistant project. This index
 
 For the primary project overview, installation instructions, and basic usage, please see the main [**README.md**](../README.md).
 
-## Core Concepts
+*(Note: This documentation reflects the strategic decisions made following detailed discussions, prioritizing Path 1: Personal Leverage for v1.0).*
 
-These documents explain the underlying philosophy and key ideas behind Kai's features:
+## Goals & Strategy (v1.0)
 
-*   **[Analysis Philosophy](concepts/analysis_philosophy.md):** Explains the distinction between foundational descriptive analysis (used for context building, e.g., `project_analysis.json`) and deeper cognitive analysis (performed by agentic systems). Clarifies that current analysis focuses on enabling context management due to software realism (LLM limits).
-*   **[Deferred Strategic Analysis (v2.0)](concepts/strategic_analysis_v2.md):** Discusses the reasoning for *deferring* the capability for Kai to handle high-level business strategy and ambiguous goals in v1.0, focusing instead on well-defined coding tasks.
-*   **[Enhanced Code Analysis (Deferred)](concepts/enhanced_code_analysis.md):** Outlines the scope for future (v1.0+) investigation into deeper code understanding beyond simple summarization, such as dependency analysis or complexity metrics.
+These documents outline the primary objectives and strategic direction for Kai v1.0:
 
-## Architecture & Design
+*   **[Kai v1.0 Goal: Maximum Personal Leverage via Reliable Implementation](goals/primary_objective_v1.md):** Defines the core focus on amplifying the primary developer's capabilities.
+*   **[Path Selection Rationale: Prioritizing Personal Leverage (Path 1)](strategy/path_selection_rationale.md):** Explains the decision to focus on personal advantage over broader sharing/impact in v1.0.
+*   **[Analysis of Cultural Motivation & Its Deferred Implementation](strategy/cultural_motivation_analysis.md):** Discusses the secondary motivation for cultural representation and why its active pursuit via Kai is deferred.
 
-### Agentic Systems Explained
+## Architecture & Vision
 
-Recent discussions clarified the design and intent behind the planned agentic workflows (System 1: Requirements, System 2: TDD). These files capture those clarifications:
+This section details the technical design and intended workflow of Kai:
 
-*   **[System 1+2 vs Consolidation for Modifications?](explanations/s1s2-vs-consolidation-modifications.md):** Details why the structured S1+S2 approach (with TDD) is preferred over the existing Consolidation Mode for modifying code, focusing on reliability, precision, and verifiability.
-*   **[Does System 1 Analyze Existing Code?](explanations/s1-analysis-existing-code.md):** Confirms that System 1's analysis *must* consider existing code context (provided via `ProjectContextBuilder`) when handling modification requests to generate accurate specifications.
-*   **[Is System 2 Only a Scaffolder? Analysis Roles?](explanations/s2-scaffolding-vs-modification-analysis.md):** Clarifies that System 2 is designed for both scaffolding *and* modification, explains how its TDD loop handles changes, and distinguishes its cognitive analysis from the context-building analysis (`ProjectAnalyzerService`).
-*   **[Responsibility Distribution (System 1 vs System 2)?](explanations/s1-s2-responsibility-distribution.md):** Outlines the distinct roles: System 1 defines **WHAT** (the `Specification`, including test scenarios), while System 2 handles **HOW** (the TDD implementation loop, generating code/diffs step-by-step).
+*   **[The S1/S2 TDD Architectural Vision for Reliable Implementation](architecture/s1_s2_tdd_vision.md):** Outlines the core System 1 (Specification) -> System 2 (TDD Execution) loop designed for reliable code generation.
 
-### Architectural Decision Records (ADRs)
+### Agentic System Details (Explanations)
+
+These older documents provide background and detailed comparisons related to the agentic systems:
+
+*   **[System 1+2 vs Consolidation for Modifications?](explanations/s1s2-vs-consolidation-modifications.md):** Why the S1/S2 TDD approach is preferred over the existing Consolidation Mode for modifications.
+*   **[Does System 1 Analyze Existing Code?](explanations/s1-analysis-existing-code.md):** How System 1 incorporates existing code context.
+*   **[Is System 2 Only a Scaffolder? Analysis Roles?](explanations/s2-scaffolding-vs-modification-analysis.md):** Clarifies System 2's role in modification and distinguishes analysis types.
+*   **[Responsibility Distribution (System 1 vs System 2)?](explanations/s1-s2-responsibility-distribution.md):** Defines the distinct roles of System 1 (WHAT) and System 2 (HOW).
+
+## Development Focus (v1.0)
+
+*   **[Development Focus (v1.0): Core Engine & Personal Optimization](development/focus_and_priorities_v1.md):** Translates the strategic goals into concrete development priorities, emphasizing S1/S2 implementation and personal workflow optimization.
+
+## Core Concepts & Analysis
+
+These documents cover underlying philosophies, analysis techniques, and competitive positioning:
+
+*   **[Role of Analysis (Context vs. Agentic)](concepts/role_of_analysis_revisited.md):** Clarifies the distinction between descriptive context analysis (`ProjectAnalyzerService`) and cognitive agentic analysis (S1/S2).
+*   **[Analysis Philosophy](concepts/analysis_philosophy.md):** Original document explaining the context-driven nature of the current analysis cache.
+*   **[Competitive Landscape Assessment & Kai's Differentiators](concepts/competitive_landscape_assessment.md):** Assesses competitors (Cursor, Replit) and highlights Kai's intended unique value proposition based on the S1/S2 architecture.
+*   **[Analysis of Kai's Long-Term Personal Advantage](concepts/personal_advantage_analysis.md):** Analyzes the nature and potential durability of the personal competitive edge offered by a private Kai S1/S2 system.
+*   **[Deferred Strategic Analysis (v2.0)](concepts/strategic_analysis_v2.md):** Discusses the deferred capability for handling high-level business strategy.
+*   **[Enhanced Code Analysis (Deferred)](concepts/enhanced_code_analysis.md):** Outlines deferred plans for deeper code understanding beyond context analysis.
+
+## Future Considerations
+
+*   **[Future Considerations (Post-v1.0 Leverage)](future/post_v1_options.md):** Explores potential paths for Kai *after* the primary v1.0 goal is achieved.
+
+## Architectural Decision Records (ADRs)
 
 Key architectural decisions are documented in the `docs/decisions/` directory:
 
-*   **[ADR 001: Defer Electron GUI Transition](decisions/ADR_001_Electron_Transition.md):** Documents the decision to postpone migrating from the CLI to a dedicated Electron GUI to prioritize core agentic workflow development (Systems 1 & 2).
-*   **[ADR 002: Prefer Web Technologies for GUI](decisions/ADR_002_Prefer_WebTech_for_GUI.md):** Establishes the guideline that *if* a GUI is developed in the future, it should utilize Web Technologies (HTML/CSS/JS/TS), potentially packaged with Electron, and explicitly avoid Java or C++ toolkits.
-*   **[ADR 003: Defer Interactive Kanban GUI](decisions/ADR_003_Defer_Interactive_Kanban_GUI.md):** Documents the decision to build a static, read-only web viewer for the Kanban board (`kai show kanban`) instead of a fully interactive GUI, again to maintain focus on core agentic features.
+*   **[ADR 001: Defer Electron GUI Transition](decisions/ADR_001_Electron_Transition.md)**
+*   **[ADR 002: Prefer Web Technologies for GUI](decisions/ADR_002_Prefer_WebTech_for_GUI.md)**
+*   **[ADR 003: Defer Interactive Kanban GUI](decisions/ADR_003_Defer_Interactive_Kanban_GUI.md)**
 
 ## Development & Task Tracking
 
