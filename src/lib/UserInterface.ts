@@ -300,10 +300,10 @@ class UserInterface {
                     choices: [
                         'Start/Continue Conversation',
                         'Consolidate Changes...',
-                        'Re-run Project Analysis', // <-- ADDED Re-run option
-                        'Change Context Mode', // <-- ADDED Change Mode option
-                        // 'Analyze Project (Update Cache)', // <-- REMOVED old option
+                        'Re-run Project Analysis',
+                        'Change Context Mode',
                         'Delete Conversation...',
+                        // REMOVED: 'View Kanban Board' option
                     ],
                 },
             ]);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// src/kai.ts
+// src/kai.ts // Note: Reverting changes from Kanban JSON migration
 import * as fsSync from 'fs'; // Keep sync fs for config defaults
+// REMOVED: fsPromises import
 import { DEFAULT_CONFIG_YAML } from './lib/config_defaults'; // Keep config defaults import
 
 import path from 'path';
@@ -8,6 +9,7 @@ import inquirer from 'inquirer';
 import { Config } from './lib/Config';
 // Ensure UserInteractionResult and any new specific result types are imported
 import { UserInterface, UserInteractionResult, ChangeModeInteractionResult } from './lib/UserInterface';
+// REMOVED: KanbanData, KanbanColumn, KanbanCard imports
 import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
 import { CommandService } from './lib/CommandService';
@@ -18,6 +20,7 @@ import { toSnakeCase } from "./lib/utils";
 // *** ADDED Imports for Analysis Feature ***
 import { ProjectAnalyzerService } from './lib/analysis/ProjectAnalyzerService';
 import { AIClient } from './lib/AIClient'; // Needed for Analyzer instantiation
+// REMOVED: uuid import
 import { WebService } from './lib/WebService'; // <-- ADDED WebService import
 // *** END Imports for Analysis Feature ***
 
@@ -99,6 +102,7 @@ async function performStartupChecks(
         const defaultLogsDir = path.resolve(configDir, "logs"); // Assume default inside .kai
         await fs.ensureKaiDirectoryExists(defaultLogsDir);
 
+        // --- REMOVED Kanban.md / kanban.json check/migration logic ---
 
         console.log(chalk.green("Startup checks complete."));
         return true; // All checks passed or were successfully completed/confirmed
@@ -110,6 +114,10 @@ async function performStartupChecks(
     }
 }
 
+// --- REMOVED: Kanban MD to JSON Conversion/Default Logic ---
+// REMOVED: convertKanbanMdToJson
+// REMOVED: createDefaultKanbanJson
+// --- END REMOVED Kanban Logic ---
 
 async function main() {
 
@@ -247,6 +255,21 @@ async function main() {
         // --- End Initial Context Mode Determination Logic ---
 
         if (!ui) throw new Error("UI was not initialized correctly."); // Type guard
+
+        // --- Start Kanban Web Service (Non-blocking) ---
+        const webService = new WebService(projectRoot);
+        (async () => {
+            try {
+                console.log(chalk.dim("\nAttempting to start Kanban web server in background..."));
+                await webService.showKanban();
+                // Server runs until Kai exits or is stopped manually
+            } catch (webError) {
+                // Log the error but don't block Kai's main functionality
+                console.error(chalk.red('\nBackground Kanban server failed to start:'), webError);
+            }
+        })(); // IIAFE to run async without blocking main flow
+        // --- End Kanban Web Service ---
+
         interactionResult = await ui.getUserInteraction();
 
         if (!interactionResult) {
@@ -422,18 +445,9 @@ async function main() {
              await config.saveConfig(); // Persist the change
              console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
 
-        } else if (mode === 'Analyze Project (Update Cache)') { // Kept existing mode handling
-             // --- Call the Analyzer Service ---
-             if (!analyzerService) { // Should have been initialized above
-                  console.error(chalk.red("Internal Error: Analyzer service not initialized."));
-                  throw new Error("Analyzer service is required for this mode.");
-             }
-             console.log(chalk.cyan("\nManually updating analysis cache...")); // Message adjusted slightly
-             await analyzerService.analyzeProject(); // Call the simple analysis
-             console.log(chalk.cyan("Analysis cache update complete."));
-             // --- End Analyzer Call ---
-
-        } else {
+        }
+        // REMOVED: 'Analyze Project (Update Cache)' mode handling, as it's covered by 'Re-run Project Analysis'
+         else {
             console.log(chalk.yellow(`Unknown mode selected: ${mode}. Exiting.`));
         }
 
@@ -463,6 +477,8 @@ async function main() {
         process.exitCode = 1;
 
     } finally {
+        // Optional: Add logic here to attempt stopping the webserver if needed,
+        // although typically Ctrl+C will handle it.
         console.log(chalk.dim("\nKai finished execution."));
     }
 }
