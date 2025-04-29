@@ -101,7 +101,6 @@ export class WebService {
         return sections;
     }
 
-
     private async findFreePort(startPort: number): Promise<number> {
         let port = startPort;
         while (true) {
@@ -140,7 +139,9 @@ export class WebService {
             const currentPort = (this.server.address() as any).port;
             console.log(chalk.yellow(`Kanban server is already running at http://localhost:${currentPort}`));
             // Optionally open browser again or just return
-            await open(`http://localhost:${currentPort}`);
+            // Removed automatic opening
+            console.log(chalk.yellow(`Click the link above to view the board.`));
+            // await open(`http://localhost:${currentPort}`); // Don't open if already running
             return;
         }
 
@@ -347,14 +348,10 @@ export class WebService {
         this.server.listen(port, '127.0.0.1', async () => {
             const serverUrl = `http://localhost:${port}`;
             console.log(chalk.green(`Kanban server running at: ${serverUrl}`));
-            console.log(chalk.yellow('Opening in your default browser...'));
+            // Removed automatic opening
+            console.log(chalk.yellow(`Click the link above to view the board.`));
             console.log(chalk.grey('(Server will keep running. Press Ctrl+C in this terminal to stop Kai and the server.)'));
-            try {
-                await open(serverUrl);
-            } catch (error) {
-                console.error(chalk.red(`Error opening browser:`), error);
-                console.log(chalk.yellow(`Please open this URL manually: ${serverUrl}`));
-            }
+            // Removed try-catch block for open()
         });
 
         this.server.on('error', (err: NodeJS.ErrnoException) => {
