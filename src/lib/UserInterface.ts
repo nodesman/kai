@@ -292,7 +292,7 @@ class UserInterface {
     // --- getUserInteraction (MODIFIED) ---
     async getUserInteraction(): Promise<UserInteractionResult | null> {
         try {
-            const { mode } = await inquirer.prompt<{ mode: UserInteractionResult['mode'] }>([
+            const { mode } = await inquirer.prompt<{ mode: UserInteractionResult['mode'] | 'Exit Kai' }>([ // Add 'Exit Kai' to type
                 {
                     type: 'list',
                     name: 'mode',
@@ -303,10 +303,18 @@ class UserInterface {
                         'Re-run Project Analysis',
                         'Change Context Mode',
                         'Delete Conversation...',
+                        'Exit Kai', // <-- ADDED Exit option
                         // REMOVED: 'View Kanban Board' option
                     ],
                 },
             ]);
+
+             // --- ADDED: Handle Exit Kai ---
+             if (mode === 'Exit Kai') {
+                console.log(chalk.blue("\nExiting Kai..."));
+                return null; // Signal to the main loop to exit
+             }
+             // --- END Handle Exit Kai ---
 
             if (mode === 'Delete Conversation...') {
                 await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);

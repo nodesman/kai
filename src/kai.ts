@@ -124,60 +124,54 @@ async function main() {
     let codeProcessor: CodeProcessor | null = null;
     let ui: UserInterface | null = null; // Declare UI here
     let targetIdentifier: string | string[] | null = null;
-    let interactionResult: UserInteractionResult | null = null;
+    // interactionResult removed from here, fetched inside the loop
+    let interactionResult: UserInteractionResult | null = null; // <-- DECLARED HERE
     let config: Config | undefined = undefined;
     let analyzerService: ProjectAnalyzerService | null = null; // Define analyzer service variable
     const projectRoot = process.cwd();
+    let webService: WebService | null = null; // Declare webService here to be accessible in finally
 
-    // --- Basic Argument Parsing for 'show kanban' ---
+    // let keepServerAlive = false; // No longer needed with the loop structure
+
+    // --- Special Case: Handle 'show kanban' command directly ---
     const args = process.argv.slice(2); // Get arguments passed to the script
     if (args.length === 2 && args[0] === 'show' && args[1] === 'kanban') {
-        console.log(chalk.cyan('Detected "show kanban" command...'));
-        const webService = new WebService(projectRoot);
+        // If 'show kanban', just start the server and keep the process alive.
+        // Do not enter the main interactive loop.
+        console.log(chalk.cyan('Starting Kanban web server (standalone mode)...'));
+        // keepServerAlive = true; // Set flag (though not used as we return)
+        const standaloneWebService = new WebService(projectRoot);
         try {
-            await webService.showKanban();
+            await standaloneWebService.showKanban();
             // Keep Kai running so the server stays alive until Ctrl+C
             return; // Exit main function after starting server
         } catch (webError) {
-            console.error(chalk.red('Failed to show Kanban board:'), webError);
-            process.exit(1);
+            console.error(chalk.red('Error starting Kanban server in standalone mode:'), webError);
+            process.exit(1); // Exit if standalone server fails
         }
     }
-    // --- End Basic Argument Parsing ---
+    // --- End Special Case Handling ---
 
     try {
         // --- Instantiate Core Services Needed Early (before config determination) ---
-        // Instantiate services that don't strictly depend on finalized config first
-        // REMOVED: ui instantiation here
         const fs = new FileSystem();
         const commandService = new CommandService();
         const gitService = new GitService(commandService, fs);
-        // Cannot create ContextBuilder yet as it needs final config
 
-        // --- Perform Startup Checks (Doesn't need config directly anymore) ---
-        // We pass a placeholder UI here, which will be replaced after config loads.
-        // This is a temporary measure. Ideally, startup checks needing UI would be moved
-        // or the UI dependency removed from performStartupChecks.
-        // For now, let's assume performStartupChecks doesn't critically need a fully configured UI *yet*.
+        // --- Perform Startup Checks ---
         const placeholderUI = new UserInterface(new Config()); // Create a placeholder config
         const startupOk = await performStartupChecks(projectRoot, fs, gitService, placeholderUI);
         if (!startupOk) {
             process.exit(1);
         }
 
-
         // Instantiate Config *after* potentially creating default config.yaml
         config = new Config();
-        // Provide config to instances that need it
         // Instantiate UI *after* config is ready
         ui = new UserInterface(config); // <-- Assign to declared variable
-        // Instantiate AIClient once
         const aiClient = new AIClient(config);
-        // Instantiate ContextBuilder now that config is ready
-        // Inject AIClient into ContextBuilder
-        const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config, aiClient); // <-- Pass AIClient
+        const contextBuilder = new ProjectContextBuilder(fs, gitService, projectRoot, config, aiClient);
 
-        // --- Instantiate Analyzer Service (needed potentially) ---
         analyzerService = new ProjectAnalyzerService(
             config,
             fs,
@@ -185,57 +179,46 @@ async function main() {
             gitService,
             aiClient // <-- Reuse AIClient
         );
-        // --- END Analyzer Instantiation ---
-
 
         // --- Initial Context Mode Determination Logic ---
-        // Check if context mode is undefined (not set in config.yaml or invalid)
+        // (This block remains the same)
         if (config.context.mode === undefined) {
             console.log(chalk.cyan("\n🤖 Context mode not yet determined. Analyzing project size..."));
             const estimatedTokens = await contextBuilder.estimateFullContextTokens();
-            // Use a threshold, e.g., 80% of max prompt tokens
             const tokenLimit = (config.gemini.max_prompt_tokens || 32000) * 0.80;
 
             if (estimatedTokens <= tokenLimit) {
                 console.log(chalk.green(`  Project size (${estimatedTokens} tokens) is within limit (${tokenLimit.toFixed(0)}). Setting mode to 'full'.`));
-                config.context.mode = 'full'; // Update in-memory config
+                config.context.mode = 'full';
             } else {
                 console.warn(chalk.yellow(`  Project size (${estimatedTokens} tokens) exceeds recommended limit (${tokenLimit.toFixed(0)}). Setting mode to 'analysis_cache'.`));
-                config.context.mode = 'analysis_cache'; // Update in-memory config
-
-                // Check if cache exists only if mode is set to 'analysis_cache'
+                config.context.mode = 'analysis_cache';
                 const cachePath = path.resolve(projectRoot, config.analysis.cache_file_path);
                 const cacheExists = await fs.readAnalysisCache(cachePath) !== null;
-
                 if (!cacheExists) {
                      console.error(chalk.red(`  Analysis cache (${config.analysis.cache_file_path}) is required but not found.`));
                      console.log(chalk.blue(`  Running project analysis now to generate the cache...`));
                      if (!analyzerService) throw new Error("Analyzer service not initialized.");
-                     await analyzerService.analyzeProject(); // Run analysis
-
-                     // CRITICAL CHECK: Verify cache exists *after* analysis attempt
+                     await analyzerService.analyzeProject();
                      if (await fs.readAnalysisCache(cachePath) === null) {
                          console.error(chalk.red(`  Analysis finished but failed to create a valid cache file at ${cachePath}. Cannot proceed.`));
-                         console.error(chalk.red(`  Please check analysis logs/errors. Ensure 'phind' or 'find' works and '.gitignore' is filtering correctly.`)); // Updated error hint
-                         process.exit(1); // Exit if analysis failed to produce the required cache
+                         console.error(chalk.red(`  Please check analysis logs/errors. Ensure 'phind' or 'find' works and '.gitignore' is filtering correctly.`));
+                         process.exit(1);
                      }
                       console.log(chalk.green(`  Analysis complete. Proceeding in 'analysis_cache' mode.`));
                 } else {
                      console.log(chalk.green(`  Found existing analysis cache at ${cachePath}. Proceeding in 'analysis_cache' mode.`));
                 }
             }
-            // Persist the determined mode to config.yaml
              try {
                   await config.saveConfig();
              } catch (saveError) {
                   console.error(chalk.red(`  ❌ Error: Failed to save determined context mode '${config.context.mode}' to config.yaml.`), saveError);
-                  // Decide if fatal. For now, warn and continue with in-memory setting.
                   console.warn(chalk.yellow(`  Warning: Proceeding with mode '${config.context.mode}' for this session only.`));
              }
         } else {
-             const currentMode = config.context.mode; // Should be 'full', 'analysis_cache', or 'dynamic'
+             const currentMode = config.context.mode;
              console.log(chalk.blue(`\n🔧 Context mode already set to '${currentMode}'.`));
-             // If mode requires cache ('analysis_cache' or 'dynamic'), ensure cache exists
              if ((currentMode === 'analysis_cache' || currentMode === 'dynamic')) {
                   const cachePath = path.resolve(projectRoot, config.analysis.cache_file_path);
                   const cacheExists = await fs.readAnalysisCache(cachePath) !== null;
@@ -243,7 +226,7 @@ async function main() {
                        console.error(chalk.red(`  Mode is '${currentMode}', but required Analysis cache (${config.analysis.cache_file_path}) is not found.`));
                        console.log(chalk.blue(`  Running project analysis now to generate the cache...`));
                        if (!analyzerService) throw new Error("Analyzer service not initialized.");
-                       await analyzerService.analyzeProject(); // Run analysis
+                       await analyzerService.analyzeProject();
                        if (await fs.readAnalysisCache(cachePath) === null) {
                              console.error(chalk.red(`  Analysis finished but failed to create a valid cache file. Mode '${currentMode}' cannot function. Exiting.`));
                              process.exit(1);
@@ -255,13 +238,14 @@ async function main() {
         // --- End Initial Context Mode Determination Logic ---
 
         if (!ui) throw new Error("UI was not initialized correctly."); // Type guard
+        // Instantiate WebService once for the main application life cycle
+        webService = new WebService(projectRoot); // Assign to the outer variable
 
         // --- Start Kanban Web Service (Non-blocking) ---
-        const webService = new WebService(projectRoot);
         (async () => {
             try {
                 console.log(chalk.dim("\nAttempting to start Kanban web server in background..."));
-                await webService.showKanban();
+                await webService.showKanban(); // Reuse the webService instance
                 // Server runs until Kai exits or is stopped manually
             } catch (webError) {
                 // Log the error but don't block Kai's main functionality
@@ -270,17 +254,7 @@ async function main() {
         })(); // IIAFE to run async without blocking main flow
         // --- End Kanban Web Service ---
 
-        interactionResult = await ui.getUserInteraction();
-
-        if (!interactionResult) {
-            console.log(chalk.yellow("Exiting."));
-            return;
-        }
-
-        const { mode } = interactionResult;
-
-        // --- Instantiate CodeProcessor (pass UI and ContextBuilder) ---
-        // Ensure CodeProcessor gets the potentially updated config
+        // --- Instantiate CodeProcessor once before the loop ---
         codeProcessor = new CodeProcessor(
             config, // Pass the final config
             fs,
@@ -288,184 +262,185 @@ async function main() {
             gitService,
             ui, // Pass the UI instance
             contextBuilder // Pass the ContextBuilder instance
-            // REMOVED: aiClient argument - CodeProcessor creates its own
         );
         // --- End CodeProcessor Instantiation ---
 
-        // --- Handle selected mode ---
-        if (mode === 'Start/Continue Conversation') {
-             // ... (Rest of Start/Continue logic unchanged) ...
-             const startResult = interactionResult as Extract<UserInteractionResult, { mode: 'Start/Continue Conversation' }>;
-            const { conversationName: convName, isNewConversation, selectedModel } = startResult;
+        // --- Main Interaction Loop ---
+        while (true) {
+            // Get user interaction INSIDE the loop
+            interactionResult = await ui.getUserInteraction(); // <-- ASSIGN to existing variable
 
-            targetIdentifier = convName;
-
-            // --- Model Override Logic (remains the same) ---
-            if (selectedModel && config.gemini.model_name !== selectedModel) {
-                console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
-                config.gemini.model_name = selectedModel;
-                // Recreate AIClient within CodeProcessor or update it if necessary
-                // For now, assume CodeProcessor handles this internally (e.g., passes config down)
-                // Or better: Pass selectedModel explicitly to startConversation if needed
-                codeProcessor.aiClient = new AIClient(config); // Simple recreation for now
-            } else {
-                console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
-            }
-            // --- End Model Override ---
-
-            if (!targetIdentifier) {
-                console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
-                throw new Error("Conversation name is required for this mode.");
-            }
-            // --- Call the refactored startConversation ---
-            await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false);
-            // --- End call ---
-
-        } else if (mode === 'Consolidate Changes...') {
-             // ... (Rest of Consolidate Changes logic unchanged) ...
-             const consolidateResult = interactionResult as Extract<UserInteractionResult, { mode: 'Consolidate Changes...' }>;
-            const { conversationName: convName, selectedModel } = consolidateResult;
-
-            targetIdentifier = convName;
-
-            // --- Model Override Logic (remains the same) ---
-            if (selectedModel && config.gemini.model_name !== selectedModel) {
-                console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
-                config.gemini.model_name = selectedModel;
-                 // Recreate AIClient within CodeProcessor if needed
-                codeProcessor.aiClient = new AIClient(config); // Simple recreation for now
-            } else {
-                console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
-            }
-            // --- End Model Override ---
-
-            if (!targetIdentifier) {
-                console.error(chalk.red("Internal Error: Conversation name missing for Consolidation mode."));
-                throw new Error("Conversation name is required for consolidation.");
-            }
-            console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(targetIdentifier)}...`));
-            // --- Call the refactored processConsolidationRequest ---
-            await codeProcessor.processConsolidationRequest(targetIdentifier);
-            // --- End call ---
-            console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
-
-        } else if (mode === 'Delete Conversation...') {
-             // ... (Rest of Delete Conversation logic unchanged) ...
-             const deleteResult = interactionResult as Extract<UserInteractionResult, { mode: 'Delete Conversation...' }>;
-            const { conversationNamesToDelete } = deleteResult;
-
-            targetIdentifier = conversationNamesToDelete;
-
-            if (!targetIdentifier || !Array.isArray(targetIdentifier) || targetIdentifier.length === 0) {
-                console.error(chalk.red("Internal Error: Conversation names missing for Delete mode after confirmation."));
-                throw new Error("Conversation names array is required for deletion.");
+            if (!interactionResult) {
+                break; // User chose 'Exit Kai', break the loop
             }
 
-            console.log(chalk.yellow(`\nAttempting to delete ${targetIdentifier.length} conversation(s)...`));
+            const { mode } = interactionResult;
 
-            let successCount = 0;
-            let failCount = 0;
+            // Reset targetIdentifier for each loop iteration
+            targetIdentifier = null;
 
-            for (const nameToDelete of targetIdentifier) {
-                const snakeName = toSnakeCase(nameToDelete);
-                const conversationFileName = `${snakeName}.jsonl`;
-                const conversationFilePath = path.join(config.chatsDir, conversationFileName);
-                const editorFileName = `${snakeName}_edit.txt`;
-                const editorFilePath = path.join(config.chatsDir, editorFileName);
+            // --- Handle selected mode ---
+            if (mode === 'Start/Continue Conversation') {
+                 if (!codeProcessor) throw new Error("CodeProcessor not initialized."); // Guard
+                 if (!config) throw new Error("Config not initialized."); // Guard
+                 const startResult = interactionResult as Extract<UserInteractionResult, { mode: 'Start/Continue Conversation' }>;
+                const { conversationName: convName, isNewConversation, selectedModel } = startResult;
 
-                console.log(chalk.yellow(`  Deleting: ${chalk.cyan(nameToDelete)} (${chalk.grey(snakeName)})...`));
-                let conversationDeleted = false;
-                let editorDeleted = false;
-                let editorSkipped = false;
+                targetIdentifier = convName;
 
-                try {
-                    await fs.deleteFile(conversationFilePath);
-                    console.log(chalk.green(`    ✓ Successfully deleted conversation file: ${conversationFilePath}`));
-                    conversationDeleted = true;
-                } catch (deleteError) {
-                    if ((deleteError as NodeJS.ErrnoException).code === 'ENOENT') {
-                        console.error(chalk.red(`    ❌ Error: Conversation file not found: ${conversationFilePath}.`));
-                    } else {
-                        console.error(chalk.red(`    ❌ Error deleting conversation file ${conversationFilePath}:`), deleteError);
-                        failCount++;
-                        continue;
+                // --- Model Override Logic ---
+                if (codeProcessor && selectedModel && config.gemini.model_name !== selectedModel) { // Check codeProcessor exists
+                    console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
+                    config.gemini.model_name = selectedModel;
+                    codeProcessor.aiClient = new AIClient(config); // Simple recreation for now
+                } else if (config) {
+                    console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
+                }
+                // --- End Model Override ---
+
+                if (!targetIdentifier) {
+                    console.error(chalk.red("Internal Error: Conversation name missing for Start/Continue mode."));
+                    continue; // Go back to menu
+                }
+                // --- Call the refactored startConversation ---
+                await codeProcessor.startConversation(targetIdentifier, isNewConversation ?? false);
+                // --- End call ---
+
+            } else if (mode === 'Consolidate Changes...') {
+                 if (!codeProcessor) throw new Error("CodeProcessor not initialized."); // Guard
+                 if (!config) throw new Error("Config not initialized."); // Guard
+                 const consolidateResult = interactionResult as Extract<UserInteractionResult, { mode: 'Consolidate Changes...' }>;
+                const { conversationName: convName, selectedModel } = consolidateResult;
+
+                targetIdentifier = convName;
+
+                // --- Model Override Logic ---
+                if (selectedModel && config.gemini.model_name !== selectedModel) {
+                    console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
+                    config.gemini.model_name = selectedModel;
+                     // Recreate AIClient within CodeProcessor if needed
+                     if (codeProcessor) { codeProcessor.aiClient = new AIClient(config); }
+                } else if (config) {
+                    console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
+                }
+                // --- End Model Override ---
+
+                if (!targetIdentifier) {
+                    console.error(chalk.red("Internal Error: Conversation name missing for Consolidation mode."));
+                    continue; // Go back to menu
+                }
+                console.log(chalk.magenta(`\n🚀 Starting consolidation process for conversation: ${chalk.cyan(targetIdentifier)}...`));
+                // --- Call the refactored processConsolidationRequest ---
+                await codeProcessor.processConsolidationRequest(targetIdentifier);
+                // --- End call ---
+                console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
+
+            } else if (mode === 'Delete Conversation...') {
+                if (!config) throw new Error("Config not initialized."); // Guard
+                 const deleteResult = interactionResult as Extract<UserInteractionResult, { mode: 'Delete Conversation...' }>;
+                const { conversationNamesToDelete } = deleteResult;
+
+                targetIdentifier = conversationNamesToDelete;
+
+                if (!targetIdentifier || !Array.isArray(targetIdentifier) || targetIdentifier.length === 0) {
+                    console.error(chalk.red("Internal Error: Conversation names missing for Delete mode after confirmation."));
+                    continue; // Go back to menu
+                }
+
+                console.log(chalk.yellow(`\nAttempting to delete ${targetIdentifier.length} conversation(s)...`));
+
+                let successCount = 0;
+                let failCount = 0;
+
+                for (const nameToDelete of targetIdentifier) {
+                    const snakeName = toSnakeCase(nameToDelete);
+                    const conversationFileName = `${snakeName}.jsonl`;
+                    const conversationFilePath = path.join(config.chatsDir, conversationFileName);
+                    const editorFileName = `${snakeName}_edit.txt`;
+                    const editorFilePath = path.join(config.chatsDir, editorFileName);
+
+                    console.log(chalk.yellow(`  Deleting: ${chalk.cyan(nameToDelete)} (${chalk.grey(snakeName)})...`));
+                    let conversationDeleted = false;
+                    let editorDeleted = false;
+                    let editorSkipped = false;
+
+                    try {
+                        await fs.deleteFile(conversationFilePath);
+                        console.log(chalk.green(`    ✓ Successfully deleted conversation file: ${conversationFilePath}`));
+                        conversationDeleted = true;
+                    } catch (deleteError) {
+                        if ((deleteError as NodeJS.ErrnoException).code === 'ENOENT') {
+                            console.error(chalk.red(`    ❌ Error: Conversation file not found: ${conversationFilePath}.`));
+                        } else {
+                            console.error(chalk.red(`    ❌ Error deleting conversation file ${conversationFilePath}:`), deleteError);
+                            failCount++;
+                            continue;
+                        }
+                    }
+
+                    try {
+                        await fs.access(editorFilePath);
+                        await fs.deleteFile(editorFilePath);
+                        console.log(chalk.green(`    ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
+                        editorDeleted = true;
+                    } catch (editorError) {
+                        if ((editorError as NodeJS.ErrnoException).code === 'ENOENT') {
+                                console.log(chalk.gray(`    ⓘ No temporary editor file found to delete for ${nameToDelete}.`));
+                            editorSkipped = true;
+                        } else {
+                            console.warn(chalk.yellow(`    ! Warning: Could not delete temporary editor file ${editorFilePath}:`), editorError);
+                        }
+                    }
+
+                    if (conversationDeleted || editorDeleted) {
+                         successCount++;
+                    } else if (editorSkipped && !conversationDeleted) {
+                         successCount++;
+                    } else if (!conversationDeleted && !editorDeleted && !editorSkipped) {
+                        successCount++;
                     }
                 }
 
-                try {
-                    await fs.access(editorFilePath);
-                    await fs.deleteFile(editorFilePath);
-                    console.log(chalk.green(`    ✓ Successfully deleted temporary editor file: ${editorFilePath}`));
-                    editorDeleted = true;
-                } catch (editorError) {
-                    if ((editorError as NodeJS.ErrnoException).code === 'ENOENT') {
-                        // Only log if conversation file *was* deleted, otherwise it's expected
-                        // if (conversationDeleted) {
-                            console.log(chalk.gray(`    ⓘ No temporary editor file found to delete for ${nameToDelete}.`));
-                        // }
-                        editorSkipped = true; // Mark as skipped regardless
-                    } else {
-                        console.warn(chalk.yellow(`    ! Warning: Could not delete temporary editor file ${editorFilePath}:`), editorError);
-                    }
-                }
+                console.log(chalk.blue(`\nDeletion Summary: ${successCount} completed (files deleted/skipped), ${failCount} failed (unexpected errors).`));
+                // --- End Delete Logic ---
 
+            } else if (mode === 'Re-run Project Analysis') {
+                 if (!analyzerService) {
+                      console.error(chalk.red("Internal Error: Analyzer service not initialized."));
+                      continue; // Go back to menu
+                 }
+                 console.log(chalk.cyan("\nManually re-running project analysis..."));
+                 await analyzerService.analyzeProject(); // Call analysis
+                 console.log(chalk.cyan("Analysis complete."));
 
-                if (conversationDeleted || editorDeleted) { // Simplified condition: success if either primary file or edit file deleted
-                     successCount++;
-                } else if (editorSkipped && !conversationDeleted) {
-                     // Consider missing conversation file + missing editor file as success (nothing to delete)
-                     successCount++;
-                } else if (!conversationDeleted && !editorDeleted && !editorSkipped) {
-                    // Both missing, no action taken, considered success
-                    successCount++;
-                }
+            } else if (mode === 'Change Context Mode') { // Needs config
+                 if (!config) throw new Error("Config not initialized."); // Guard
+                 const changeModeResult = interactionResult as ChangeModeInteractionResult;
+                 const { newMode } = changeModeResult;
+                 console.log(chalk.cyan(`\nChanging context mode to '${newMode}'...`));
+                 config.context.mode = newMode; // Update in-memory config
+                 await config.saveConfig(); // Persist the change
+                 console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
+
+            } else {
+                console.log(chalk.yellow(`Unknown mode selected: ${mode}. Returning to menu.`));
             }
-
-            console.log(chalk.blue(`\nDeletion Summary: ${successCount} completed (files deleted/skipped), ${failCount} failed (unexpected errors).`));
-            // --- End Delete Logic ---
-
-        } else if (mode === 'Re-run Project Analysis') {
-             // --- Call the Analyzer Service ---
-             if (!analyzerService) {
-                  console.error(chalk.red("Internal Error: Analyzer service not initialized."));
-                  throw new Error("Analyzer service is required for this mode.");
-             }
-             console.log(chalk.cyan("\nManually re-running project analysis..."));
-             await analyzerService.analyzeProject(); // Call analysis
-             console.log(chalk.cyan("Analysis complete."));
-             // --- End Analyzer Call ---
-
-        } else if (mode === 'Change Context Mode') {
-             // --- Update Config and Save ---
-             if (!config) throw new Error("Config not initialized."); // Guard
-             const changeModeResult = interactionResult as ChangeModeInteractionResult;
-             const { newMode } = changeModeResult;
-             console.log(chalk.cyan(`\nChanging context mode to '${newMode}'...`));
-             config.context.mode = newMode; // Update in-memory config
-             await config.saveConfig(); // Persist the change
-             console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
-
-        }
-        // REMOVED: 'Analyze Project (Update Cache)' mode handling, as it's covered by 'Re-run Project Analysis'
-         else {
-            console.log(chalk.yellow(`Unknown mode selected: ${mode}. Exiting.`));
-        }
+            // Loop continues here, will call ui.getUserInteraction() again
+        } // End while(true) loop
 
     } catch (error) {
+        // Error handling logic remains largely the same
         const loggableIdentifier = typeof targetIdentifier === 'string' ? targetIdentifier : Array.isArray(targetIdentifier) ? targetIdentifier.join(', ') : 'unknown_context';
-
-         // Use the instantiated codeProcessor which now contains the aiClient internally
-         // Ensure config is available for logging path
          if (config && codeProcessor && codeProcessor.aiClient) {
              try {
-                 // Only log to conversation file for these modes
-                 if ((interactionResult?.mode === 'Start/Continue Conversation' || interactionResult?.mode === 'Consolidate Changes...') && typeof targetIdentifier === 'string') {
+                 // Only log to conversation file for specific modes that have a target identifier
+                 if (targetIdentifier && typeof targetIdentifier === 'string' && (interactionResult?.mode === 'Start/Continue Conversation' || interactionResult?.mode === 'Consolidate Changes...')) {
                      const logFileName = `${toSnakeCase(targetIdentifier)}.jsonl`;
                      const logFilePath = path.join(config.chatsDir, logFileName);
                      await codeProcessor.aiClient.logConversation(logFilePath, { type: 'error', error: `Main execution error: ${(error as Error).message}` });
                      console.error(chalk.red(`\n🛑 Main execution error logged to: ${logFilePath}`), error);
                  } else {
-                     console.error(chalk.red(`\n🛑 An unexpected error occurred in main execution (Mode: ${interactionResult?.mode || 'unknown'}, Context: ${loggableIdentifier}).`), error);
+                     console.error(chalk.red(`\n🛑 An unexpected error occurred in main execution (Last Mode: ${interactionResult?.mode || 'unknown'}, Context: ${loggableIdentifier}).`), error);
                  }
              } catch (logError) {
                  console.error(chalk.red("Additionally failed to log main error:"), logError);
@@ -473,12 +448,18 @@ async function main() {
          } else {
              console.error(chalk.red(`\n🛑 General error occurred (Context: ${loggableIdentifier}). Could not log to conversation file (config or services unavailable).`), error);
          }
-
-        process.exitCode = 1;
+        process.exitCode = 1; // Indicate error on exit
 
     } finally {
-        // Optional: Add logic here to attempt stopping the webserver if needed,
-        // although typically Ctrl+C will handle it.
+        // Stop the web server when the main loop exits (e.g., user chose 'Exit Kai')
+        // The 'show kanban' case exits before reaching here.
+        if (webService) { // Check if webService was instantiated
+            try {
+                await webService.stopServer(); // Wait for the server to close
+            } catch (stopError) {
+                console.error(chalk.red('Error during server shutdown:'), stopError);
+            }
+        }
         console.log(chalk.dim("\nKai finished execution."));
     }
 }

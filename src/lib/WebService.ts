@@ -361,13 +361,23 @@ export class WebService {
     }
 
     // Optional: Method to stop the server if needed later
-    stopServer(): void {
-        if (this.server) {
-            console.log(chalk.blue('Stopping Kanban server...'));
-            this.server.close(() => {
-                console.log(chalk.green('Kanban server stopped.'));
-                this.server = null;
-            });
-        }
+    stopServer(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (this.server && this.server.listening) {
+                console.log(chalk.blue('Stopping Kanban server...'));
+                this.server.close((err) => { // Asynchronous close with error handling
+                    if (err) {
+                        console.error(chalk.red('Error stopping Kanban server:'), err);
+                        reject(err); // Reject the promise on error
+                    } else {
+                        console.log(chalk.green('Kanban server stopped.'));
+                        this.server = null;
+                        resolve(); // Resolve the promise on successful close
+                    }
+                });
+            } else {
+                resolve(); // Resolve immediately if server is not running or doesn't exist
+            }
+        });
     }
 }
