@@ -175,21 +175,23 @@ export class GitService {
 
     // --- MOVED FROM FileSystem: readGitignoreForContext (renamed slightly) ---
     /**
-     * Reads .gitignore rules for in-memory filtering during context building.
-     * Does NOT create or modify the file itself. Always includes default ignores.
-     * Uses the injected FileSystem service to read the file.
+     * Reads ignore rules from .gitignore and .kaiignore for in-memory filtering during context building.
+     * Does NOT create or modify the files. Always includes default in-memory ignores.
+     * Uses the injected FileSystem service to read the files.
      * @param projectRoot The root directory of the project.
-     * @returns An `ignore` instance populated with rules.
+     * @returns An `ignore` instance populated with rules from both files and defaults.
      */
     async getIgnoreRules(projectRoot: string): Promise<Ignore> { // Renamed
         const ig = ignore();
-        const gitignorePath = path.join(projectRoot, '.gitignore');
-        const kaiIgnoreLine = '.kai/'; // Use the directory ignore rule
+        const gitignorePath = path.resolve(projectRoot, '.gitignore'); // Use resolve for consistency
+        const kaiignorePath = path.resolve(projectRoot, '.kaiignore'); // Path to .kaiignore at root
+        const defaultInMemoryIgnores = ['.git', '.kai/']; // Essential ignores regardless of files
 
         // --- Step 1: Always add essential *in-memory* ignores ---
-        ig.add(['.git', 'node_modules', '.gitignore', kaiIgnoreLine]); // Ignore .kai/ in memory too
+        // node_modules and .gitignore should typically be handled by the .gitignore file itself
+        ig.add(defaultInMemoryIgnores);
 
-        // --- Step 2: Read the actual file IF it exists using injected fs ---
+        // --- Step 2: Read the actual .gitignore IF it exists using injected fs ---
         try {
             // Use injected fs instance
             const gitignoreContent = await this.fs.readFile(gitignorePath); // Returns null if ENOENT
@@ -204,6 +206,20 @@ export class GitService {
             console.error(chalk.red(`  Warning: Error reading .gitignore file at ${gitignorePath} for context building:`), readError);
         }
 
+        // --- Step 2b: Read .kaiignore IF it exists using injected fs ---
+        try {
+             // Use injected fs instance
+            const kaiignoreContent = await this.fs.readFile(kaiignorePath); // Returns null if ENOENT
+            if (kaiignoreContent !== null) {
+                console.log(chalk.dim(`  Applying rules from existing .kaiignore for context building.`));
+                ig.add(kaiignoreContent); // Add rules from .kaiignore
+            } else {
+                 console.log(chalk.dim(`  No .kaiignore file found, skipping additional rules.`));
+            }
+        } catch (readError) {
+            // Catch errors from readFile *other* than ENOENT
+             console.error(chalk.red(`  Warning: Error reading .kaiignore file at ${kaiignorePath} for context building:`), readError);
+        }
         // --- Step 3: Return the in-memory ignore object ---
         return ig;
     }

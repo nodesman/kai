@@ -94,6 +94,19 @@ async function performStartupChecks(
         } else {
             console.log(chalk.dim(`  Found existing config.yaml in '.kai/'. Skipping default creation.`));
         }
+
+        // --- Ensure .kaiignore exists at project root ---
+        const kaiignorePath = path.resolve(projectRoot, '.kaiignore');
+        if (!fsSync.existsSync(kaiignorePath)) {
+            console.log(chalk.yellow(`  '.kaiignore' not found at project root. Creating a default one...`));
+            try {
+                const defaultKaiignoreContent = `# Add patterns here to exclude files/directories from Kai's context (e.g., build/, *.log)\n`;
+                fsSync.writeFileSync(kaiignorePath, defaultKaiignoreContent, 'utf8');
+                console.log(chalk.green(`  Successfully created default .kaiignore.`));
+            } catch (writeError) {
+                console.error(chalk.red(`  ❌ Error creating default .kaiignore at ${kaiignorePath}:`), writeError);
+            }
+        }
         // --- End Scaffold config.yaml ---
 
 

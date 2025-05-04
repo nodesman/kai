@@ -5,3 +5,13 @@ node_modules
 bin
 cmake-build-debug
 qtsrc
+.git
+bin
+__tests__
+README.md
+docs/
+yarn.lock
+Kanban.md
+LICENSE
+jest.config.js
+.kaiignore
