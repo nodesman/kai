@@ -389,14 +389,14 @@ class UserInterface {
              }
 
             // --- Remaining modes require Model selection ---
-            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-preview-03-25";
+            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-exp-03-25";
             const { modelChoice } = await inquirer.prompt([
                 {
                     type: 'list',
                     name: 'modelChoice',
                     message: 'Select the AI model to use for this operation:',
                     choices: [
-                        { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-preview-03-25' },
+                        { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' },
                         { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
                     ],
                     default: this.config.gemini.model_name,

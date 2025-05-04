@@ -122,7 +122,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
 
         const finalGeminiConfig: GeminiConfig = {
             api_key: apiKey, // Mandatory, loaded from env
-            model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-preview-03-25", // Default initial model
+            model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-exp-03-25", // Default initial model
             subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || defaultSubsequentModel, // Default subsequent
             max_output_tokens: yamlConfig.gemini?.max_output_tokens || 8192,
             max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 32000, // Default context limit for context building
