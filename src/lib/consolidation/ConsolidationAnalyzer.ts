@@ -1,10 +1,10 @@
 // File: src/lib/consolidation/ConsolidationAnalyzer.ts
 import path from 'path';
 import chalk from 'chalk';
-import { AIClient, LogEntryData } from '../AIClient';
-import { Message } from '../models/Conversation'; // Import Message directly
-import { ConsolidationPrompts } from './prompts';
-import { ConsolidationAnalysis } from './types';
+import {AIClient, LogEntryData} from '../AIClient';
+import {Message} from '../models/Conversation'; // Import Message directly
+import {ConsolidationPrompts} from './prompts';
+import {ConsolidationAnalysis} from './types';
 
 // --- ADDED: Looser type definition for raw operations before validation ---
 type RawOperationFromAI = {
@@ -60,6 +60,15 @@ export class ConsolidationAnalyzer {
             analysis.operations = this._validateAndNormalizeOperations(analysis.operations as RawOperationFromAI[]); // Cast input here
 
             console.log(chalk.cyan(`    Analysis received from ${modelName}. Found ${analysis.operations.length} valid operations.`));
+            if (analysis.operations.length === 0) {
+                console.log(chalk.yellow(`    Analysis from ${modelName} resulted in 0 valid file operations.`));
+                // Optionally log raw response if operations are empty but expected
+                if (responseTextRaw.length > 50) { // Arbitrary length to avoid logging trivial empty responses
+                    console.log(chalk.dim(`      (Raw response for 0 ops: ${responseTextRaw.substring(0, 100)}...)`));
+                }
+            } else {
+                console.log(chalk.cyan(`    Analysis received from ${modelName}. Found ${analysis.operations.length} valid operations.`));
+            }
             return analysis; // Returns the strict ConsolidationAnalysis type
 
         } catch (error) {
@@ -67,7 +76,11 @@ export class ConsolidationAnalyzer {
             let errorMessage = `Failed to analyze conversation using ${modelName}. Error: ${(error as Error).message}`;
             // --- FIX 1: responseTextRaw is now accessible here ---
             if ((errorMessage.includes("Failed to parse JSON") || errorMessage.includes("Invalid JSON structure")) && responseTextRaw) {
-                errorMessage += `. Raw: ${responseTextRaw}`; // Append raw response for easier debugging
+                // Log full raw response separately for clarity
+                console.error(chalk.red("--- RAW AI RESPONSE (Analysis) ---"));
+                console.error(responseTextRaw);
+                console.error(chalk.red("--- END RAW AI RESPONSE (Analysis) ---"));
+                // errorMessage can remain concise for the thrown error
             }
             const errorMsg = errorMessage;
             console.error(chalk.red(`    ${errorMsg}`));
@@ -85,7 +98,7 @@ export class ConsolidationAnalyzer {
      */
     private async _callAnalysisAI(analysisPrompt: string, useFlashModel: boolean): Promise<string> {
         return this.aiClient.getResponseTextFromAI(
-            [{ role: 'user', content: analysisPrompt }],
+            [{role: 'user', content: analysisPrompt}],
             useFlashModel
         );
     }
@@ -99,24 +112,62 @@ export class ConsolidationAnalyzer {
      * @throws An error if parsing or validation fails.
      */
     private _parseAndAdaptAnalysisResponse(responseTextRaw: string, modelName: string): ConsolidationAnalysis {
-        let responseTextClean = responseTextRaw.trim();
-        const jsonMatch = responseTextClean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
 
-        if (jsonMatch && jsonMatch[1]) {
-            responseTextClean = jsonMatch[1].trim();
-        } else if (responseTextClean.startsWith('{') && responseTextClean.endsWith('}')) {
-            // Assume raw JSON object
-        } else if (responseTextClean.startsWith('[') && responseTextClean.endsWith(']')) {
-            // Assume raw JSON array - THIS IS THE NEW CASE TO HANDLE
-            console.log(chalk.dim(`      Received raw JSON array from ${modelName}. Attempting to adapt.`));
-        }
-        else {
-            // Throw error only if it doesn't look like JSON at all or isn't wrapped in fences
-            throw new Error(`Analysis response from ${modelName} was not in a recognizable JSON format (object/array, optional fences).`);
+        let jsonString = responseTextRaw.trim();
+
+        // Attempt 1: Extract from markdown fences
+        // Regex to find ```json ... ``` or ``` ... ```, capturing the content.
+        const fenceMatch = jsonString.match(/```(?:[a-zA-Z0-9])?\s*([\s\S]?)\s*```/);
+        if (fenceMatch && fenceMatch[1]) {
+            jsonString = fenceMatch[1].trim();
+            console.log(chalk.dim(`      Extracted JSON from markdown fences.`));
+        } else {
+            // Attempt 2: If no fences, try to find JSON substring by looking for first/last brackets
+            // This is useful if the AI includes conversational text around the JSON.
+            console.log(chalk.dim(`      No markdown fences found or content not fully inside. Attempting substring extraction.`));
+            const firstCurly = jsonString.indexOf('{');
+            const firstSquare = jsonString.indexOf('[');
+            let startIndex = -1;
+
+            // Determine if it's likely an object or array start
+            if (firstCurly !== -1 && (firstSquare === -1 || firstCurly < firstSquare)) {
+                startIndex = firstCurly;
+            } else if (firstSquare !== -1) {
+                startIndex = firstSquare;
+            }
+
+            if (startIndex !== -1) {
+                const lastCurly = jsonString.lastIndexOf('}');
+                const lastSquare = jsonString.lastIndexOf(']');
+                let endIndex = -1;
+
+                // Determine if it's likely an object or array end
+                if (startIndex === firstCurly && lastCurly !== -1) { // Expecting an object
+                    endIndex = lastCurly;
+                } else if (startIndex === firstSquare && lastSquare !== -1) { // Expecting an array
+                    endIndex = lastSquare;
+                } else if (lastCurly > startIndex) { // Fallback if mixed
+                    endIndex = lastCurly;
+                } else if (lastSquare > startIndex) { // Fallback if mixed
+                    endIndex = lastSquare;
+                }
+
+                if (endIndex > startIndex) {
+                    jsonString = jsonString.substring(startIndex, endIndex + 1);
+                )
+                    ;
+                    console.log(chalk.dim(`      Extracted potential JSON substring: ${jsonString.substring(0, 100)}...`));
+                } else {
+                    console.log(chalk.dim(`      Could not identify a clear JSON substring using bracket matching. Proceeding with original trimmed string.`));
+                }
+            } else {
+                console.log(chalk.dim(`      No clear JSON start ( '{' or '[' ) found. Proceeding with original trimmed string.`));
+            }
         }
 
+        // Now, try to parse the processed jsonString
         try {
-            const parsedData = JSON.parse(responseTextClean);
+            const parsedData = JSON.parse(jsonString);
             let analysis: ConsolidationAnalysis; // Still aims for the target structure
 
             // --- ADAPTATION LOGIC ---
@@ -124,26 +175,30 @@ export class ConsolidationAnalyzer {
                 // If the AI returned just the array, wrap it in the expected structure
                 console.log(chalk.dim(`      Adapting raw array response into {"operations": [...]}`));
                 // The elements within parsedData might still have file_path at this point
-                analysis = { operations: parsedData };
+                analysis = {operations: parsedData};
             } else if (parsedData && typeof parsedData === 'object' && Array.isArray(parsedData.operations)) {
                 // If the AI returned the correct object structure
                 // The elements within parsedData.operations might still have file_path
                 analysis = parsedData as ConsolidationAnalysis; // Cast, validation happens next
             } else {
                 // If it's an object but doesn't have the 'operations' array
-                throw new Error(`Invalid JSON structure received from ${modelName}. Expected { "operations": [...] } or just [...]. Received: ${responseTextClean}`);
+                throw new Error(`Invalid JSON structure. Expected { "operations": [...] } or just [...]. Received after cleaning: ${jsonString.substring(0, 200)}...`);
             }
             // --- END ADAPTATION LOGIC ---
 
             // Basic structure validation *after* potential adaptation
             if (!analysis || !Array.isArray(analysis.operations)) {
-                throw new Error(`Invalid final JSON structure after parsing/adaptation. Expected { "operations": [...] }. Result: ${JSON.stringify(analysis)}`);
+                throw new Error(`Invalid final JSON structure after parsing/adaptation. Expected { "operations": [...] }. Result: ${JSON.stringify(analysis).substring(0,200)}...`);
             }
             // Note: analysis.operations might contain RawOperationFromAI types here,
             // they get strictly validated in the next step.
             return analysis;
         } catch (parseError) {
-            throw new Error(`Failed to parse JSON analysis from ${modelName}. Error: ${(parseError as Error).message}`);
+            // Log the string that JSON.parse failed on
+            console.error(chalk.red(`--- FAILED TO PARSE THIS JSON STRING (Analysis Attempt) ---`));
+            console.error(jsonString);
+            console.error(chalk.red(`--- END FAILED JSON STRING (Analysis Attempt) ---`));
+            throw new Error(`Failed to parse JSON analysis from ${modelName} after cleaning. Error: ${(parseError as Error).message}`);
         }
     }
 
@@ -203,7 +258,7 @@ export class ConsolidationAnalyzer {
      */
     private async _logError(conversationFilePath: string, errorMsg: string): Promise<void> {
         try {
-            await this.aiClient.logConversation(conversationFilePath, { type: 'error', role: 'system', error: errorMsg });
+            await this.aiClient.logConversation(conversationFilePath, {type: 'error', role: 'system', error: errorMsg});
         } catch (logErr) {
             console.error(chalk.red("Additionally failed to log analysis error:"), logErr);
         }
