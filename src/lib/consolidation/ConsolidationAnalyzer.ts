@@ -154,8 +154,6 @@ export class ConsolidationAnalyzer {
 
                 if (endIndex > startIndex) {
                     jsonString = jsonString.substring(startIndex, endIndex + 1);
-                )
-                    ;
                     console.log(chalk.dim(`      Extracted potential JSON substring: ${jsonString.substring(0, 100)}...`));
                 } else {
                     console.log(chalk.dim(`      Could not identify a clear JSON substring using bracket matching. Proceeding with original trimmed string.`));
