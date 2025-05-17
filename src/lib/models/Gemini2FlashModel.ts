@@ -33,8 +33,8 @@ class Gemini2FlashModel extends BaseModel {
             throw new Error("Gemini API key is missing in the configuration.");
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        // --- Use Flash model name from config or default ---
-        this.modelName = config.gemini.subsequent_chat_model_name || "gemini-2.5-flash-preview-04-17";
+        // --- Use Flash model name from config (guaranteed by Config.ts) ---
+        this.modelName = config.gemini.subsequent_chat_model_name;
         // --- End Flash model name ---
         console.log(chalk.yellow(`Initializing Gemini Flash Model instance with: ${this.modelName}`));
         try {

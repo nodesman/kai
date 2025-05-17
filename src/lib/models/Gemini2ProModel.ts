@@ -38,7 +38,8 @@ class Gemini2ProModel extends BaseModel {
             throw new Error("Gemini API key is missing in the configuration.");
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        this.modelName = config.gemini.model_name || "gemini-2.5-pro-preview-05-06";
+        // --- Use Pro model name from config (guaranteed by Config.ts) ---
+        this.modelName = config.gemini.model_name;
         console.log(chalk.yellow(`Initializing Gemini Model instance with: ${this.modelName}`));
         try {
             this.model = this.genAI.getGenerativeModel({ model: this.modelName });

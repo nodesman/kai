@@ -389,20 +389,30 @@ class UserInterface {
              }
 
             // --- Remaining modes require Model selection ---
-            let selectedModel = this.config.gemini.model_name || "gemini-2.5-pro-exp-03-25";
+            const primaryModel = this.config.gemini.model_name; // Already guaranteed to be a string by Config.ts
+            const secondaryModel = this.config.gemini.subsequent_chat_model_name; // Already guaranteed to be a string
+
+            const modelChoices = [
+                {
+                    name: `Primary Model (${primaryModel}) - Recommended for complex tasks / generation`,
+                    value: primaryModel
+                },
+                {
+                    name: `Secondary Model (${secondaryModel}) - Recommended for quick interactions / analysis`,
+                    value: secondaryModel
+                },
+            ];
+
             const { modelChoice } = await inquirer.prompt([
                 {
                     type: 'list',
                     name: 'modelChoice',
                     message: 'Select the AI model to use for this operation:',
-                    choices: [
-                        { name: `Gemini 2.5 Pro (Slower, Powerful)`, value: 'gemini-2.5-pro-exp-03-25' },
-                        { name: `Gemini 2.0 Flash (Faster, Lighter)`, value: 'gemini-2.0-flash' },
-                    ],
-                    default: this.config.gemini.model_name,
+                    choices: modelChoices,
+                    default: primaryModel, // Default to the currently configured primary model
                 },
             ]);
-            selectedModel = modelChoice;
+            const selectedModel = modelChoice;
 
             // --- Remaining modes require Conversation Selection ---
             let conversationDetails: { name: string; isNew: boolean } | null = null;

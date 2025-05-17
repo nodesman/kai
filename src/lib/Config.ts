@@ -12,8 +12,8 @@ interface GeminiRateLimitConfig {
 
 interface GeminiConfig {
     api_key: string; // Loaded from ENV
-    model_name?: string; // Primary model (e.g., Pro)
-    subsequent_chat_model_name?: string; // Secondary model (e.g., Flash)
+    model_name: string; // Primary model (e.g., Pro) - Will be required after loading
+    subsequent_chat_model_name: string; // Secondary model (e.g., Flash) - Will be required after loading
     max_output_tokens?: number; // Max tokens for model response
     max_prompt_tokens?: number; // Max tokens for input (used for context building limit)
     rate_limit?: GeminiRateLimitConfig;
@@ -46,7 +46,7 @@ interface ContextConfig {
 
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
-    gemini: GeminiConfig;
+    gemini: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig }; // Most fields are required, rate_limit is optional object
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
     analysis: Required<AnalysisConfig>; // Add analysis section
     context: ContextConfig; // Add context section (mode is optional until resolved)
@@ -63,7 +63,7 @@ type YamlConfigData = {
 
 // --- Config Class ---
 class ConfigLoader /* implements IConfig */ { // Let TS infer implementation details
-    gemini: GeminiConfig;
+    gemini: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig };
     project: Required<ProjectConfig>; // Use Required utility type
     analysis: Required<AnalysisConfig>; // Add analysis property
     context: ContextConfig; // Add context property (mode is optional until resolved)
@@ -115,15 +115,18 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         }
 
         // 3. Construct the final Config object with defaults
-        const defaultSubsequentModel = "gemini-2.0-flash";
+        // Define application-level defaults here
+        const DEFAULT_PRIMARY_MODEL = "gemini-2.5-pro-preview-05-06";
+        const DEFAULT_SECONDARY_MODEL = "gemini-2.0-flash";
+
         const defaultGenerationMaxRetries = 3;
         const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
         const defaultInteractivePromptReview = false;
 
-        const finalGeminiConfig: GeminiConfig = {
+        const finalGeminiConfig: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig } = {
             api_key: apiKey, // Mandatory, loaded from env
-            model_name: yamlConfig.gemini?.model_name || "gemini-2.5-pro-preview-05-06", // Default initial model
-            subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || defaultSubsequentModel, // Default subsequent
+            model_name: yamlConfig.gemini?.model_name || DEFAULT_PRIMARY_MODEL,
+            subsequent_chat_model_name: yamlConfig.gemini?.subsequent_chat_model_name || DEFAULT_SECONDARY_MODEL,
             max_output_tokens: yamlConfig.gemini?.max_output_tokens || 8192,
             max_prompt_tokens: yamlConfig.gemini?.max_prompt_tokens || 32000, // Default context limit for context building
             rate_limit: {
