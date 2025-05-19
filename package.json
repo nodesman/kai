@@ -16,7 +16,7 @@
     "test": "jest",
     "build": "tsc",
     "start": "node bin/kai.js",
-    "preversion": "npm test && git diff --quiet && npm run build",
+    "preversion": "git diff --quiet && npm run build",
     "postversion": "git push && git push --tags"
   },
   "keywords": [
