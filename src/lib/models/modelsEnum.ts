@@ -1,7 +1,5 @@
-const Models = {
-    Gemini2Pro: "gemini2-pro",
-    Gemini2Fast: "gemini2-fast",
-    GPT4o: "gpt-4",
-    GPT4oMini: "gpt-4o-mini",
-};
-export default Models;
+export enum SupportedModels {
+  GEMINI_PRO = 'gemini-1.5-pro',
+  GEMINI_FLASH = 'gemini-1.5-flash',
+  // Add other supported models here
+}
