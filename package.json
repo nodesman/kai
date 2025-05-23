@@ -40,9 +40,10 @@
   "homepage": "https://github.com/nodesman/kai#readme",
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "apply-patch": "^0.1.2",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
-    "diff": "^7.0.0",
+    "diff": "^8.0.1",
     "gpt-3-encoder": "^1.1.4",
     "ignore": "^7.0.3",
     "inquirer": "^9.2.12",
@@ -54,12 +55,13 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/diff": "^7.0.2",
+    "@types/diff": "^8.0.0",
     "@types/inquirer": "^9.0.7",
+    "@types/jest": "^29.5.14",
     "@types/js-yaml": "^4.0.9",
     "@types/marked": "^6.0.0",
     "@types/node": "^22.13.10",
     "jest": "^29.7.0",
-    "ts-jest": "^29.1.2"
+    "ts-jest": "^29.3.4"
   }
 }
