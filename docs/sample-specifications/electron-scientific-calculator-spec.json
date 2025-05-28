@@ -1,0 +1,177 @@
+{
+  "name": "ElectronScientificCalculator",
+  "description": "A scientific calculator application built with Electron, providing standard arithmetic and common scientific functions.",
+  "featureDescription": "Supports basic arithmetic (add, subtract, multiply, divide) and scientific functions (square root, power, sine). Input via UI buttons and results displayed.",
+  "targetFiles": [
+    "src/electron-calculator/main.ts",
+    "src/electron-calculator/renderer.ts",
+    "src/electron-calculator/calculator-logic.ts",
+    "src/electron-calculator/ui-handler.ts",
+    "src/electron-calculator/preload.ts",
+    "src/electron-calculator/index.html",
+    "src/electron-calculator/styles.css"
+  ],
+  "testScenarios": [
+    {
+      "description": "Application launches and displays the calculator UI.",
+      "focusArea": "Application Startup",
+      "expectedBehavior": "Main window opens showing calculator buttons (0-9, operators, functions) and an empty display area (or 0)."
+    },
+    {
+      "description": "Perform simple addition: 2 + 3 = 5.",
+      "focusArea": "Arithmetic - Add",
+      "expectedBehavior": "Clicking '2', '+', '3', '=' buttons results in '5' displayed."
+    },
+    {
+      "description": "Perform simple subtraction: 5 - 3 = 2.",
+      "focusArea": "Arithmetic - Subtract",
+      "expectedBehavior": "Clicking '5', '-', '3', '=' buttons results in '2' displayed."
+    },
+    {
+      "description": "Perform simple multiplication: 2 * 3 = 6.",
+      "focusArea": "Arithmetic - Multiply",
+      "expectedBehavior": "Clicking '2', '*', '3', '=' buttons results in '6' displayed."
+    },
+    {
+      "description": "Perform simple division: 6 / 3 = 2.",
+      "focusArea": "Arithmetic - Divide",
+      "expectedBehavior": "Clicking '6', '/', '3', '=' buttons results in '2' displayed."
+    },
+    {
+      "description": "Attempt division by zero: 5 / 0.",
+      "focusArea": "Arithmetic - Divide",
+      "expectedBehavior": "Display shows an error message (e.g., 'Error', 'Cannot divide by zero')."
+    },
+    {
+      "description": "Order of operations: 2 + 3 * 4 = 14 (if expression evaluation is supported beyond immediate execution).",
+      "focusArea": "Arithmetic - Order of Operations",
+      "expectedBehavior": "Inputting '2', '+', '3', '*', '4', '=' results in '14' (not '20'). If only immediate execution, this might be '2 + 3 = 5', then '5 * 4 = 20'."
+    },
+    {
+      "description": "Calculate square root of a positive number: sqrt(9) = 3.",
+      "focusArea": "Scientific - Square Root",
+      "expectedBehavior": "Inputting '9', then 'sqrt' button results in '3' displayed."
+    },
+    {
+      "description": "Attempt square root of a negative number: sqrt(-4).",
+      "focusArea": "Scientific - Square Root",
+      "expectedBehavior": "Display shows an error message (e.g., 'Error', 'Invalid input') if not handling complex numbers."
+    },
+    {
+      "description": "Calculate power: 2 ^ 3 = 8.",
+      "focusArea": "Scientific - Power",
+      "expectedBehavior": "Inputting '2', '^' (or 'pow'), '3', '=' results in '8' displayed."
+    },
+    {
+      "description": "Calculate power with zero exponent: 5 ^ 0 = 1.",
+      "focusArea": "Scientific - Power",
+      "expectedBehavior": "Inputting '5', '^', '0', '=' results in '1' displayed."
+    },
+    {
+      "description": "Calculate sine of 0: sin(0) = 0.",
+      "focusArea": "Scientific - Sine",
+      "expectedBehavior": "Inputting '0', then 'sin' button results in '0' displayed (assuming angle in radians or degrees as per UI indication)."
+    },
+    {
+      "description": "Calculate sine of 90 degrees (PI/2 radians): sin(90 deg) = 1.",
+      "focusArea": "Scientific - Sine",
+      "expectedBehavior": "Inputting '90', then 'sin' button (assuming degree mode) results in '1'. If radians, input PI/2."
+    },
+    {
+      "description": "Verify number button clicks append to display/input.",
+      "focusArea": "Display & Input",
+      "expectedBehavior": "Clicking '1', then '2', then '3' results in '123' in the display/current input."
+    },
+    {
+      "description": "Verify operator button clicks manage current input and prepare for next number.",
+      "focusArea": "Display & Input",
+      "expectedBehavior": "Clicking '12', '+', '3' shows '+' or prepares for '3', display might show '12' or '12+'."
+    },
+    {
+      "description": "Clear (C/AC) button resets current input and calculation.",
+      "focusArea": "Display & Input",
+      "expectedBehavior": "After inputting numbers/operators, clicking 'C' or 'AC' clears the display (to '0' or empty) and resets any ongoing calculation state."
+    },
+    {
+      "description": "Chained operations: 2 + 3 - 1 * 2 = 4 (immediate execution logic: 2+3=5, 5-1=4, 4*2=8).",
+      "focusArea": "Arithmetic - Chained Operations",
+      "expectedBehavior": "Verify result based on whether calculator evaluates full expressions or executes operations immediately. For immediate: '2', '+', '3', '=', (display '5'), '-', '1', '=', (display '4'), '*', '2', '=', (display '8')."
+    },
+    {
+      "description": "Inputting multiple decimal points: 3 . 1 . 4",
+      "focusArea": "Display & Input",
+      "expectedBehavior": "The calculator should only allow one decimal point per number. So, '3.14' is accepted, but a subsequent '.' for that number is ignored or handled gracefully."
+    }
+  ],
+  "changes": [
+    {
+      "filePath": "src/electron-calculator/main.ts",
+      "operation": "modify",
+      "contentOrTarget": "Setup Electron app, BrowserWindow. No complex IPC needed if all logic is in renderer, but might have basic menu setup.",
+      "testScenarios": [
+        "Verify main process initializes and opens the main calculator window."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/preload.ts",
+      "operation": "create",
+      "contentOrTarget": "Minimal or no preload script if all logic is self-contained in renderer. If there are system interactions (e.g. custom title bar), it might be used.",
+      "testScenarios": [
+        "Verify preload script (if any) loads without errors."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/index.html",
+      "operation": "create",
+      "contentOrTarget": "HTML structure: display area (e.g., <input type='text' id='display' readonly>), buttons for numbers (0-9, .), operators (+, -, *, /, =), scientific functions (sqrt, pow, sin), and clear (C/AC). Link to styles.css and renderer.js.",
+      "testScenarios": [
+        "Verify all specified buttons and the display area are present in the DOM."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/styles.css",
+      "operation": "create",
+      "contentOrTarget": "Basic CSS for a calculator layout: grid for buttons, styling for display and buttons to make it look like a calculator.",
+      "testScenarios": [
+        "Visually inspect that the calculator has a reasonable layout and styling."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/renderer.ts",
+      "operation": "create",
+      "contentOrTarget": "Main renderer logic. Initialize UI handlers, calculator logic. No direct DOM manipulation here, delegate to ui-handler.js.",
+      "testScenarios": [
+        "Verify renderer script initializes ui-handler and calculator-logic."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/ui-handler.ts",
+      "operation": "create",
+      "contentOrTarget": "Handles DOM interactions: event listeners for all buttons (numbers, operators, functions, clear). Updates the display element based on user input and calculation results from calculator-logic. Functions like `updateDisplay(value: string)`, `getDisplayValue(): string`, `initButtonListeners(calculatorLogicInstance)`. ",
+      "testScenarios": [
+        "Test number button click updates display correctly (e.g. '1', then '2' -> '12').",
+        "Test operator button click stores operator and prepares for next input.",
+        "Test '=' button click triggers calculation and displays result.",
+        "Test 'C' button click clears display and resets state in calculator-logic.",
+        "Test function button (e.g. 'sqrt') click processes current display value and shows result."
+      ]
+    },
+    {
+      "filePath": "src/electron-calculator/calculator-logic.ts",
+      "operation": "create",
+      "contentOrTarget": "Core calculator engine. Class `CalculatorLogic` with methods like `inputDigit(digit: string)`, `inputOperator(operator: string)`, `calculate()`, `clear()`, `squareRoot()`, `power(exponent: number)`, `sine()`. Manages current number, previous number, current operation, and handles calculation logic including error states (e.g. division by zero, sqrt of negative).",
+      "testScenarios": [
+        "Test `add(2, 3)` returns 5.",
+        "Test `subtract(5, 2)` returns 3.",
+        "Test `multiply(3, 4)` returns 12.",
+        "Test `divide(10, 2)` returns 5.",
+        "Test `divide(5, 0)` throws error or returns 'Error'.",
+        "Test `squareRoot(9)` returns 3.",
+        "Test `squareRoot(-1)` throws error or returns 'Error'.",
+        "Test `power(2, 3)` returns 8.",
+        "Test `sine(0)` returns 0 (handle degree/radian mode consistently).",
+        "Test internal state management: `inputDigit`, `inputOperator`, then `calculate`."
+      ]
+    }
+  ]
+}

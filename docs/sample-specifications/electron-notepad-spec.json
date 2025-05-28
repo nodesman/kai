@@ -1,0 +1,136 @@
+{
+  "name": "ElectronNotepadApplication",
+  "description": "A basic notepad application built with Electron, allowing users to create, save, and open text notes.",
+  "featureDescription": "Core notepad functionalities including file operations (new, save, open) and basic text editing with word count.",
+  "targetFiles": [
+    "src/electron-notepad/main.ts",
+    "src/electron-notepad/renderer.ts",
+    "src/electron-notepad/file-operations.ts",
+    "src/electron-notepad/editor.ts",
+    "src/electron-notepad/preload.ts",
+    "src/electron-notepad/index.html"
+  ],
+  "testScenarios": [
+    {
+      "description": "Application launches successfully and displays the main window.",
+      "focusArea": "Application Startup",
+      "expectedBehavior": "Main window opens with an empty text area and word count display initialized to 0."
+    },
+    {
+      "description": "Create a new note after text has been entered.",
+      "focusArea": "File Operations - New",
+      "expectedBehavior": "Text area is cleared, and word count resets to 0. No save dialog is shown if no changes were made to a new document, or if previous document was saved."
+    },
+    {
+      "description": "Save a new note to a user-selected file path.",
+      "focusArea": "File Operations - Save",
+      "expectedBehavior": "A save dialog appears. If the user selects a path and saves, the content of the text area is written to the specified file. The window title might update with the filename."
+    },
+    {
+      "description": "User cancels the save dialog when saving a new note.",
+      "focusArea": "File Operations - Save",
+      "expectedBehavior": "The save operation is aborted. The text area content remains unchanged. No file is created."
+    },
+    {
+      "description": "Save an existing (previously saved/opened) note.",
+      "focusArea": "File Operations - Save",
+      "expectedBehavior": "The content of the text area is written to the existing file path without showing a save dialog (direct save)."
+    },
+    {
+      "description": "Open an existing note from a user-selected file.",
+      "focusArea": "File Operations - Open",
+      "expectedBehavior": "An open dialog appears. If the user selects a valid text file, its content is loaded into the text area, and the word count updates. The window title might update."
+    },
+    {
+      "description": "User cancels the open dialog.",
+      "focusArea": "File Operations - Open",
+      "expectedBehavior": "The open operation is aborted. The text area content remains unchanged."
+    },
+    {
+      "description": "Attempt to open a non-existent file.",
+      "focusArea": "File Operations - Open",
+      "expectedBehavior": "An error message is displayed to the user (e.g., via a dialog or status bar message). The text area content remains unchanged."
+    },
+    {
+      "description": "Attempt to open a binary (non-text) file.",
+      "focusArea": "File Operations - Open",
+      "expectedBehavior": "An error message is displayed, or the content is loaded as is (depending on robustness). Preferably, an error is shown if content cannot be interpreted as text."
+    },
+    {
+      "description": "Text input in the main text area is reflected.",
+      "focusArea": "Editing - Text Input",
+      "expectedBehavior": "Characters typed by the user appear in the text area."
+    },
+    {
+      "description": "Word count updates accurately as user types.",
+      "focusArea": "Editing - Word Count",
+      "expectedBehavior": "The displayed word count changes in real-time or near real-time. Test cases: empty text (0 words), 'hello' (1 word), 'hello world' (2 words), 'hello, world!' (2 words, punctuation handled)."
+    },
+    {
+      "description": "Word count for text with multiple spaces between words.",
+      "focusArea": "Editing - Word Count",
+      "expectedBehavior": "Word count should be accurate, treating multiple spaces as a single separator (e.g., 'hello   world' is 2 words)."
+    },
+    {
+      "description": "Word count for text with leading/trailing spaces.",
+      "focusArea": "Editing - Word Count",
+      "expectedBehavior": "Leading/trailing spaces should not count as words (e.g., '  hello world  ' is 2 words)."
+    }
+  ],
+  "changes": [
+    {
+      "filePath": "src/electron-notepad/main.ts",
+      "operation": "modify",
+      "contentOrTarget": "Setup Electron app, BrowserWindow, IPC handlers for file operations (new, save, open). Implement menu items for these operations.",
+      "testScenarios": [
+        "Verify main process initializes and opens the main window.",
+        "Verify IPC channels for file operations are registered."
+      ]
+    },
+    {
+      "filePath": "src/electron-notepad/preload.ts",
+      "operation": "create",
+      "contentOrTarget": "Expose IPC functions (e.g., `api.requestSaveDialog`, `api.requestOpenDialog`, `api.readFile`, `api.writeFile`, `api.onNewFile`, `api.updateWordCount`) to renderer process securely using contextBridge.",
+      "testScenarios": [
+        "Verify contextBridge exposes the specified API functions.",
+        "Verify that the exposed functions can be called from the renderer process."
+      ]
+    },
+    {
+      "filePath": "src/electron-notepad/index.html",
+      "operation": "create",
+      "contentOrTarget": "HTML structure with a <textarea> for note content and a <div> or <span> for word count display. Include <script src=\"renderer.js\"></script>.",
+      "testScenarios": [
+        "Verify the text area and word count elements are present in the DOM."
+      ]
+    },
+    {
+      "filePath": "src/electron-notepad/renderer.ts",
+      "operation": "modify",
+      "contentOrTarget": "Logic for handling text area input, sending text to main process for word count (or calculating locally), receiving word count updates, and displaying it. Handle clicks for menu items (e.g., via IPC calls to main process for file ops).",
+      "testScenarios": [
+        "Verify text area input triggers word count update logic.",
+        "Verify word count display element is updated with correct values.",
+        "Verify interactions with menu (e.g., clicking 'File > New') trigger appropriate IPC calls."
+      ]
+    },
+    {
+      "filePath": "src/electron-notepad/file-operations.ts",
+      "operation": "create",
+      "contentOrTarget": "Contains functions for showing save/open dialogs (using Electron's dialog module), reading file content, and writing file content. These functions would be called by main.ts via IPC requests from renderer.",
+      "testScenarios": [
+        "Test 'saveFile(filePath, content)' function: creates/overwrites a file with given content.",
+        "Test 'readFile(filePath)' function: reads content from a file or returns error if not found.",
+        "Test integration with Electron dialogs for selecting file paths."
+      ]
+    },
+    {
+      "filePath": "src/electron-notepad/editor.ts",
+      "operation": "create",
+      "contentOrTarget": "Functions related to editor features, e.g., `calculateWordCount(text: string): number`. This might be used by renderer.ts or main.ts.",
+      "testScenarios": [
+        "Test `calculateWordCount` with empty string, single word, multiple words, punctuation, multiple spaces, leading/trailing spaces."
+      ]
+    }
+  ]
+}

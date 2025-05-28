@@ -104,9 +104,45 @@ const sampleSpecification: Specification = {
 async function main() {
   console.log("--- Starting Agentic TDD System Test Rig ---");
 
+  let specToProcess: Specification = sampleSpecification;
+  let specOrigin = "default calculator specification";
+
+  const args = process.argv.slice(2); // Skip node executable and script path
+  const specArgIndex = args.indexOf('--spec');
+
+  if (specArgIndex !== -1 && args[specArgIndex + 1]) {
+    const specFilePath = path.resolve(args[specArgIndex + 1]);
+    specOrigin = `specification from: ${specFilePath}`;
+    console.log(`Attempting to load ${specOrigin}`);
+    try {
+      const fileContent = await fs.readFile(specFilePath, 'utf-8');
+      const loadedSpec = JSON.parse(fileContent) as Specification;
+      
+      // Basic validation - ensure it looks like a Specification object
+      // This is a simplified check; a more robust validation might use a schema validator
+      if (!loadedSpec.featureDescription || !loadedSpec.testScenarios || !loadedSpec.affectedFiles) {
+          console.error(`Error: The file ${specFilePath} does not appear to be a valid Specification object. Missing key fields.`);
+          process.exit(1);
+      }
+      specToProcess = loadedSpec;
+      console.log(`Successfully loaded ${specOrigin}`);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        console.error(`Error: Specification file not found at ${specFilePath}`);
+      } else if (error instanceof SyntaxError) {
+        console.error(`Error: Could not parse specification file at ${specFilePath}. Invalid JSON. Details: ${error.message}`);
+      } else {
+        console.error(`Error loading or parsing specification file ${specFilePath}: ${error.message}`);
+      }
+      process.exit(1); // Exit if spec loading fails
+    }
+  } else {
+    console.log(`Using ${specOrigin}.`);
+  }
+
   const fileSystemService: IFileSystemService = new NodeFileSystemService();
   const outputParser = new JestOutputParser();
-  const aiModelService: IAiModelService = new ConfigurableSimpleAiModelService();
+  const aiModelService: IAiModelService = new ConfigurableSimpleAiModelService(); // Remains as is
   const testRunnerService = new TestRunnerService(); // Uses Jest
 
   const agenticTddService = new AgenticTddService(
@@ -116,37 +152,57 @@ async function main() {
     fileSystemService
   );
 
+  // The following logic for reading/restoring calculator.ts is specific to the default spec.
+  // It will be skipped if a custom spec is loaded that doesn't use CALCULATOR_FILE_PATH.
+  // A more generic before/after and restoration would require changes to how AgenticTddService reports changes
+  // or by making the test rig aware of all targetFiles in any spec.
+  let isDefaultCalculatorSpec = specToProcess === sampleSpecification;
+
   try {
-    originalCalculatorContent = await fileSystemService.readFile(CALCULATOR_FILE_PATH);
-    console.log("\n--- Initial content of calculator.ts ---");
-    console.log(originalCalculatorContent);
-
-    console.log("\n--- Processing specification ---");
-    const success = await agenticTddService.processSpecification(sampleSpecification);
-    console.log(`\n--- Specification processing completed. Overall Success: ${success} ---`);
-
-    const finalCalculatorContent = await fileSystemService.readFile(CALCULATOR_FILE_PATH);
-    console.log("\n--- Final content of calculator.ts ---");
-    console.log(finalCalculatorContent);
-
-    if (success && finalCalculatorContent.includes("subtract(a: number, b: number): number")) {
-        console.log("\nSUCCESS: Test rig completed, and calculator.ts was modified as expected.");
-    } else if (success) {
-        console.warn("\nWARNING: Test rig reported success, but calculator.ts content might not be as expected.");
+    if (isDefaultCalculatorSpec) {
+      originalCalculatorContent = await fileSystemService.readFile(CALCULATOR_FILE_PATH);
+      console.log("\n--- Initial content of calculator.ts (default spec) ---");
+      console.log(originalCalculatorContent);
+    } else {
+      // For custom specs, we won't do the specific calculator.ts before/after logging here.
+      // The AgenticTddService itself logs the operations on the files specified in the custom spec.
+      console.log(`\n--- Processing custom specification: ${specToProcess.featureDescription} ---`);
     }
-     else {
-        console.error("\nFAILURE: Test rig reported failure or calculator.ts was not modified as expected.");
+    
+    console.log(`\n--- Processing ${specOrigin} ---`);
+    const success = await agenticTddService.processSpecification(specToProcess);
+    console.log(`\n--- Specification processing completed for ${specOrigin}. Overall Success: ${success} ---`);
+
+    if (isDefaultCalculatorSpec) {
+      const finalCalculatorContent = await fileSystemService.readFile(CALCULATOR_FILE_PATH);
+      console.log("\n--- Final content of calculator.ts (default spec) ---");
+      console.log(finalCalculatorContent);
+
+      if (success && finalCalculatorContent.includes("subtract(a: number, b: number): number")) {
+          console.log("\nSUCCESS: Default calculator test rig completed, and calculator.ts was modified as expected.");
+      } else if (success) {
+          console.warn("\nWARNING: Default calculator test rig reported success, but calculator.ts content might not be as expected.");
+      } else {
+          console.error("\nFAILURE: Default calculator test rig reported failure or calculator.ts was not modified as expected.");
+      }
+    } else {
+        // For custom specs, success is determined by AgenticTddService's output
+        if (success) {
+            console.log(`\nSUCCESS: Custom specification "${specToProcess.featureDescription}" processed successfully.`);
+        } else {
+            console.error(`\nFAILURE: Custom specification "${specToProcess.featureDescription}" processing failed.`);
+        }
     }
 
   } catch (error) {
-    console.error("\n--- ERROR in test rig ---");
+    console.error(`\n--- ERROR in test rig while processing ${specOrigin} ---`);
     console.error(error);
   } finally {
-    // Cleanup: Restore original content
-    if (originalCalculatorContent) {
-      console.log("\n--- Restoring original content of calculator.ts ---");
+    // Cleanup: Restore original content only if it was the default calculator spec
+    if (isDefaultCalculatorSpec && originalCalculatorContent) {
+      console.log("\n--- Restoring original content of calculator.ts (default spec) ---");
       await fileSystemService.writeFile(CALCULATOR_FILE_PATH, originalCalculatorContent);
-      console.log("Original content restored.");
+      console.log("Original content restored for default spec.");
     }
     const tempDirPattern = path.join(os.tmpdir(), 'agentic-tdd-');
     // Basic cleanup of temp dirs - more robust cleanup would be needed in a real app
