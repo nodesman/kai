@@ -12,7 +12,9 @@ import { IAiModelService } from './typescript/services/ai-model/IAiModelService'
 import { ParsedErrorDetails } from './typescript/services/test-parser/JestOutputParser';
 
 
-const CALCULATOR_FILE_PATH = path.resolve(__dirname, 'sample-project/calculator.ts');
+// Make path resolution robust whether running from src (ts-node) or bin (node after tsc)
+const PROJECT_ROOT = process.cwd(); // /app
+const CALCULATOR_FILE_PATH = path.resolve(PROJECT_ROOT, 'src/lib/sample-project/calculator.ts');
 
 // Store original content for restoration
 let originalCalculatorContent: string;
@@ -24,9 +26,9 @@ class ConfigurableSimpleAiModelService extends SimpleAiModelService {
     // console.log("User Prompt:", userPrompt.substring(0, 150) + "...");
     // console.log("Context:", context);
 
-    const scenario = context as TestScenario; // For test gen and fix gen (if context is just scenario)
-    const errorDetails = context?.parsedError as ParsedErrorDetails; // For analysis
-    const analysisContext = context?.analysis as string; // For fix gen
+    const scenario = context as TestScenario; 
+    const errorDetails = context?.parsedError as ParsedErrorDetails; 
+    const analysisContext = context?.analysis as string; 
 
     if (userPrompt.includes("Generate a Jest test for the following scenario")) {
       if (scenario?.description === "should correctly subtract two numbers") {
@@ -39,8 +41,6 @@ import { Calculator } from './calculator';
 describe('Calculator.subtract', () => {
   it('should correctly subtract two numbers', () => {
     const calculator = new Calculator();
-    // This will cause a runtime error if subtract is not defined,
-    // or an assertion error if it's defined but incorrect.
     expect(calculator.subtract(5, 2)).toBe(3);
   });
 });
@@ -52,11 +52,10 @@ describe('Calculator.subtract', () => {
         return `ConfigurableAI Diagnosis: The test 'Calculator.subtract > should correctly subtract two numbers' failed.
 Error: ${errorDetails?.errorMessage || 'Method not found or incorrect implementation.'}.
 Likely cause: The 'subtract' method is missing from the Calculator class or not implemented correctly.
-File: ${errorDetails?.filePath || CALCULATOR_FILE_PATH}.
-Focus on implementing the 'subtract' method in '${CALCULATOR_FILE_PATH}'.`;
+File: ${errorDetails?.filePath || CALCULATOR_FILE_PATH}. // Using the robust CALCULATOR_FILE_PATH
+Focus on implementing the 'subtract' method in '${CALCULATOR_FILE_PATH}'.`; // Using the robust CALCULATOR_FILE_PATH
       }
     } else if (userPrompt.includes("Generate a code fix for the following")) {
-      // Assuming the context for fix generation will include the scenario
       if (context?.scenario?.description === "should correctly subtract two numbers") {
         console.log(`ConfigurableAI: Generating specific code fix for "should correctly subtract two numbers"`);
         const fixContent = `// src/lib/sample-project/calculator.ts

@@ -45,35 +45,33 @@ export class TestRunnerService implements ITestRunnerService {
       console.log(`Contents of temporary directory ${tempDir}:`, filesInTempDir.join(', '));
 
       // Execute Jest
-      // CWD is tempDir, so Jest resolves relative imports from there.
-      // Using the project's main jest.config.js for ts-jest preset and other global settings.
-      const projectRoot = path.resolve('/app'); // Assuming project root is /app
-      const jestConfigPath = path.join(projectRoot, 'jest.config.js');
+      // CWD will be project root. Test file path must be absolute.
+      // Jest config will be resolved from project root.
       
-      // Removed -t testName filter to simplify; the file should only contain the relevant test.
-      let command = `npx jest ${testFileName} --config ${jestConfigPath} --passWithNoTests`;
+      // testFileName is already the base name. absoluteTestFilePath is the one to use.
+      let command = `npx jest ${absoluteTestFilePath} --config jest.config.js --passWithNoTests`;
 
-      console.log(`Executing test command: ${command} (CWD: ${tempDir}) for test file: ${testFileName}`);
+      console.log(`Executing test command: ${command} (CWD: ${process.cwd()}) for test file: ${absoluteTestFilePath}`);
 
       return await new Promise<TestResult>((resolve) => {
-        exec(command, { cwd: tempDir }, (error, stdout, stderr) => {
+        exec(command, { cwd: process.cwd() }, (error, stdout, stderr) => {
           const output = stdout + stderr; // Combine for easier parsing
 
           if (error) { // Non-zero exit code
-            console.error(`Jest execution error or test failure for ${testFileName} in ${tempDir}:`, error);
+            console.error(`Jest execution error or test failure for ${absoluteTestFilePath}:`, error);
             console.error('stderr:', stderr);
             console.log('stdout (on error/failure):', stdout);
             resolve({
               success: false,
               testName: testName,
-              message: `Test execution failed or tests did not pass for ${testName ? `'${testName}' in ` : ''}${testFileName}.\nstdout: ${stdout}\nstderr: ${stderr}`,
+              message: `Test execution failed or tests did not pass for ${testName ? `'${testName}' in ` : ''}${absoluteTestFilePath}.\nstdout: ${stdout}\nstderr: ${stderr}`,
               error: stderr || error.message || "Jest command failed.",
               stackTrace: error.stack,
             });
             return;
           }
           
-          console.log(`Jest execution completed (exit code 0) for ${testFileName} in ${tempDir}:`);
+          console.log(`Jest execution completed (exit code 0) for ${absoluteTestFilePath}:`);
           console.log('stdout:', stdout);
           if (stderr && stderr.trim() !== "") {
               console.warn('stderr (on exit code 0, should ideally be empty or only warnings):', stderr);
@@ -83,27 +81,27 @@ export class TestRunnerService implements ITestRunnerService {
              resolve({
                 success: false, 
                 testName: testName,
-                message: `Jest reported no tests found for ${testFileName}.\nstdout: ${stdout}`,
+                message: `Jest reported no tests found for ${absoluteTestFilePath}.\nstdout: ${stdout}`,
                 error: "No tests found.",
              });
           } else if (/FAIL/.test(output) || /Test Suites: \d+ failed/.test(output) || /Tests:      \d+ failed/.test(output)) {
             resolve({
                 success: false,
                 testName: testName,
-                message: `Jest tests failed for ${testFileName}.\nstdout: ${stdout}\nstderr: ${stderr}`,
+                message: `Jest tests failed for ${absoluteTestFilePath}.\nstdout: ${stdout}\nstderr: ${stderr}`,
                 error: stderr || "Tests failed based on stdout.",
             });
           } else if (/PASS/.test(output) || /Test Suites: \d+ passed/.test(output) || /Tests:      \d+ passed/.test(output)) {
             resolve({
               success: true,
               testName: testName,
-              message: `Test ${testName ? `'${testName}' in ` : ''}${testFileName} passed. Output:\n${stdout}`,
+              message: `Test ${testName ? `'${testName}' in ` : ''}${absoluteTestFilePath} passed. Output:\n${stdout}`,
             });
           } else {
              resolve({
                 success: false, 
                 testName: testName,
-                message: `Jest execution for ${testFileName} had unclear results (exit code 0 but no clear pass/fail/no tests found in output).\nstdout: ${stdout}\nstderr: ${stderr}`,
+                message: `Jest execution for ${absoluteTestFilePath} had unclear results (exit code 0 but no clear pass/fail/no tests found in output).\nstdout: ${stdout}\nstderr: ${stderr}`,
                 error: stderr || "Unclear test outcome despite exit code 0.",
              });
           }
