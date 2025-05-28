@@ -11,7 +11,7 @@
     "resolveJsonModule": true //if importing data from a json file.
   },
   "include": [
-    "src/kai.ts"
+    "src/**/*.ts"
   ],       // Compile everything in src
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "bin"]
 }

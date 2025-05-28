@@ -1,0 +1,238 @@
+{
+  "name": "ElectronPersonalFinanceApp",
+  "description": "A desktop personal finance application built with Electron and TypeScript for managing transactions, categories, budgets, and viewing historical data with local persistence and simulated server sync.",
+  "featureDescription": "Comprehensive personal finance management including transaction tracking (add, edit, delete), expense categorization, monthly budgeting, historical data viewing with filtering, local data persistence, and a simulated server synchronization feature.",
+  "affectedFiles": [
+    "src/finance-app/services/transaction-service.ts",
+    "src/finance-app/ui/transaction-form.ts",
+    "src/finance-app/ui/transaction-list.ts",
+    "src/finance-app/models/category.ts",
+    "src/finance-app/services/category-service.ts",
+    "src/finance-app/services/budget-service.ts",
+    "src/finance-app/models/budget.ts",
+    "src/finance-app/ui/budget-view.ts",
+    "src/finance-app/ui/history-view.ts",
+    "src/finance-app/services/persistence-service.ts",
+    "src/finance-app/main.ts",
+    "src/finance-app/ui/sync-button.ts",
+    "src/finance-app/services/sync-service.ts",
+    "src/finance-app/models/transaction.ts",
+    "src/finance-app/preload.ts",
+    "src/finance-app/index.html",
+    "src/finance-app/renderer.ts",
+    "src/finance-app/data/finance-data.json"
+  ],
+  "testScenarios": [
+    {
+      "description": "User can add, edit, and delete transactions (income and expense), and the balance reflects these changes.",
+      "focusArea": "Transaction Management",
+      "type": "integration"
+    },
+    {
+      "description": "User can define and manage expense categories, and assign them to transactions.",
+      "focusArea": "Expense Categorization",
+      "type": "integration"
+    },
+    {
+      "description": "User can set monthly budgets for categories and view actual spending against these budgets.",
+      "focusArea": "Budgeting",
+      "type": "integration"
+    },
+    {
+      "description": "User can view a list of all transactions and filter them by date range, category, and type.",
+      "focusArea": "Historical Data View & Filtering",
+      "type": "integration"
+    },
+    {
+      "description": "Application data (transactions, categories, budgets) is saved locally and loaded on startup.",
+      "focusArea": "Local Persistence",
+      "type": "integration"
+    },
+    {
+      "description": "Simulated server sync function logs success or failure messages with an artificial delay.",
+      "focusArea": "Simulated Server Sync",
+      "type": "e2e"
+    }
+  ],
+  "changes": [
+    {
+      "filePath": "src/finance-app/models/transaction.ts",
+      "operation": "create",
+      "contentOrTarget": "Define the Transaction interface/class: id (string), type ('income' | 'expense'), date (string/Date), amount (number), categoryId (string), description (string).",
+      "testScenarios": [
+        "Verify Transaction model can be instantiated with valid income data.",
+        "Verify Transaction model can be instantiated with valid expense data."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/models/category.ts",
+      "operation": "create",
+      "contentOrTarget": "Define the Category interface/class: id (string), name (string), description (optional string).",
+      "testScenarios": [
+        "Verify Category model can be instantiated with valid data."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/models/budget.ts",
+      "operation": "create",
+      "contentOrTarget": "Define the Budget interface/class: categoryId (string), month (string, e.g., 'YYYY-MM'), limit (number).",
+      "testScenarios": [
+        "Verify Budget model can be instantiated with valid data."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/services/transaction-service.ts",
+      "operation": "create",
+      "contentOrTarget": "Implement logic for adding, editing, deleting, and retrieving transactions. Store transactions in memory for now (persistence service will handle saving/loading). Include methods for filtering transactions by date range, category, and type. Update overall balance.",
+      "testScenarios": [
+        "Test addTransaction: valid income, valid expense, balance updates correctly.",
+        "Test addTransaction: attempt with missing amount, attempt with invalid date.",
+        "Test editTransaction: edit amount of existing transaction, edit category, edit date.",
+        "Test editTransaction: attempt to edit non-existent transaction, verify error or no change.",
+        "Test deleteTransaction: delete existing transaction, balance updates.",
+        "Test deleteTransaction: attempt to delete non-existent transaction.",
+        "Test getTransactions: returns all transactions.",
+        "Test filterTransactions: by date range (e.g., last 30 days), by specific category, by type 'income', by type 'expense'.",
+        "Test filterTransactions: combine multiple filters (e.g., 'Food' category in 'last week').",
+        "Test calculateBalance: returns correct balance after various transactions."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/services/category-service.ts",
+      "operation": "create",
+      "contentOrTarget": "Implement logic for creating, editing, deleting, and retrieving categories. Handle default categories. If a category is deleted, reassign its transactions to an 'Uncategorized' category.",
+      "testScenarios": [
+        "Test createDefaultCategories: ensure 'Food', 'Rent', 'Travel', 'Utilities', 'Entertainment', 'Uncategorized' are created.",
+        "Test addCategory: add a new unique category.",
+        "Test addCategory: attempt to add a category with a duplicate name.",
+        "Test editCategoryName: successfully edit an existing category's name.",
+        "Test deleteCategory: delete a category. Verify transactions previously in this category are moved to 'Uncategorized'.",
+        "Test getCategories: returns all categories."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/services/budget-service.ts",
+      "operation": "create",
+      "contentOrTarget": "Implement logic for setting, updating, and retrieving monthly budget limits for categories. Calculate actual spending for a category in a given month.",
+      "testScenarios": [
+        "Test setBudget: set a new budget for 'Food' for current month.",
+        "Test updateBudget: change the budget for 'Food' for current month.",
+        "Test getBudget: retrieve budget for a category for a specific month.",
+        "Test getSpendingForCategory: calculate total spending for 'Food' in current month based on transactions.",
+        "Test checkBudgetStatus: identify if spending is nearing (e.g., >80%) or has exceeded budget for a category."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/services/persistence-service.ts",
+      "operation": "create",
+      "contentOrTarget": "Implement saving current application state (transactions, categories, budgets) to a local JSON file (e.g., `data/finance-data.json`). Handle file creation if not exists, and overwrite on save. Implement loading application state from this file.",
+      "testScenarios": [
+        "Test saveData: with sample transactions, categories, and budgets; verify `data/finance-data.json` is created/updated with correct JSON structure.",
+        "Test loadData: from an existing valid `data/finance-data.json`; verify data is loaded into respective services.",
+        "Test loadData: when `data/finance-data.json` does not exist; verify services start with empty/default state without error.",
+        "Test loadData: with a corrupted or invalid JSON file; verify error is handled gracefully and services start with empty/default state."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/main.ts",
+      "operation": "modify",
+      "contentOrTarget": "Electron main process setup. Create BrowserWindow. Integrate PersistenceService to load data on app startup. Setup IPC handlers if needed for file operations or sync.",
+      "testScenarios": [
+        "Verify application window opens.",
+        "Verify PersistenceService.loadData() is called on startup.",
+        "Verify IPC channel for 'sync-now' is registered (if using IPC for sync)."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/preload.ts",
+      "operation": "create",
+      "contentOrTarget": "Expose necessary IPC functions to renderer process securely using contextBridge (e.g., for persistence, sync simulation if not handled by direct service calls in renderer). Example: `api.invoke('save-data', data)`, `api.invoke('load-data')`, `api.invoke('sync-now')`.",
+      "testScenarios": [
+        "Verify contextBridge exposes specified API functions for data operations and sync."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/index.html",
+      "operation": "create",
+      "contentOrTarget": "Basic HTML structure for the Electron app. Include main sections for transaction form, transaction list, budget view, history view, and sync button. Link to renderer.js and CSS.",
+      "testScenarios": [
+        "Verify HTML contains placeholders or root elements for all major UI components."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/renderer.ts",
+      "operation": "create",
+      "contentOrTarget": "Main renderer process script. Initialize UI components, orchestrate calls to services (TransactionService, CategoryService, BudgetService, PersistenceService, SyncService). Manage application state relevant to UI.",
+      "testScenarios": [
+        "Verify renderer initializes and loads initial data (e.g., categories for forms).",
+        "Verify UI components are instantiated and rendered."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/ui/transaction-form.ts",
+      "operation": "create",
+      "contentOrTarget": "UI component for adding/editing transactions. Form fields for type (income/expense), date, amount, category (dropdown), description. Submit button calls TransactionService.",
+      "testScenarios": [
+        "Test form submission with valid income data; verify TransactionService.addTransaction is called.",
+        "Test form submission with valid expense data; verify TransactionService.addTransaction is called.",
+        "Test form validation: submit with missing amount, verify error message and no service call.",
+        "Test category dropdown is populated from CategoryService.",
+        "Test form resets after successful submission."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/ui/transaction-list.ts",
+      "operation": "create",
+      "contentOrTarget": "UI component to display a list of recent transactions. Allow clicking a transaction to select it for editing or deletion. Trigger calls to TransactionService for these operations.",
+      "testScenarios": [
+        "Test display of several transactions with correct details.",
+        "Test clicking 'edit' on a transaction populates the transaction form for editing.",
+        "Test clicking 'delete' on a transaction calls TransactionService.deleteTransaction and list updates."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/ui/budget-view.ts",
+      "operation": "create",
+      "contentOrTarget": "UI component to display budget vs. actual spending for categories. Show progress bars or visual indicators for budget utilization. Allow setting/editing budgets.",
+      "testScenarios": [
+        "Test display of budget and actual spending for 'Food' category.",
+        "Test visual indicator correctly shows 'under budget', 'nearing budget', 'over budget'.",
+        "Test setting a new budget value through UI updates BudgetService."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/ui/history-view.ts",
+      "operation": "create",
+      "contentOrTarget": "UI component to display all transactions with filtering options (date range, category, type). Include pagination if the list is long.",
+      "testScenarios": [
+        "Test display of a list of all transactions.",
+        "Test filter by 'last month' updates the displayed transaction list.",
+        "Test filter by 'Food' category updates the list.",
+        "Test filter by 'income only' updates the list.",
+        "Test combining filters (e.g., 'income' in 'last week' for 'Salary' category) updates list.",
+        "Test pagination works if more than X (e.g., 20) transactions are present."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/services/sync-service.ts",
+      "operation": "create",
+      "contentOrTarget": "Implement a 'syncNow' method. This method simulates a server sync: introduce an artificial delay (e.g., 2-3 seconds). With a 80% chance, log 'Sync successful'. With a 20% chance, log 'Sync failed: Network error' or 'Sync failed: Server busy'. No actual data needs to be sent/received.",
+      "testScenarios": [
+        "Test syncNow: run multiple times to observe ~80% success logs.",
+        "Test syncNow: run multiple times to observe ~20% failure logs (either 'Network error' or 'Server busy').",
+        "Verify artificial delay is present during sync operation."
+      ]
+    },
+    {
+      "filePath": "src/finance-app/ui/sync-button.ts",
+      "operation": "create",
+      "contentOrTarget": "UI component for a 'Sync Now' button. Clicking it calls the SyncService.syncNow() method and displays feedback (e.g., 'Syncing...', 'Sync successful', 'Sync failed').",
+      "testScenarios": [
+        "Test clicking 'Sync Now' button triggers SyncService.syncNow().",
+        "Test UI displays 'Syncing...' message during the artificial delay.",
+        "Test UI displays 'Sync successful' on successful simulation.",
+        "Test UI displays 'Sync failed: Network error' or 'Sync failed: Server busy' on failed simulation."
+      ]
+    }
+  ]
+}
