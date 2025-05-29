@@ -49,12 +49,13 @@ export class TestRunnerService implements ITestRunnerService {
       // Jest config will be resolved from project root.
       
       // testFileName is already the base name. absoluteTestFilePath is the one to use.
-      let command = `npx jest ${absoluteTestFilePath} --config jest.config.js --passWithNoTests`;
+      const jestConfigPath = path.resolve(process.cwd(), 'jest.config.js');
+      let command = `npx jest ${absoluteTestFilePath} --config ${jestConfigPath} --passWithNoTests`;
 
-      console.log(`Executing test command: ${command} (CWD: ${process.cwd()}) for test file: ${absoluteTestFilePath}`);
+      console.log(`Executing test command: ${command} (CWD: ${tempDir}) for test file: ${absoluteTestFilePath}`);
 
       return await new Promise<TestResult>((resolve) => {
-        exec(command, { cwd: process.cwd() }, (error, stdout, stderr) => {
+        exec(command, { cwd: tempDir }, (error, stdout, stderr) => {
           const output = stdout + stderr; // Combine for easier parsing
 
           if (error) { // Non-zero exit code
