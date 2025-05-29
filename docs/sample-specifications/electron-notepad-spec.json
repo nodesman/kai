@@ -2,7 +2,7 @@
   "name": "ElectronNotepadApplication",
   "description": "A basic notepad application built with Electron, allowing users to create, save, and open text notes.",
   "featureDescription": "Core notepad functionalities including file operations (new, save, open) and basic text editing with word count.",
-  "targetFiles": [
+  "affectedFiles": [
     "src/electron-notepad/main.ts",
     "src/electron-notepad/renderer.ts",
     "src/electron-notepad/file-operations.ts",
