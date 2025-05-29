@@ -59,6 +59,26 @@ export class TestRunnerService implements ITestRunnerService {
       
       // testFileName is already the base name. absoluteTestFilePath is the one to use.
       const jestConfigPath = path.resolve(process.cwd(), 'jest.config.js');
+
+      const listTestsCommand = `npx jest --listTests ${absoluteTestFilePath} --config ${jestConfigPath}`;
+      console.log(`Executing --listTests command: ${listTestsCommand} (CWD: ${tempDir})`);
+      await new Promise<void>((resolveList) => { // Wrap in a promise to ensure it completes before the next command
+        exec(listTestsCommand, { cwd: tempDir }, (listError, listStdout, listStderr) => {
+          console.log(`--- Output of jest --listTests for ${absoluteTestFilePath}: --- `);
+          if (listError) {
+            console.error(`Error during --listTests: ${listError.message}`);
+          }
+          if (listStderr) {
+            console.error(`stderr from --listTests: ${listStderr}`);
+          }
+          if (listStdout) {
+            console.log(`stdout from --listTests: ${listStdout}`);
+          }
+          console.log(`----------------------------------------`);
+          resolveList();
+        });
+      });
+
       let command = `npx jest ${absoluteTestFilePath} --config ${jestConfigPath} --passWithNoTests`;
 
       console.log(`Executing test command: ${command} (CWD: ${tempDir}) for test file: ${absoluteTestFilePath}`);
