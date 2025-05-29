@@ -101,6 +101,7 @@ const sampleSpecification: Specification = {
 };
 
 async function main() {
+  console.log("Kai TDD Test Rig - New execution started...");
   console.log("--- Starting Agentic TDD System Test Rig ---");
 
   let specToProcess: Specification = sampleSpecification;

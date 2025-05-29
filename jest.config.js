@@ -12,7 +12,10 @@ module.exports = {
     // You could also use "**/__tests__/**/*.ts?(x)", "**/?(*.)+(spec|test).ts?(x)"
   ],
   moduleNameMapper: {
-    '^src/(.*)$': '/app/src/$1' // Use absolute path
+    '^src/(.*)$': '<rootDir>/src/$1' // Use absolute path
+  },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true }],
   },
   clearMocks: true, // Automatically clear mock calls and instances between every test
 };

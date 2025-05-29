@@ -40,6 +40,15 @@ export class TestRunnerService implements ITestRunnerService {
       await fs.writeFile(absoluteTestFilePath, testFileContent, 'utf-8');
       console.log(`Test file written to ${absoluteTestFilePath}`);
 
+    try {
+      const actualTestFileContent = await fs.readFile(absoluteTestFilePath, 'utf-8');
+      console.log(`--- Content of generated test file ${absoluteTestFilePath}: ---`);
+      console.log(actualTestFileContent);
+      console.log(`----------------------------------------`);
+    } catch (e: any) {
+      console.error(`Error reading back test file ${absoluteTestFilePath} for logging: ${e.message}`);
+    }
+
       // For debugging: Log contents of the temporary directory
       const filesInTempDir = await fs.readdir(tempDir);
       console.log(`Contents of temporary directory ${tempDir}:`, filesInTempDir.join(', '));
@@ -49,12 +58,33 @@ export class TestRunnerService implements ITestRunnerService {
       // Jest config will be resolved from project root.
       
       // testFileName is already the base name. absoluteTestFilePath is the one to use.
-      let command = `npx jest ${absoluteTestFilePath} --config jest.config.js --passWithNoTests`;
+      const jestConfigPath = path.resolve(process.cwd(), 'jest.config.js');
 
-      console.log(`Executing test command: ${command} (CWD: ${process.cwd()}) for test file: ${absoluteTestFilePath}`);
+      const listTestsCommand = `npx jest --listTests ${absoluteTestFilePath} --config ${jestConfigPath}`;
+      console.log(`Executing --listTests command: ${listTestsCommand} (CWD: ${tempDir})`);
+      await new Promise<void>((resolveList) => { // Wrap in a promise to ensure it completes before the next command
+        exec(listTestsCommand, { cwd: tempDir }, (listError, listStdout, listStderr) => {
+          console.log(`--- Output of jest --listTests for ${absoluteTestFilePath}: --- `);
+          if (listError) {
+            console.error(`Error during --listTests: ${listError.message}`);
+          }
+          if (listStderr) {
+            console.error(`stderr from --listTests: ${listStderr}`);
+          }
+          if (listStdout) {
+            console.log(`stdout from --listTests: ${listStdout}`);
+          }
+          console.log(`----------------------------------------`);
+          resolveList();
+        });
+      });
+
+      let command = `npx jest ${absoluteTestFilePath} --config ${jestConfigPath} --passWithNoTests`;
+
+      console.log(`Executing test command: ${command} (CWD: ${tempDir}) for test file: ${absoluteTestFilePath}`);
 
       return await new Promise<TestResult>((resolve) => {
-        exec(command, { cwd: process.cwd() }, (error, stdout, stderr) => {
+        exec(command, { cwd: tempDir }, (error, stdout, stderr) => {
           const output = stdout + stderr; // Combine for easier parsing
 
           if (error) { // Non-zero exit code
