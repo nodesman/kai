@@ -14,10 +14,8 @@ module.exports = {
   moduleNameMapper: {
     '^src/(.*)$': '<rootDir>/src/$1' // Use absolute path
   },
-  globals: {
-    'ts-jest': {
-      isolatedModules: true
-    }
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true }],
   },
   clearMocks: true, // Automatically clear mock calls and instances between every test
 };
