@@ -195,6 +195,14 @@ Generate the necessary code changes to fix all these issues.`;
     sourceFilesToCopy: SourceFileToCopy[],
     generatedTestCodeMap: Map<string, { testCode: string, testFileName: string, tempDirNamePrefix: string }> 
   ): Promise<boolean> {
+    // Logging the content of the generated test file before running it
+    console.log(`--- Content of generated test file ${testFileName} (to be written by TestRunnerService): ---`);
+    console.log(generatedTestCode);
+    console.log(`----------------------------------------`);
+    // The above block is added as per the subtask. Note that AgenticTddService
+    // does not write this file itself; it passes the content to TestRunnerService.
+    // The actual file path (testFilePath in the prompt) is determined within TestRunnerService.
+
     console.log(`Running initial test for "${scenario.description}" (expecting failure): ${testFileName}`);
     let testResult: TestResult = await this.testRunnerService.runTest(
       generatedTestCode, testFileName, tempDirNamePrefix, sourceFilesToCopy, scenario.description

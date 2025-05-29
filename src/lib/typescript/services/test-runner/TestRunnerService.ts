@@ -40,6 +40,15 @@ export class TestRunnerService implements ITestRunnerService {
       await fs.writeFile(absoluteTestFilePath, testFileContent, 'utf-8');
       console.log(`Test file written to ${absoluteTestFilePath}`);
 
+    try {
+      const actualTestFileContent = await fs.readFile(absoluteTestFilePath, 'utf-8');
+      console.log(`--- Content of generated test file ${absoluteTestFilePath}: ---`);
+      console.log(actualTestFileContent);
+      console.log(`----------------------------------------`);
+    } catch (e: any) {
+      console.error(`Error reading back test file ${absoluteTestFilePath} for logging: ${e.message}`);
+    }
+
       // For debugging: Log contents of the temporary directory
       const filesInTempDir = await fs.readdir(tempDir);
       console.log(`Contents of temporary directory ${tempDir}:`, filesInTempDir.join(', '));
