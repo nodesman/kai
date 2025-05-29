@@ -15,7 +15,7 @@ module.exports = {
     '^src/(.*)$': '<rootDir>/src/$1' // Use absolute path
   },
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true }],
+    '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true, tsconfig: '<rootDir>/tsconfig.json' }],
   },
   clearMocks: true, // Automatically clear mock calls and instances between every test
 };
