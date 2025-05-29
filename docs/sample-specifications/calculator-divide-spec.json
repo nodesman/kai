@@ -1,0 +1,24 @@
+{
+  "featureDescription": "Add a divide method to the Calculator",
+  "affectedFiles": ["src/lib/sample-project/calculator.ts"],
+  "changes": [{
+    "filePath": "src/lib/sample-project/calculator.ts",
+    "description": "Add a divide(a, b) method that returns a / b. Should throw an error if b is 0.",
+    "type": "modification",
+    "targetElement": "Calculator"
+  }],
+  "testScenarios": [
+    {
+      "description": "should correctly divide two numbers",
+      "type": "unit",
+      "focusArea": "Calculator.divide",
+      "expectedOutcome": "The divide method should return the quotient of two numbers."
+    },
+    {
+      "description": "should throw an error when dividing by zero",
+      "type": "unit",
+      "focusArea": "Calculator.divide",
+      "expectedOutcome": "The divide method should throw an error if the divisor is zero."
+    }
+  ]
+}

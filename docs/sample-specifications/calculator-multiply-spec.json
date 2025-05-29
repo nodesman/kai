@@ -1,0 +1,16 @@
+{
+  "featureDescription": "Add a multiply method to the Calculator",
+  "affectedFiles": ["src/lib/sample-project/calculator.ts"],
+  "changes": [{
+    "filePath": "src/lib/sample-project/calculator.ts",
+    "description": "Add a multiply(a, b) method that returns a * b.",
+    "type": "modification",
+    "targetElement": "Calculator"
+  }],
+  "testScenarios": [{
+    "description": "should correctly multiply two numbers",
+    "type": "unit",
+    "focusArea": "Calculator.multiply",
+    "expectedOutcome": "The multiply method should be added to the Calculator class and return the product of two numbers."
+  }]
+}

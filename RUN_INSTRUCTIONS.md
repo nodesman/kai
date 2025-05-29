@@ -49,6 +49,17 @@ The `system2-test-rig.ts` script is the entry point for testing the Agentic TDD 
         npx ts-node src/lib/system2-test-rig.ts --spec docs/sample-specifications/personal-finance-app-spec.json
         ```
 
+*   **C. Run with Additional Calculator Method Scenarios:**
+    These commands test the TDD loop with newly added operations for the `Calculator` class.
+    *   **Calculator Multiply Method:**
+        ```bash
+        npx ts-node src/lib/system2-test-rig.ts --spec docs/sample-specifications/calculator-multiply-spec.json
+        ```
+    *   **Calculator Divide Method (includes division by zero test):**
+        ```bash
+        npx ts-node src/lib/system2-test-rig.ts --spec docs/sample-specifications/calculator-divide-spec.json
+        ```
+
 ## 3. What to Expect in the Console Output
 
 When you run the script, you will see extensive console output. This output details the steps the `AgenticTddService` is taking during its TDD process:
