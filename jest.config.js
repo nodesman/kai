@@ -1,7 +1,7 @@
 // jest.config.js
-const os = require('os');
+import os from 'os';
 
-module.exports = {
+export default {
   preset: 'ts-jest', // Use ts-jest preset for TypeScript
   testEnvironment: 'node', // Specify the environment (Node.js for a CLI tool)
   roots: [ // Directories Jest should scan for tests and modules

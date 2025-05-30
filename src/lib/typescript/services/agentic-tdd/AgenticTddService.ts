@@ -77,6 +77,17 @@ Specification Context: []`; // Removed specification.featureDescription as it mi
         if (foundPath) originalFilePathForFix = foundPath;
     }
 
+    let fileContentForPrompt = "[]"; // Default if file can't be read or path is unknown
+    if (originalFilePathForFix && originalFilePathForFix !== 'unknown') {
+      try {
+        console.log(`Reading content of ${originalFilePathForFix} to include in prompt for AI code fix.`);
+        fileContentForPrompt = await this.fileSystemService.readFile(originalFilePathForFix);
+      } catch (e: any) {
+        console.warn(`AgenticTddService: Could not read file ${originalFilePathForFix} to provide context for AI code fix. Error: ${e.message}`);
+        fileContentForPrompt = `[Could not read file content: ${e.message}]`;
+      }
+    }
+
     const userPrompt = `Generate a code fix for the following:
 Test Failure Diagnosis: ${analysis}
 Test Name: ${parsedError.testName}
@@ -84,11 +95,21 @@ Error Message: ${parsedError.errorMessage}
 Relevant Test Scenario: ${scenario.description}
 Focus Area: ${scenario.focusArea}
 Specification Context: ${specification.featureDescription}
-Original file path to modify: ${originalFilePathForFix || 'unknown'} 
-Code to Modify (if available): []`; 
+Original file path to modify: ${originalFilePathForFix || 'unknown'}
+Code to Modify (if available):
+\`\`\`typescript
+${fileContentForPrompt}
+\`\`\`
+Please ensure your output is ONLY the specified JSON object.`;
 
     console.log(`AI: Generating code fix for scenario: "${scenario.description}"`);
-    return this.aiModelService.prompt(systemMessage, userPrompt, { analysis, parsedError, scenario, originalFilePath: originalFilePathForFix });
+    return this.aiModelService.prompt(systemMessage, userPrompt, { 
+      analysis, 
+      parsedError, 
+      scenario, 
+      originalFilePath: originalFilePathForFix,
+      originalFileContent: fileContentForPrompt !== "[]" && !fileContentForPrompt.startsWith("[Could not read") ? fileContentForPrompt : undefined 
+    });
   }
 
   private sanitizeForFileName(description: string): string {

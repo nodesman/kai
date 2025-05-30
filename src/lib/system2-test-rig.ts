@@ -1,5 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as dotenv from 'dotenv';
+
+dotenv.config(); // Loads .env file into process.env
 
 import { AgenticTddService } from './typescript/services/agentic-tdd/AgenticTddService';
 import { NodeFileSystemService } from './typescript/services/file-system/NodeFileSystemService';
@@ -10,6 +13,9 @@ import { TestRunnerService } from './typescript/services/test-runner/TestRunnerS
 import { Specification, TestScenario } from './typescript/types/specification';
 import { IAiModelService } from './typescript/services/ai-model/IAiModelService';
 import { ParsedErrorDetails } from './typescript/services/test-parser/JestOutputParser';
+import { RealAiModelService } from './typescript/services/ai-model/RealAiModelService';
+import { Config as ConfigLoader, IConfig } from './Config'; // Path relative to src/lib/
+import chalk from 'chalk';
 
 
 // Make path resolution robust whether running from src (ts-node) or bin (node after tsc)
@@ -220,10 +226,15 @@ async function main() {
   console.log("Kai TDD Test Rig - New execution started...");
   console.log("--- Starting Agentic TDD System Test Rig ---");
 
+  const args = process.argv.slice(2);
+  const useRealAI = args.includes('--useRealAI');
+
+  // Instantiate ConfigLoader
+  const appConfig = new ConfigLoader();
+
   let specToProcess: Specification = sampleSpecification;
   let specOrigin = "default calculator specification";
 
-  const args = process.argv.slice(2); // Skip node executable and script path
   const specArgIndex = args.indexOf('--spec');
 
   if (specArgIndex !== -1 && args[specArgIndex + 1]) {
@@ -258,7 +269,23 @@ async function main() {
 
   const fileSystemService: IFileSystemService = new NodeFileSystemService();
   const outputParser = new JestOutputParser();
-  const aiModelService: IAiModelService = new ConfigurableSimpleAiModelService(); // Remains as is
+  
+  let aiModelService: IAiModelService;
+  if (useRealAI) {
+    console.log(chalk.yellow("Attempting to use REAL AI Model Service... Ensure GEMINI_API_KEY is set and valid."));
+    try {
+      aiModelService = new RealAiModelService(appConfig);
+      console.log(chalk.green("RealAiModelService instantiated successfully."));
+    } catch (error) {
+      console.error(chalk.red("Failed to instantiate RealAiModelService:"), error);
+      console.log(chalk.blue("Falling back to MOCKED AI Model Service."));
+      aiModelService = new ConfigurableSimpleAiModelService();
+    }
+  } else {
+    console.log(chalk.cyan("Using MOCKED AI Model Service (ConfigurableSimpleAiModelService)."));
+    aiModelService = new ConfigurableSimpleAiModelService();
+  }
+
   const testRunnerService = new TestRunnerService(); // Uses Jest
 
   const agenticTddService = new AgenticTddService(

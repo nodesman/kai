@@ -11,3 +11,6 @@ package-lock.json
 
 # Kai internal files (logs, cache, config) - (auto-added by Kai)
 .kai/
+
+# Environment variables file
+.env

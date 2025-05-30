@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "target": "es2020",          // Or a more recent version if your Node supports it
-    "module": "commonjs",        // For Node.js
+    "module": "node16",        // For Node.js, enabling ESM-friendly output
+    "moduleResolution": "node16", // Recommended with module: node16
     "outDir": "bin",           // Output to the bin directory
     "rootDir": "src",          // Your source files are in src
     "strict": true,             // Enable strict type checking

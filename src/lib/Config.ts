@@ -88,11 +88,15 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         let yamlConfig: YamlConfigData = {};
 
         // 1. Load API Key from Environment Variable
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            console.error(chalk.red('Error: GEMINI_API_KEY environment variable is not set.'));
-            console.log(chalk.yellow('Please set the GEMINI_API_KEY environment variable with your API key.'));
-            process.exit(1); // Exit if API key is missing
+        const apiKeyFromEnv = process.env.GEMINI_API_KEY;
+        let apiKey: string; // Explicitly typed
+
+        if (!apiKeyFromEnv) {
+            console.error(chalk.red('ConfigLoader: GEMINI_API_KEY environment variable is not set.'));
+            console.warn(chalk.yellow('Proceeding without API key. Real AI Model Service will fail if attempted.'));
+            apiKey = ""; // Assign empty string to satisfy type, RealAiModelService will check
+        } else {
+            apiKey = apiKeyFromEnv;
         }
 
         // 2. Load config.yaml

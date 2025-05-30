@@ -24,6 +24,17 @@ Before you can run the script, you need to ensure your local environment is corr
     yarn install
     ```
 
+*   **Set up `GEMINI_API_KEY` for Real AI (Optional):**
+    The test rig can be configured to use a real AI model (e.g., Google's Gemini) instead of the default scripted AI. This allows you to see more realistic (though potentially less predictable) behavior.
+    To do this, you need to provide your AI model's API key via the `GEMINI_API_KEY` environment variable.
+    *   **Recommended Method:** Create a file named `.env` in the root directory of the project.
+    *   Add the following line to this `.env` file, replacing `your_actual_api_key_here` with your actual API key:
+        ```
+        GEMINI_API_KEY=your_actual_api_key_here
+        ```
+    *   **Important:** The `.env` file contains sensitive credentials and should **not** be committed to version control. Ensure that `.env` is listed in your project's `.gitignore` file. (The setup performed by this agent should have added it if it wasn't already there).
+    *   The `system2-test-rig.ts` script is configured to automatically load variables from the `.env` file using the `dotenv` package if the file exists.
+
 ## 2. Run the Test Rig (`system2-test-rig.ts`)
 
 The `system2-test-rig.ts` script is the entry point for testing the Agentic TDD service (`AgenticTddService`). You can run it with different configurations:
