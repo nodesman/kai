@@ -11,6 +11,9 @@ import { ProjectContextBuilder } from './ProjectContextBuilder';
 import { ConsolidationService } from './consolidation/ConsolidationService';
 import { toSnakeCase } from './utils';
 
+// Marker used to detect the last successful consolidation in the history
+const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
+
 // Interface for paths managed within the conversation session
 interface ConversationPaths {
     conversationFilePath: string;
@@ -175,10 +178,19 @@ export class ConversationManager {
         try {
             // Fetch fresh context using the builder
             console.log(chalk.cyan("  Fetching fresh codebase context for consolidation..."));
-            // Use the injected contextBuilder instance
-            // NOTE: Consolidation currently ALWAYS uses the default buildContext (full or cache)
-            // It does NOT yet support the 'dynamic' context mode.
-            const { context: currentContextString } = await this.contextBuilder.buildContext();
+            let currentContextString: string;
+            if (this.config.context.mode === 'dynamic') {
+                const relevantHistory = this._findRelevantHistorySlice(conversation);
+                const historySummary = this._summarizeHistory(relevantHistory);
+                const ctx = await this.contextBuilder.buildDynamicContext(
+                    'Consolidate recent conversation changes',
+                    historySummary
+                );
+                currentContextString = ctx.context;
+            } else {
+                const { context } = await this.contextBuilder.buildContext();
+                currentContextString = context;
+            }
 
             // Delegate to the *injected* consolidation service
             await this.consolidationService.process(
@@ -308,6 +320,19 @@ export class ConversationManager {
                 }
             }
         }
+    }
+
+    /** Returns conversation messages since the last successful consolidation. */
+    private _findRelevantHistorySlice(conversation: Conversation): Message[] {
+        const allMessages = conversation.getMessages();
+        let lastSuccessIndex = -1;
+        for (let i = allMessages.length - 1; i >= 0; i--) {
+            if (allMessages[i].role === 'system' && allMessages[i].content === CONSOLIDATION_SUCCESS_MARKER) {
+                lastSuccessIndex = i;
+                break;
+            }
+        }
+        return allMessages.slice(lastSuccessIndex + 1);
     }
 
     /** Creates a simple summary of conversation history for dynamic context */
