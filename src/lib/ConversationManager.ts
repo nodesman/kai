@@ -9,10 +9,8 @@ import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
 import { ProjectContextBuilder } from './ProjectContextBuilder';
 import { ConsolidationService } from './consolidation/ConsolidationService';
+import { CONSOLIDATION_SUCCESS_MARKER } from './consolidation/constants';
 import { toSnakeCase } from './utils';
-
-// Marker used to detect the last successful consolidation in the history
-const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
 // Interface for paths managed within the conversation session
 interface ConversationPaths {
@@ -201,7 +199,9 @@ export class ConversationManager {
             );
             // Note: ConsolidationService internally adds its own success/failure messages to the log file.
             // We add a message to the *in-memory* conversation object for context in the ongoing chat.
-            const successMarker = conversation.getMessages().some(m => m.role === 'system' && m.content.includes("Consolidation Completed Successfully")); // Quick check if service logged success
+            const successMarker = conversation
+                .getMessages()
+                .some(m => m.role === 'system' && m.content === CONSOLIDATION_SUCCESS_MARKER); // Quick check if service logged success
             const systemMessage = successMarker
                 ? `[System: Consolidation process triggered for '${conversationName}' completed successfully. See logs for details.]`
                 : `[System: Consolidation process triggered for '${conversationName}' finished (potentially with errors). See logs for details.]`;
