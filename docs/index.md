@@ -27,6 +27,7 @@ These older documents provide background and detailed comparisons related to the
 *   **[System 1+2 vs Consolidation for Modifications?](explanations/s1s2-vs-consolidation-modifications.md):** Why the S1/S2 TDD approach is preferred over the existing Consolidation Mode for modifications.
 *   **[Does System 1 Analyze Existing Code?](explanations/s1-analysis-existing-code.md):** How System 1 incorporates existing code context.
 *   **[Is System 2 Only a Scaffolder? Analysis Roles?](explanations/s2-scaffolding-vs-modification-analysis.md):** Clarifies System 2's role in modification and distinguishes analysis types.
+*   **[Scaffold Mode](explanations/scaffold_mode.md):** Overview of how Kai creates new projects.
 *   **[Responsibility Distribution (System 1 vs System 2)?](explanations/s1-s2-responsibility-distribution.md):** Defines the distinct roles of System 1 (WHAT) and System 2 (HOW).
 
 ## Development Focus (v1.0)

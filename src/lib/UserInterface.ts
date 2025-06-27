@@ -18,7 +18,8 @@ interface UserInteractionResultBase {
         | 'Start/Continue Conversation'
         | 'Consolidate Changes...'
         | 'Re-run Project Analysis' // Added Re-run option
-        | 'Change Context Mode'; // Added Change Mode option
+        | 'Change Context Mode'
+        | 'Scaffold New Project'; // Added scaffold mode
     conversationName: string | null; // Used for conversation ops
     isNewConversation: boolean; // Relevant only for Start/Continue
     selectedModel: string;
@@ -35,6 +36,13 @@ interface ChangeModeInteractionResult {
     newMode: 'full' | 'analysis_cache' | 'dynamic'; // Added dynamic mode
 }
 
+interface ScaffoldProjectInteractionResult {
+    mode: 'Scaffold New Project';
+    language: string;
+    framework: string;
+    directoryName: string;
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -43,7 +51,11 @@ interface FallbackError {
 }
 
 // Combined result types
-type UserInteractionResult = UserInteractionResultBase | DeleteInteractionResult | ChangeModeInteractionResult;
+type UserInteractionResult =
+    | UserInteractionResultBase
+    | DeleteInteractionResult
+    | ChangeModeInteractionResult
+    | ScaffoldProjectInteractionResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -302,6 +314,7 @@ class UserInterface {
                         'Consolidate Changes...',
                         'Re-run Project Analysis',
                         'Change Context Mode',
+                        'Scaffold New Project',
                         'Delete Conversation...',
                         'Exit Kai', // <-- ADDED Exit option
                         // REMOVED: 'View Kanban Board' option
@@ -367,26 +380,55 @@ class UserInterface {
             }
 
             // --- Handle Change Context Mode ---
-             if (mode === 'Change Context Mode') {
-                 const currentMode = this.config.context.mode || 'Undetermined'; // Get current mode
-                 const { newModeChoice } = await inquirer.prompt([
-                     {
-                         type: 'list',
-                         name: 'newModeChoice',
-                         message: `Current context mode is '${currentMode}'. Select the new mode:`,
-                         choices: [
-                             { name: 'Full Codebase (reads all files)', value: 'full' },
-                             { name: 'Analysis Cache (uses summaries)', value: 'analysis_cache' },
-                             { name: 'Dynamic (AI selects relevant files)', value: 'dynamic' }, // <-- ADDED Dynamic option
-                         ],
-                     },
-                 ]);
-                 // Return specific result type for changing mode
-                 return {
-                     mode: 'Change Context Mode',
-                     newMode: newModeChoice as 'full' | 'analysis_cache' | 'dynamic',
-                 };
-             }
+            if (mode === 'Change Context Mode') {
+                const currentMode = this.config.context.mode || 'Undetermined'; // Get current mode
+                const { newModeChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'newModeChoice',
+                        message: `Current context mode is '${currentMode}'. Select the new mode:`,
+                        choices: [
+                            { name: 'Full Codebase (reads all files)', value: 'full' },
+                            { name: 'Analysis Cache (uses summaries)', value: 'analysis_cache' },
+                            { name: 'Dynamic (AI selects relevant files)', value: 'dynamic' }, // <-- ADDED Dynamic option
+                        ],
+                    },
+                ]);
+                // Return specific result type for changing mode
+                return {
+                    mode: 'Change Context Mode',
+                    newMode: newModeChoice as 'full' | 'analysis_cache' | 'dynamic',
+                };
+            }
+
+            // --- Handle Scaffold New Project ---
+            if (mode === 'Scaffold New Project') {
+                const { directoryName } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'directoryName',
+                        message: 'Project directory name:',
+                        validate: (input) => input.trim() ? true : 'Directory name cannot be empty.'
+                    }
+                ]);
+                const { language } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'language',
+                        message: 'Select primary language:',
+                        choices: ['TypeScript', 'JavaScript']
+                    }
+                ]);
+                const { framework } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'framework',
+                        message: 'Select framework:',
+                        choices: ['Node', 'None']
+                    }
+                ]);
+                return { mode: 'Scaffold New Project', language, framework, directoryName };
+            }
 
             // --- Remaining modes require Model selection ---
             const primaryModel = this.config.gemini.model_name; // Already guaranteed to be a string by Config.ts
@@ -469,4 +511,9 @@ class UserInterface {
     }
 }
 
-export { UserInterface, UserInteractionResult, ChangeModeInteractionResult }; // Export new type
+export {
+    UserInterface,
+    UserInteractionResult,
+    ChangeModeInteractionResult,
+    ScaffoldProjectInteractionResult
+};
