@@ -90,8 +90,29 @@ class AIClient {
         // *** Prepend the hidden instruction ***
         // This instruction is prepended to the final user message text sent to the model.
         // It does NOT get saved back into the Conversation object or logged.
+
         finalUserPromptText = `${HIDDEN_CONVERSATION_INSTRUCTION}\n\n---\n\n${finalUserPromptText}`;
         console.log(chalk.dim("Prepended hidden conversation instruction (not logged)."));
+
+        // --- Token breakdown logging ---
+        const hiddenInstructionTokens = this.countTokens(HIDDEN_CONVERSATION_INSTRUCTION);
+        const userPromptTokens = this.countTokens(lastMessage.content);
+        const contextHeader = "This is the code base context:\n";
+        const contextFooter = "\n\n---\nUser Question:\n";
+        const contextTokens = contextString && contextString.length > "Code Base Context:\n".length
+            ? this.countTokens(contextHeader) + this.countTokens(contextString) + this.countTokens(contextFooter)
+            : 0;
+        const historyTokens = messages.slice(0, -1).reduce((sum, m) => sum + this.countTokens(m.content), 0);
+        const totalTokens = hiddenInstructionTokens + userPromptTokens + contextTokens + historyTokens;
+
+        console.log(chalk.cyan("\nPrompt Token Breakdown:"));
+        console.table([
+            { Part: 'Conversation History', Tokens: historyTokens },
+            { Part: 'Hidden Instruction', Tokens: hiddenInstructionTokens },
+            { Part: 'Code Context', Tokens: contextTokens },
+            { Part: 'User Prompt', Tokens: userPromptTokens },
+            { Part: 'TOTAL', Tokens: totalTokens }
+        ]);
 
         // Create the message structure for the model, replacing the last user message content
         const messagesForModel: Message[] = [
