@@ -23,6 +23,13 @@ export class ConsolidationAnalyzer {
     }
 
     /**
+     * Allows updating the AI client after construction.
+     */
+    setAIClient(aiClient: AIClient): void {
+        this.aiClient = aiClient;
+    }
+
+    /**
      * Analyzes the relevant conversation history slice against the code context.
      * @param relevantHistory The relevant slice of conversation messages.
      * @param codeContext The current codebase context string.

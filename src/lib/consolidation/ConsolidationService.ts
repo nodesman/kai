@@ -54,6 +54,15 @@ export class ConsolidationService {
     }
 
     /**
+     * Updates the AI client used by all consolidation components.
+     */
+    updateAIClient(aiClient: AIClient): void {
+        this.aiClient = aiClient;
+        this.consolidationGenerator.setAIClient(aiClient);
+        this.consolidationAnalyzer.setAIClient(aiClient);
+    }
+
+    /**
      * Orchestrates the entire consolidation process.
      */
     async process(

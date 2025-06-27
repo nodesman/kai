@@ -305,7 +305,7 @@ async function main() {
                 if (codeProcessor && selectedModel && config.gemini.model_name !== selectedModel) { // Check codeProcessor exists
                     console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
                     config.gemini.model_name = selectedModel;
-                    codeProcessor.aiClient = new AIClient(config); // Simple recreation for now
+                    codeProcessor.updateAIClient(new AIClient(config));
                 } else if (config) {
                     console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
                 }
@@ -331,8 +331,7 @@ async function main() {
                 if (selectedModel && config.gemini.model_name !== selectedModel) {
                     console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(selectedModel)}`));
                     config.gemini.model_name = selectedModel;
-                     // Recreate AIClient within CodeProcessor if needed
-                     if (codeProcessor) { codeProcessor.aiClient = new AIClient(config); }
+                     if (codeProcessor) { codeProcessor.updateAIClient(new AIClient(config)); }
                 } else if (config) {
                     console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
                 }

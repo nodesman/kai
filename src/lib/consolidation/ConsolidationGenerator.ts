@@ -29,6 +29,13 @@ export class ConsolidationGenerator {
         this.projectRoot = projectRoot;
         // *** REMOVED: _loadHiddenConsolidationInstruction call ***
     }
+
+    /**
+     * Allows updating the AI client after construction.
+     */
+    setAIClient(aiClient: AIClient): void {
+        this.aiClient = aiClient;
+    }
     // *** REMOVED: _loadHiddenConsolidationInstruction method ***
 
     /**
