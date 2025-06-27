@@ -8,7 +8,12 @@ import path from 'path';
 import inquirer from 'inquirer';
 import { Config } from './lib/Config';
 // Ensure UserInteractionResult and any new specific result types are imported
-import { UserInterface, UserInteractionResult, ChangeModeInteractionResult } from './lib/UserInterface';
+import {
+    UserInterface,
+    UserInteractionResult,
+    ChangeModeInteractionResult,
+    ScaffoldProjectInteractionResult
+} from './lib/UserInterface';
 // REMOVED: KanbanData, KanbanColumn, KanbanCard imports
 import { CodeProcessor } from './lib/CodeProcessor';
 import { FileSystem } from './lib/FileSystem';
@@ -17,6 +22,7 @@ import { GitService } from './lib/GitService';
 import { ProjectContextBuilder } from './lib/ProjectContextBuilder'; // <-- Ensure this is imported
 import chalk from 'chalk';
 import { toSnakeCase } from "./lib/utils";
+import { ProjectScaffolder } from './lib/ProjectScaffolder';
 // *** ADDED Imports for Analysis Feature ***
 import { ProjectAnalyzerService } from './lib/analysis/ProjectAnalyzerService';
 import { AIClient } from './lib/AIClient'; // Needed for Analyzer instantiation
@@ -25,7 +31,7 @@ import { WebService } from './lib/WebService'; // <-- ADDED WebService import
 // *** END Imports for Analysis Feature ***
 
 // performStartupChecks adjusted signature, Config is instantiated later now
-async function performStartupChecks(
+export async function performStartupChecks(
     projectRoot: string,
     fs: FileSystem,
     gitService: GitService,
@@ -433,6 +439,17 @@ async function main() {
                  config.context.mode = newMode; // Update in-memory config
                  await config.saveConfig(); // Persist the change
                  console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
+
+            } else if (mode === 'Scaffold New Project') {
+                 const scaffoldResult = interactionResult as ScaffoldProjectInteractionResult;
+                 const scaffolder = new ProjectScaffolder(fs, gitService);
+                 const newPath = await scaffolder.scaffoldProject(scaffoldResult);
+                 process.chdir(newPath);
+                 console.log(chalk.cyan(`\nSwitched to new project at ${newPath}.`));
+                 const ok = await performStartupChecks(newPath, fs, gitService, ui!);
+                 if (!ok) { process.exit(1); }
+                 await main();
+                 return;
 
             } else {
                 console.log(chalk.yellow(`Unknown mode selected: ${mode}. Returning to menu.`));
