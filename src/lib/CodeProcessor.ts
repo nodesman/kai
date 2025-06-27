@@ -131,6 +131,15 @@ class CodeProcessor {
         }
     }
 
+    /**
+     * Updates the AI client across the processor and dependent services.
+     */
+    updateAIClient(aiClient: AIClient): void {
+        this.aiClient = aiClient;
+        this.conversationManager.updateAIClient(aiClient);
+        this.consolidationService.updateAIClient(aiClient);
+    }
+
      // Keep optimizeWhitespace if it's potentially used by other methods or could be useful
      // If not, it can be removed as well. Currently not used within this class.
      optimizeWhitespace(code: string): string {

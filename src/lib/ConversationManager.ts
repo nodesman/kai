@@ -44,6 +44,13 @@ export class ConversationManager {
     }
 
     /**
+     * Updates the AI client used for conversations and consolidation.
+     */
+    updateAIClient(aiClient: AIClient): void {
+        this.aiClient = aiClient;
+    }
+
+    /**
      * Runs the main interactive conversation session for a given conversation name.
      * @param conversationName The user-facing name of the conversation.
      * @param isNew Whether this is a newly created conversation.
