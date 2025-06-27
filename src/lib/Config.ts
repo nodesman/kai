@@ -31,6 +31,8 @@ interface ProjectConfig {
     prompts_dir?: string;
     prompt_template?: string;
     chats_dir?: string; // Directory for conversation logs
+    typescript_autofix?: boolean;
+    autofix_iterations?: number;
 }
 
 // *** ADDED: Analysis Config Interface ***
@@ -144,6 +146,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             prompts_dir: yamlConfig.project?.prompts_dir || "prompts",
             prompt_template: yamlConfig.project?.prompt_template || "prompt_template.yaml",
             chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Using the updated default
+            typescript_autofix: yamlConfig.project?.typescript_autofix ?? false,
+            autofix_iterations: yamlConfig.project?.autofix_iterations ?? 3,
         };
 
         // *** ADDED: Default and Loading for Analysis Config ***
@@ -189,6 +193,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 prompts_dir: this.project.prompts_dir,
                 prompt_template: this.project.prompt_template,
                 chats_dir: this.project.chats_dir, // Save the relative path
+                typescript_autofix: this.project.typescript_autofix,
+                autofix_iterations: this.project.autofix_iterations,
             },
             analysis: {
                 cache_file_path: this.analysis.cache_file_path,

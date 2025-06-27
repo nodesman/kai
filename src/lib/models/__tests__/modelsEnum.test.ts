@@ -1,4 +1,4 @@
-import Models from '../modelsEnum';
+import { SupportedModels } from '../modelsEnum';
 
 describe('Models', () => {
     it('should be created', () => {

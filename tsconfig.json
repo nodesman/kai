@@ -8,10 +8,11 @@
     "esModuleInterop": true,     // For better compatibility with CommonJS modules
     "skipLibCheck": true,       // Optional: Speeds up compilation
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true //if importing data from a json file.
+    "resolveJsonModule": true, //if importing data from a json file.
+    "types": ["jest"]
   },
   "include": [
-    "src/kai.ts"
+    "src/**/*"
   ],       // Compile everything in src
   "exclude": ["node_modules"]
 }

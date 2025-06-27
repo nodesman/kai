@@ -20,6 +20,7 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
     *   Automatically determines the best mode on the first run or allows manual selection.
 *   **Project Analysis:** Can analyze your project to generate a cache (`.kai/project_analysis.json`) containing file summaries, types, and sizes, enabling efficient context handling for large repositories.
 *   **Direct Filesystem Interaction:** Can create, modify, and delete files based on conversation analysis (Consolidation Mode) or direct instructions (future agentic modes).
+*   **Iterative Compilation:** After applying changes Kai can run `tsc --noEmit` and feed errors back to the AI for another pass.
 *   **Configurable:** Uses a local `.kai/config.yaml` for settings like AI models, token limits, and directories.
 *   **Editor Integration:** Opens conversations in your default command-line editor (tested with Sublime Text's `subl --wait`, basic support for JetBrains IDEs like WebStorm, CLion, IntelliJ IDEA via their command-line launchers).
 
@@ -122,8 +123,14 @@ Key settings include:
 *   `gemini.generation_max_retries`: Retries for the file generation step in consolidation.
 *   `gemini.generation_retry_base_delay_ms`: Base delay for generation retries.
 *   `gemini.interactive_prompt_review`: Set to `true` to review/edit prompts in Sublime Text before sending to Gemini Pro models during chat.
+*   `project.typescript_autofix`: If `true`, run `tsc --noEmit` after each consolidation pass.
+*   `project.autofix_iterations`: How many times Kai will attempt to re-run generation after compilation errors (default 3).
 
 *(Refer to the `src/lib/config_defaults.ts` file for default values).*
+
+### Iterative TypeScript Compilation
+
+When the TypeScript feedback loop is enabled, Kai runs `npx tsc --noEmit` after applying generated changes. Any compiler errors are appended to the conversation and the generation step is retried. The process repeats up to `project.autofix_iterations` times.
 
 ## Development
 
