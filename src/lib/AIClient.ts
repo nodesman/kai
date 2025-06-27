@@ -94,25 +94,40 @@ class AIClient {
         finalUserPromptText = `${HIDDEN_CONVERSATION_INSTRUCTION}\n\n---\n\n${finalUserPromptText}`;
         console.log(chalk.dim("Prepended hidden conversation instruction (not logged)."));
 
-        // --- Token breakdown logging ---
+        // --- Token and character breakdown logging ---
         const hiddenInstructionTokens = this.countTokens(HIDDEN_CONVERSATION_INSTRUCTION);
+        const hiddenInstructionChars = HIDDEN_CONVERSATION_INSTRUCTION.length;
+
         const userPromptTokens = this.countTokens(lastMessage.content);
+        const userPromptChars = lastMessage.content.length;
+
         const contextHeader = "This is the code base context:\n";
         const contextFooter = "\n\n---\nUser Question:\n";
         const contextTokens = contextString && contextString.length > "Code Base Context:\n".length
             ? this.countTokens(contextHeader) + this.countTokens(contextString) + this.countTokens(contextFooter)
             : 0;
+        const contextChars = contextString && contextString.length > "Code Base Context:\n".length
+            ? contextHeader.length + contextString.length + contextFooter.length
+            : 0;
+
         const historyTokens = messages.slice(0, -1).reduce((sum, m) => sum + this.countTokens(m.content), 0);
+        const historyChars = messages.slice(0, -1).reduce((sum, m) => sum + m.content.length, 0);
+
         const totalTokens = hiddenInstructionTokens + userPromptTokens + contextTokens + historyTokens;
+        const totalChars = hiddenInstructionChars + userPromptChars + contextChars + historyChars;
 
         console.log(chalk.cyan("\nPrompt Token Breakdown:"));
         console.table([
-            { Part: 'Conversation History', Tokens: historyTokens },
-            { Part: 'Hidden Instruction', Tokens: hiddenInstructionTokens },
-            { Part: 'Code Context', Tokens: contextTokens },
-            { Part: 'User Prompt', Tokens: userPromptTokens },
-            { Part: 'TOTAL', Tokens: totalTokens }
+            { Part: 'Conversation History', Tokens: historyTokens, Characters: historyChars },
+            { Part: 'Hidden Instruction', Tokens: hiddenInstructionTokens, Characters: hiddenInstructionChars },
+            { Part: 'Code Context', Tokens: contextTokens, Characters: contextChars },
+            { Part: 'User Prompt', Tokens: userPromptTokens, Characters: userPromptChars },
+            { Part: 'TOTAL', Tokens: totalTokens, Characters: totalChars }
         ]);
+
+        const finalPromptTokens = this.countTokens(finalUserPromptText);
+        console.log(chalk.cyan(`Final user prompt size: ${finalPromptTokens} tokens, ${finalUserPromptText.length} characters`));
+        console.log(chalk.cyan(`Total conversation size sent: ${finalPromptTokens + historyTokens} tokens, ${finalUserPromptText.length + historyChars} characters`));
 
         // Create the message structure for the model, replacing the last user message content
         const messagesForModel: Message[] = [
