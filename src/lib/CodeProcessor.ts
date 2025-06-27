@@ -12,6 +12,7 @@ import { CommandService } from './CommandService';
 import { GitService } from './GitService';
 import { ConversationManager } from './ConversationManager'; // <-- ADDED Import
 import { toSnakeCase } from './utils'; // <-- Added for path generation duplication
+import { TypeScriptLoop } from './consolidation/feedback/TypeScriptLoop';
 
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
@@ -45,13 +46,18 @@ class CodeProcessor {
         this.aiClient = new AIClient(config); // AIClient only needs config (and fs internally)
         this.projectRoot = process.cwd(); // projectRoot derived here
 
+        const feedbackLoops = [
+            new TypeScriptLoop(this.commandService, this.fs, this.config)
+        ];
+
         // Pass injected services to ConsolidationService
         this.consolidationService = new ConsolidationService(
             this.config,
             this.fs,
             this.aiClient,
             this.projectRoot,
-            this.gitService
+            this.gitService,
+            feedbackLoops
         );
 
         // --- Instantiate ConversationManager with required dependencies ---
