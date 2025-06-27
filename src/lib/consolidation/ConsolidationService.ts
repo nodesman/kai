@@ -11,6 +11,7 @@ import { ConsolidationGenerator } from './ConsolidationGenerator';
 import { ConsolidationApplier } from './ConsolidationApplier';
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
 import { FinalFileStates, ConsolidationAnalysis } from './types';
+import { CONSOLIDATION_SUCCESS_MARKER } from './constants';
 
 interface ModelSelection {
     analysisModelName: string;
@@ -19,8 +20,6 @@ interface ModelSelection {
     useFlashForGeneration: boolean;
 }
 
-// Define a marker for successful consolidation
-const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
 export class ConsolidationService {
     private config: Config;
