@@ -75,12 +75,12 @@ class Gemini2FlashModel extends BaseModel {
                 generationConfig,
             });
             const lastMessageText = lastMessageToSend.parts.map((part) => part.text).join('');
-            console.log(chalk.blue(`Sending prompt to ${this.modelName}... (Last message length: ${lastMessageText.length})`));
+            console.log(chalk.blue(`Sending prompt to ${this.modelName}... (last message: ${lastMessageText.length} characters)`));
             const result = await chatSession.sendMessage(lastMessageText);
 
             if (result.response && typeof result.response.text === 'function') {
                 const responseText = result.response.text();
-                console.log(chalk.blue(`Received response from ${this.modelName}. (Length: ${responseText.length})`));
+                console.log(chalk.blue(`Received response from ${this.modelName}. (${responseText.length} characters)`));
                 return responseText;
             } else {
                 const finishReason = result.response?.candidates?.[0]?.finishReason;

@@ -179,7 +179,7 @@ class AIClient {
             // Use the chat-focused method of the model, assuming it handles simple text gen too
             const responseText = await modelToCall.getResponseFromAI(messages);
 
-            console.log(chalk.blue(`Received simple text response (Length: ${responseText.length})`));
+        console.log(chalk.blue(`Received simple text response (${responseText.length} characters)`));
             return responseText;
 
         } catch (error) {
@@ -213,7 +213,7 @@ class AIClient {
                 console.log(chalk.green(`Received function call: ${fc.name} with args: ${JSON.stringify(fc.args)}`));
             } else if (firstCandidate?.content?.parts?.[0]?.text) {
                 const text = firstCandidate.content.parts[0].text;
-                console.log(chalk.blue(`Received text response (Length: ${text.length})`));
+                console.log(chalk.blue(`Received text response (${text.length} characters)`));
             } else {
                 const finishReason = firstCandidate?.finishReason;
                 console.log(chalk.yellow(`Received response with no function call or text. Finish Reason: ${finishReason}`));

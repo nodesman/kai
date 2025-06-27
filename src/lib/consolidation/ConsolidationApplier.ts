@@ -78,7 +78,7 @@ export class ConsolidationApplier {
                 // Attempt to write the file
                 const contentToWrite = typeof contentOrAction === 'string' ? contentOrAction : '';
                 await this._writeFile(absolutePath, contentToWrite);
-                logMsg = `Written: ${normalizedPath} (Length: ${contentToWrite.length})`;
+                logMsg = `Written: ${normalizedPath} (${contentToWrite.length} characters)`;
                 status = 'success';
             }
 
