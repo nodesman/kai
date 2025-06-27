@@ -5,8 +5,8 @@ project:
   chats_dir: ".kai/logs" # Default location for conversation logs
 
 gemini:
-  model_name: "gemini-2.5-pro-preview-03-25" # Default primary model
-  subsequent_chat_model_name: "gemini-2.0-flash" # Default secondary model
+  model_name: "gemini-2.5-flash" # Default primary model (Flash)
+  subsequent_chat_model_name: "gemini-2.5-pro" # Default secondary model
   max_output_tokens: 8192
   max_prompt_tokens: 32000 # Max tokens for the *input* prompt (context limit)
   rate_limit:
