@@ -26,8 +26,8 @@ project:
 # --- Gemini Configuration ---
 gemini:
   # API Key is read from the GEMINI_API_KEY environment variable, not set here.
-  model_name: "gemini-2.5-pro-preview-05-06" # Default primary model
-  subsequent_chat_model_name: "gemini-2.0-flash" # Default secondary (faster) model
+  model_name: "gemini-2.5-flash" # Default primary model (Flash)
+  subsequent_chat_model_name: "gemini-2.5-pro" # Default secondary model
   max_output_tokens: 8192 # Max tokens for model response
   max_prompt_tokens: 32000 # Max tokens for input context (adjust based on model limits)
   rate_limit:

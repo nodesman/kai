@@ -118,8 +118,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
 
         // 3. Construct the final Config object with defaults
         // Define application-level defaults here
-        const DEFAULT_PRIMARY_MODEL = "gemini-2.5-pro-preview-05-06";
-        const DEFAULT_SECONDARY_MODEL = "gemini-2.0-flash";
+        const DEFAULT_PRIMARY_MODEL = "gemini-2.5-flash";
+        const DEFAULT_SECONDARY_MODEL = "gemini-2.5-pro";
 
         const defaultGenerationMaxRetries = 3;
         const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
