@@ -10,14 +10,15 @@ import {
     FinishReason            // Import FinishReason
 } from "@google/generative-ai";
 import { Config } from "../Config";
+import { InteractivePromptReviewer } from "../UserInteraction/InteractivePromptReviewer"; // NEW Import
 import { Message } from "../models/Conversation"; // Correct path
 import chalk from 'chalk';
 // --- Conditional Imports ---
-import inquirer from 'inquirer';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { execSync } from 'child_process';
+// Removed: inquirer
+// Removed: fs
+// Removed: path
+// Removed: os
+// Removed: execSync
 // --- End Conditional Imports ---
 
 // Types for internal conversion (unchanged)
@@ -31,6 +32,7 @@ class Gemini2ProModel extends BaseModel {
     model: GenerativeModel; // The specific model instance
     private maxRetries: number;
     private retryBaseDelay: number;
+    private promptReviewer: InteractivePromptReviewer; // NEW Property
 
     constructor(config: Config) {
         super(config);
@@ -50,6 +52,8 @@ class Gemini2ProModel extends BaseModel {
 
         this.maxRetries = config.gemini.generation_max_retries ?? 3;
         this.retryBaseDelay = config.gemini.generation_retry_base_delay_ms ?? 2000;
+        // NEW: Initialize the InteractivePromptReviewer
+        this.promptReviewer = new InteractivePromptReviewer(config);
     }
 
     // --- getResponseFromAI (for Chat - Unchanged) ---
@@ -63,8 +67,6 @@ class Gemini2ProModel extends BaseModel {
 
     // --- queryGeminiChat (Helper for getResponseFromAI - MODIFIED) ---
     async queryGeminiChat(geminiMessages: GeminiChatHistory): Promise<string> {
-        let tempFilePath: string | null = null; // Keep track of temp file path, initialized outside try
-
         try {
             const generationConfig = {
                 maxOutputTokens: this.config.gemini.max_output_tokens || 8192,
@@ -74,76 +76,34 @@ class Gemini2ProModel extends BaseModel {
             const lastMessageToSend = geminiMessages[geminiMessages.length - 1];
             if (!lastMessageToSend || lastMessageToSend.role !== "user") throw new Error("Internal Error: Last message must be user.");
 
-            let lastMessageText = lastMessageToSend.parts.map((part) => part.text).join(''); // Initial text
+            const initialPromptText = lastMessageToSend.parts.map((part) => part.text).join('');
+            let finalPromptText = initialPromptText;
 
             // --- START: Conditional Interactive Prompt Edit/Confirmation ---
             if (this.config.gemini.interactive_prompt_review) { // Check config flag
-                console.log(chalk.magenta('Interactive prompt review ENABLED. Preparing prompt...'));
-
-                // 1. Create a temporary file
-                const tempDir = os.tmpdir();
-                tempFilePath = path.join(tempDir, `gemini-prompt-${Date.now()}.txt`); // Assign path here
-                fs.writeFileSync(tempFilePath, lastMessageText, 'utf8');
-                console.log(chalk.grey(`Prompt saved to temporary file: ${tempFilePath}`));
-
-                // 2. Open in Sublime Text
-                const sublimeCommand = `subl --wait "${tempFilePath}"`;
                 try {
-                    console.log(chalk.yellow(`Opening prompt in Sublime Text. Please review/edit, save, and close the editor to continue...`));
-                    execSync(sublimeCommand); // This will pause execution
-                    console.log(chalk.yellow('Sublime Text closed. Reading modified prompt...'));
-
-                    // 3. Read back the potentially edited content
-                    lastMessageText = fs.readFileSync(tempFilePath, 'utf8'); // Update lastMessageText
-
-                } catch (editError: any) {
-                    console.error(chalk.red(`Error opening or waiting for Sublime Text:`), editError.message);
-                    console.warn(chalk.yellow('Proceeding with the original prompt content.'));
-                    const { proceedAnyway } = await inquirer.prompt([
-                        {
-                            type: 'confirm',
-                            name: 'proceedAnyway',
-                            message: 'Sublime Text could not be opened/tracked. Continue with the original prompt?',
-                            default: false,
-                        },
-                    ]);
-                    if (!proceedAnyway) {
-                        throw new Error('User cancelled prompt submission after editor failure.');
+                    const reviewedPrompt = await this.promptReviewer.reviewPrompt(initialPromptText);
+                    if (reviewedPrompt === null) {
+                        throw new Error('User cancelled prompt submission.'); // Propagate cancellation
                     }
-                    // If proceedAnyway, original lastMessageText is used implicitly
+                    finalPromptText = reviewedPrompt;
+                } catch (cancellationError: any) {
+                    // Re-throw if it's a cancellation or unrecoverable editor error from the reviewer
+                    throw cancellationError;
                 }
-
-                // 4. Ask for confirmation using inquirer
-                const { confirmSend } = await inquirer.prompt([
-                    {
-                        type: 'confirm',
-                        name: 'confirmSend',
-                        message: `Send the reviewed prompt (${lastMessageText.length} characters) to ${this.modelName}?`,
-                        default: true,
-                    },
-                ]);
-
-                // 5. Handle confirmation result
-                if (!confirmSend) {
-                    console.log(chalk.red('User cancelled prompt submission.'));
-                    throw new Error('User cancelled prompt submission.'); // Abort the operation
-                }
-                console.log(chalk.green('User confirmed. Proceeding...'));
-
             } else {
                 // Log that the interactive review is disabled
                 console.log(chalk.dim('Interactive prompt review DISABLED. Sending prompt directly...'));
             }
             // --- END: Conditional Interactive Prompt Edit/Confirmation ---
 
-            // --- Original Logic Continues (using potentially edited or original lastMessageText) ---
             const chatSession = this.model.startChat({
                 history: historyForChat as Content[],
                 generationConfig,
             });
 
-            console.log(chalk.blue(`Sending final prompt to ${this.modelName}... (${lastMessageText.length} characters)`));
-            const result = await chatSession.sendMessage(lastMessageText); // Use the final text
+            console.log(chalk.blue(`Sending final prompt to ${this.modelName}... (${finalPromptText.length} characters)`));
+            const result = await chatSession.sendMessage(finalPromptText); // Use the final prompt text
 
             if (result.response && typeof result.response.text === 'function') {
                 const responseText = result.response.text();
@@ -159,29 +119,14 @@ class Gemini2ProModel extends BaseModel {
                 throw new Error(`AI response from ${this.modelName} missing content. ${blockReason}`);
             }
         } catch (error) {
-            // Catch specific cancellation errors explicitly
-            if (error instanceof Error && error.message === 'User cancelled prompt submission.') {
-                console.log(chalk.yellow('Operation cancelled by user before sending prompt.'));
-                return ''; // Or throw if caller needs to know
-            }
-            if (error instanceof Error && error.message === 'User cancelled prompt submission after editor failure.') {
-                console.log(chalk.yellow('Operation cancelled by user after editor failure.'));
-                return ''; // Or throw
+            // Handle user cancellation specifically, don't pass to generic handleError
+            if (error instanceof Error && error.message.startsWith('User cancelled prompt submission')) {
+                console.log(chalk.yellow(error.message)); // Log the cancellation message
+                return ''; // Return empty string or handle as appropriate for a cancelled operation
             }
             // Otherwise, let the standard error handler deal with it
             this.handleError(error, this.modelName);
             return ''; // Unreachable if handleError throws, but satisfies TS
-        } finally {
-            // --- Cleanup (Only attempt if tempFilePath was set inside the 'if' block) ---
-            if (tempFilePath && fs.existsSync(tempFilePath)) {
-                try {
-                    fs.unlinkSync(tempFilePath);
-                    console.log(chalk.grey(`Temporary prompt file deleted: ${tempFilePath}`));
-                } catch (cleanupError) {
-                    console.error(chalk.red(`Failed to delete temporary file: ${tempFilePath}`), cleanupError);
-                }
-            }
-            // --- End Cleanup ---
         }
     }
 
