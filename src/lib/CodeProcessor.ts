@@ -13,6 +13,8 @@ import { GitService } from './GitService';
 import { ConversationManager } from './ConversationManager'; // <-- ADDED Import
 import { toSnakeCase } from './utils'; // <-- Added for path generation duplication
 
+const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
+
 class CodeProcessor {
     config: Config;
     fs: FileSystem;
@@ -111,7 +113,20 @@ class CodeProcessor {
 
             // Build context string using the injected contextBuilder
             console.log(chalk.cyan("Fetching fresh codebase context for consolidation..."));
-            const { context: currentContextString } = await this.contextBuilder.build();
+
+            let currentContextString: string;
+            if (this.config.context.mode === 'dynamic') {
+                const historySlice = this._findRelevantHistorySlice(conversation);
+                const historySummary = this._summarizeHistory(historySlice);
+                const ctx = await this.contextBuilder.buildDynamicContext(
+                    'Consolidate recent conversation changes',
+                    historySummary
+                );
+                currentContextString = ctx.context;
+            } else {
+                const { context } = await this.contextBuilder.buildContext();
+                currentContextString = context;
+            }
 
             // Delegate *entirely* to the ConsolidationService
             await this.consolidationService.process(
@@ -138,6 +153,33 @@ class CodeProcessor {
         this.aiClient = aiClient;
         this.conversationManager.updateAIClient(aiClient);
         this.consolidationService.updateAIClient(aiClient);
+    }
+
+    /** Returns conversation messages since the last successful consolidation. */
+    private _findRelevantHistorySlice(conversation: Conversation): Message[] {
+        const allMessages = conversation.getMessages();
+        let lastSuccessIndex = -1;
+        for (let i = allMessages.length - 1; i >= 0; i--) {
+            if (allMessages[i].role === 'system' && allMessages[i].content === CONSOLIDATION_SUCCESS_MARKER) {
+                lastSuccessIndex = i;
+                break;
+            }
+        }
+        return allMessages.slice(lastSuccessIndex + 1);
+    }
+
+    /** Creates a simple summary of conversation history for dynamic context */
+    private _summarizeHistory(history: Message[]): string | null {
+        if (!history || history.length === 0) return null;
+        const recentMessages = history.slice(-4);
+        let summary = 'Recent conversation highlights:\n';
+        recentMessages.forEach((msg: Message) => {
+            const contentPreview = typeof msg.content === 'string'
+                ? `${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+                : '[Non-text content]';
+            summary += `  ${msg.role}: ${contentPreview}\n`;
+        });
+        return summary;
     }
 
      // Keep optimizeWhitespace if it's potentially used by other methods or could be useful
