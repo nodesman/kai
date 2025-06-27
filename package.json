@@ -3,9 +3,7 @@
   "version": "1.1.0",
   "description": "An AI-powered coding assistant",
   "main": "bin/lib/index.js",
-  "bin": {
-    "kai": "bin/kai.js"
-  },
+  "bin": "bin/kai.js",
   "files": [
     "bin",
     "README.md",
@@ -56,6 +54,7 @@
   "devDependencies": {
     "@types/diff": "^7.0.2",
     "@types/inquirer": "^9.0.7",
+    "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/marked": "^6.0.0",
     "@types/node": "^22.13.10",

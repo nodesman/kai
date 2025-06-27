@@ -11,6 +11,8 @@ project:
   prompts_dir: "prompts" # Directory for custom prompt templates
   prompt_template: "prompt_template.yaml" # Default prompt template file
   chats_dir: ".kai/logs" # Directory for conversation logs (inside .kai)
+  typescript_autofix: false # Run tsc after each consolidation
+  autofix_iterations: 3 # Max compile/apply iterations
 
 # --- Analysis & Context Caching (Optional) ---
 # analysis:

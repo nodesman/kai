@@ -12,6 +12,7 @@ import { ConsolidationApplier } from './ConsolidationApplier';
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
 import { FinalFileStates, ConsolidationAnalysis } from './types';
 import { CONSOLIDATION_SUCCESS_MARKER } from './constants';
+import { FeedbackLoop } from './feedback/FeedbackLoop';
 
 interface ModelSelection {
     analysisModelName: string;
@@ -31,13 +32,15 @@ export class ConsolidationService {
     private consolidationGenerator: ConsolidationGenerator;
     private consolidationApplier: ConsolidationApplier;
     private consolidationAnalyzer: ConsolidationAnalyzer;
+    private feedbackLoops: FeedbackLoop[];
 
     constructor(
         config: Config,
         fileSystem: FileSystem,
         aiClient: AIClient,
         projectRoot: string,
-        gitService: GitService
+        gitService: GitService,
+        feedbackLoops: FeedbackLoop[] = []
     ) {
         this.config = config;
         this.fs = fileSystem;
@@ -50,6 +53,7 @@ export class ConsolidationService {
         );
         this.consolidationApplier = new ConsolidationApplier(this.fs);
         this.consolidationAnalyzer = new ConsolidationAnalyzer(this.aiClient);
+        this.feedbackLoops = feedbackLoops;
     }
 
     /**
@@ -112,12 +116,39 @@ export class ConsolidationService {
             // REMOVED: Step C: Review
             // const userApproved = await this._runReviewStep(finalStates); // REMOVED
 
-            // Step C: Apply (always attempts if generation succeeded)
-            changesApplied = await this._runApplyStep(finalStates, conversationFilePath); // Modified call
+            let states = finalStates;
+            let iterations = this.config.project.autofix_iterations ?? 3;
+            let loopsOk = false;
 
-            // Mark overall success if we reached here and changes were applied
-            if (changesApplied) { // Simplified success condition
-                consolidationSucceeded = true;
+            while (iterations > 0) {
+                // Step C: Apply (always attempts if generation succeeded)
+                changesApplied = await this._runApplyStep(states, conversationFilePath);
+
+                const loopLogs: string[] = [];
+                loopsOk = true;
+                for (const loop of this.feedbackLoops) {
+                    const result = await loop.run(this.projectRoot);
+                    if (result.log) loopLogs.push(result.log);
+                    if (!result.success) loopsOk = false;
+                }
+
+                if (loopsOk) {
+                    consolidationSucceeded = true;
+                    break;
+                }
+
+                iterations--;
+                if (iterations === 0) break;
+
+                const errorMessage: Message = { role: 'system', content: `Compilation errors:\n${loopLogs.join('\n')}` };
+                const retryHistory = relevantHistory.concat(errorMessage);
+                states = await this._runGenerationStep(
+                    retryHistory,
+                    currentContextString,
+                    analysisResult,
+                    conversationFilePath,
+                    models
+                );
             }
 
         } catch (error) {
