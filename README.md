@@ -34,6 +34,7 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
     *   **Re-run Project Analysis:** Manually triggers the analysis process to update the `.kai/project_analysis.json` cache. Useful if you've made significant changes outside of Kai.
     *   **Change Context Mode:** Allows you to manually switch between `full`, `analysis_cache`, and `dynamic` modes and saves the setting to `.kai/config.yaml`.
     *   **Delete Conversation:** Lets you select and remove conversation log files.
+    *   **Scaffold New Project:** Create a fresh project directory with default Kai configuration and a basic TypeScript setup.
 
 ## Installation
 
