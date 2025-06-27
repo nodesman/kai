@@ -90,8 +90,44 @@ class AIClient {
         // *** Prepend the hidden instruction ***
         // This instruction is prepended to the final user message text sent to the model.
         // It does NOT get saved back into the Conversation object or logged.
+
         finalUserPromptText = `${HIDDEN_CONVERSATION_INSTRUCTION}\n\n---\n\n${finalUserPromptText}`;
         console.log(chalk.dim("Prepended hidden conversation instruction (not logged)."));
+
+        // --- Token and character breakdown logging ---
+        const hiddenInstructionTokens = this.countTokens(HIDDEN_CONVERSATION_INSTRUCTION);
+        const hiddenInstructionChars = HIDDEN_CONVERSATION_INSTRUCTION.length;
+
+        const userPromptTokens = this.countTokens(lastMessage.content);
+        const userPromptChars = lastMessage.content.length;
+
+        const contextHeader = "This is the code base context:\n";
+        const contextFooter = "\n\n---\nUser Question:\n";
+        const contextTokens = contextString && contextString.length > "Code Base Context:\n".length
+            ? this.countTokens(contextHeader) + this.countTokens(contextString) + this.countTokens(contextFooter)
+            : 0;
+        const contextChars = contextString && contextString.length > "Code Base Context:\n".length
+            ? contextHeader.length + contextString.length + contextFooter.length
+            : 0;
+
+        const historyTokens = messages.slice(0, -1).reduce((sum, m) => sum + this.countTokens(m.content), 0);
+        const historyChars = messages.slice(0, -1).reduce((sum, m) => sum + m.content.length, 0);
+
+        const totalTokens = hiddenInstructionTokens + userPromptTokens + contextTokens + historyTokens;
+        const totalChars = hiddenInstructionChars + userPromptChars + contextChars + historyChars;
+
+        console.log(chalk.cyan("\nPrompt Token Breakdown:"));
+        console.table([
+            { Part: 'Conversation History', Tokens: historyTokens, Characters: historyChars },
+            { Part: 'Hidden Instruction', Tokens: hiddenInstructionTokens, Characters: hiddenInstructionChars },
+            { Part: 'Code Context', Tokens: contextTokens, Characters: contextChars },
+            { Part: 'User Prompt', Tokens: userPromptTokens, Characters: userPromptChars },
+            { Part: 'TOTAL', Tokens: totalTokens, Characters: totalChars }
+        ]);
+
+        const finalPromptTokens = this.countTokens(finalUserPromptText);
+        console.log(chalk.cyan(`Final user prompt size: ${finalPromptTokens} tokens, ${finalUserPromptText.length} characters`));
+        console.log(chalk.cyan(`Total conversation size sent: ${finalPromptTokens + historyTokens} tokens, ${finalUserPromptText.length + historyChars} characters`));
 
         // Create the message structure for the model, replacing the last user message content
         const messagesForModel: Message[] = [
@@ -143,7 +179,7 @@ class AIClient {
             // Use the chat-focused method of the model, assuming it handles simple text gen too
             const responseText = await modelToCall.getResponseFromAI(messages);
 
-            console.log(chalk.blue(`Received simple text response (Length: ${responseText.length})`));
+        console.log(chalk.blue(`Received simple text response (${responseText.length} characters)`));
             return responseText;
 
         } catch (error) {
@@ -177,7 +213,7 @@ class AIClient {
                 console.log(chalk.green(`Received function call: ${fc.name} with args: ${JSON.stringify(fc.args)}`));
             } else if (firstCandidate?.content?.parts?.[0]?.text) {
                 const text = firstCandidate.content.parts[0].text;
-                console.log(chalk.blue(`Received text response (Length: ${text.length})`));
+                console.log(chalk.blue(`Received text response (${text.length} characters)`));
             } else {
                 const finishReason = firstCandidate?.finishReason;
                 console.log(chalk.yellow(`Received response with no function call or text. Finish Reason: ${finishReason}`));

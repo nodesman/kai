@@ -136,7 +136,7 @@ export class ConsolidationGenerator {
             if (finalContentOrDelete === 'DELETE_CONFIRMED') {
                  console.log(chalk.yellow(`      AI suggested DELETE for ${normalizedPath}. Marked for deletion.`));
             } else {
-                console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (Length: ${finalContentOrDelete.length})`));
+                console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (${finalContentOrDelete.length} characters)`));
             }
 
         } catch (error) {

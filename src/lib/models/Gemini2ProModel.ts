@@ -118,7 +118,7 @@ class Gemini2ProModel extends BaseModel {
                     {
                         type: 'confirm',
                         name: 'confirmSend',
-                        message: `Send the reviewed prompt (length: ${lastMessageText.length}) to ${this.modelName}?`,
+                        message: `Send the reviewed prompt (${lastMessageText.length} characters) to ${this.modelName}?`,
                         default: true,
                     },
                 ]);
@@ -142,12 +142,12 @@ class Gemini2ProModel extends BaseModel {
                 generationConfig,
             });
 
-            console.log(chalk.blue(`Sending final prompt to ${this.modelName}... (Length: ${lastMessageText.length})`));
+            console.log(chalk.blue(`Sending final prompt to ${this.modelName}... (${lastMessageText.length} characters)`));
             const result = await chatSession.sendMessage(lastMessageText); // Use the final text
 
             if (result.response && typeof result.response.text === 'function') {
                 const responseText = result.response.text();
-                console.log(chalk.blue(`Received response from ${this.modelName}. (Length: ${responseText.length})`));
+                console.log(chalk.blue(`Received response from ${this.modelName}. (${responseText.length} characters)`));
                 return responseText;
             } else {
                 const finishReason = result.response?.candidates?.[0]?.finishReason;
