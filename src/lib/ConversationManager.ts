@@ -350,5 +350,3 @@ export class ConversationManager {
          return summary;
     }
 }
-
- // REMOVED: Redundant export statement
