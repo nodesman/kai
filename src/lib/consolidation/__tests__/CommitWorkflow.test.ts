@@ -1,5 +1,9 @@
 import { ConsolidationService } from '../ConsolidationService';
 
+// Chalk is ESM-only which Jest struggles to load in the CommonJS test environment
+// so we provide a simple manual mock that returns proxy functions.
+jest.mock('chalk', () => ({ __esModule: true, default: new Proxy({}, { get: () => (s: string) => s }) }));
+
 describe('commit workflow', () => {
   const baseConfig:any = { gemini:{}, project:{} };
   const fs:any = {};
