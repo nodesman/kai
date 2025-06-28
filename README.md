@@ -36,6 +36,31 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
     *   **Change Context Mode:** Allows you to manually switch between `full`, `analysis_cache`, and `dynamic` modes and saves the setting to `.kai/config.yaml`.
     *   **Delete Conversation:** Lets you select and remove conversation log files.
     *   **Scaffold New Project:** Create a fresh project directory with default Kai configuration and a basic TypeScript setup.
+### AI-assisted Commit Workflow
+
+After changes are applied, Kai guides you through committing them:
+
+1. **Display of modified files:** Prints the list from `git status --short` so you can review what changed.
+2. **Prompt to generate a commit message:** Kai asks whether to create a commit message with Gemini.
+3. **Confirmation before committing:** The proposed message is shown and you must confirm before `git commit` runs.
+
+Example session:
+
+```text
+Modified files:
+  - src/index.ts
+  - README.md
+
+Generate commit message with Gemini and commit all changes? (Y/n) y
+
+Proposed commit message:
+
+Add greeting to CLI output
+
+Use this commit message? (Y/n) y
+[main abc1234] Add greeting to CLI output
+ 2 files changed, 5 insertions(+)
+```
 
 ## Installation
 
