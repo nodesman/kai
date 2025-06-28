@@ -13,6 +13,7 @@ project:
   chats_dir: ".kai/logs" # Directory for conversation logs (inside .kai)
   typescript_autofix: false # Run tsc after each consolidation
   autofix_iterations: 3 # Max compile/apply iterations
+  coverage_iterations: 3 # Max test coverage improvement iterations
 
 # --- Analysis & Context Caching (Optional) ---
 # analysis:

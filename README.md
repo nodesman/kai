@@ -165,6 +165,7 @@ Key settings include:
 *   `gemini.interactive_prompt_review`: Set to `true` to review/edit prompts in Sublime Text before sending to Gemini Pro models during chat.
 *   `project.typescript_autofix`: If `true`, run `tsc --noEmit` after each consolidation pass.
 *   `project.autofix_iterations`: How many times Kai will attempt to re-run generation after compilation errors (default 3).
+*   `project.coverage_iterations`: Maximum loops to generate tests and rerun coverage reports (default 3).
 
 *(Refer to the `src/lib/config_defaults.ts` file for default values).*
 
