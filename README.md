@@ -93,6 +93,18 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
     ```
     *(Optionally, use `npm link` to make the `kai` command available globally from your source directory)*
 
+### Installing Dependencies
+
+Before running TypeScript or Jest commands, make sure to install all project dependencies:
+
+```bash
+npm install
+# or
+yarn install
+```
+
+If dependencies are missing, `tsc` and `jest` will report errors about missing type definitions.
+
 ## Usage
 
 1.  Navigate to your project's root directory in your terminal.
