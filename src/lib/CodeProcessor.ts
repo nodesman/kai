@@ -14,6 +14,7 @@ import { ConversationManager } from './ConversationManager'; // <-- ADDED Import
 import { toSnakeCase } from './utils'; // <-- Added for path generation duplication
 import { TypeScriptLoop } from './consolidation/feedback/TypeScriptLoop';
 import { CommitMessageService } from './CommitMessageService';
+import { TestCoverageRaiser } from './hardening/TestCoverageRaiser';
 
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
@@ -29,6 +30,7 @@ class CodeProcessor {
     gitService: GitService;
     conversationManager: ConversationManager; // <-- ADDED Property
     commitMessageService: CommitMessageService;
+    hardenService: TestCoverageRaiser;
 
     static async create(
         config: Config,
@@ -99,6 +101,14 @@ class CodeProcessor {
             this.ui, // Pass injected UI
             this.contextBuilder, // Pass injected ContextBuilder
             this.consolidationService // Pass the created ConsolidationService
+        );
+
+        this.hardenService = new TestCoverageRaiser(
+            this.config,
+            this.fs,
+            this.commandService,
+            this.aiClient,
+            this.projectRoot
         );
     }
     // --- END MODIFIED Constructor ---
@@ -183,6 +193,10 @@ class CodeProcessor {
         }
     }
 
+    async processHardeningRequest(tool: string): Promise<void> {
+        await this.hardenService.process(tool);
+    }
+
     /**
      * Updates the AI client across the processor and dependent services.
      */
@@ -190,6 +204,7 @@ class CodeProcessor {
         this.aiClient = aiClient;
         this.conversationManager.updateAIClient(aiClient);
         this.consolidationService.updateAIClient(aiClient);
+        this.hardenService.updateAIClient(aiClient);
     }
 
     /** Returns conversation messages since the last successful consolidation. */
