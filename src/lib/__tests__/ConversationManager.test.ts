@@ -118,6 +118,74 @@ describe('ConversationManager private flows', () => {
         expect(fs.deleteFile).not.toHaveBeenCalled();
         expect(logSpy).toHaveBeenCalled();
       });
+
+      it('warns when deletion fails', async () => {
+        fs.access = jest.fn().mockResolvedValue(undefined);
+        fs.deleteFile = jest.fn().mockRejectedValue(new Error('bad'));
+        await (manager as any)._cleanupEditorFile('/e');
+        expect(warnSpy).toHaveBeenCalled();
+      });
+
+      it('warns when access fails', async () => {
+        fs.access = jest.fn().mockRejectedValue(new Error('nope'));
+        fs.deleteFile = jest.fn();
+        await (manager as any)._cleanupEditorFile('/e');
+        expect(fs.deleteFile).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalled();
+      });
+
+      it('skips when path is null', async () => {
+        fs.access = jest.fn();
+        fs.deleteFile = jest.fn();
+        await (manager as any)._cleanupEditorFile(null);
+        expect(fs.access).not.toHaveBeenCalled();
+        expect(fs.deleteFile).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('_handleConsolidateCommand', () => {
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      afterEach(() => {
+        errSpy.mockClear();
+      });
+
+      it('logs when initial log fails', async () => {
+        const convo = new Conversation();
+        aiClient.logConversation = jest.fn().mockRejectedValue(new Error('oops'));
+        builder.buildContext = jest.fn().mockResolvedValue({ context: 'ctx', tokenCount: 1 });
+        consolidation.process = jest.fn().mockResolvedValue(undefined);
+        await (manager as any)._handleConsolidateCommand(convo, '/c.jsonl');
+        expect(errSpy).toHaveBeenCalled();
+      });
+
+      it('handles consolidation errors', async () => {
+        const convo = new Conversation();
+        aiClient.logConversation = jest.fn().mockResolvedValue(undefined);
+        builder.buildContext = jest.fn().mockResolvedValue({ context: 'ctx', tokenCount: 1 });
+        consolidation.process = jest.fn().mockRejectedValue(new Error('fail'));
+
+        await (manager as any)._handleConsolidateCommand(convo, '/c.jsonl');
+
+        expect(errSpy).toHaveBeenCalled();
+        expect(aiClient.logConversation).toHaveBeenCalledWith('/c.jsonl', expect.objectContaining({ type: 'error' }));
+        const systemMsg = convo.getMessages().find(m => m.role === 'system');
+        expect(systemMsg?.content).toContain('System Error during');
+      });
+
+      it('logs when context build fails', async () => {
+        const convo = new Conversation();
+        aiClient.logConversation = jest.fn().mockResolvedValue(undefined);
+        builder.buildContext = jest.fn().mockRejectedValue(new Error('ctx'));
+        consolidation.process = jest.fn();
+
+        await (manager as any)._handleConsolidateCommand(convo, '/c.jsonl');
+
+        expect(consolidation.process).not.toHaveBeenCalled();
+        expect(errSpy).toHaveBeenCalled();
+        expect(aiClient.logConversation).toHaveBeenCalledWith('/c.jsonl', expect.objectContaining({ type: 'error' }));
+        const sysMsg = convo.getMessages().find(m => m.role === 'system');
+        expect(sysMsg?.content).toContain('System Error during');
+      });
     });
 
     describe('_findRelevantHistorySlice and _summarizeHistory', () => {
