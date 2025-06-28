@@ -67,5 +67,75 @@ describe('ConversationManager private flows', () => {
       expect(cleanup).toHaveBeenCalled();
     });
   });
+
+  describe('utility helpers', () => {
+    it('generates expected conversation paths', () => {
+      const paths = (manager as any)._getConversationPaths('My Chat');
+      expect(paths.conversationFilePath).toContain('my_chat.jsonl');
+      expect(paths.editorFilePath).toContain('my_chat_edit.txt');
+    });
+
+    describe('_loadOrCreateConversation', () => {
+      it('loads existing conversation file', async () => {
+        const logs = [{ type: 'request', role: 'user', content: 'hi', timestamp: 't' }];
+        fs.readJsonlFile = jest.fn().mockResolvedValue(logs);
+        const convo = await (manager as any)._loadOrCreateConversation('Chat', false, '/c');
+        expect(fs.readJsonlFile).toHaveBeenCalledWith('/c');
+        expect(convo.getMessages()).toHaveLength(1);
+      });
+
+      it('creates new conversation when file missing', async () => {
+        fs.readJsonlFile = jest.fn().mockRejectedValue({ code: 'ENOENT' });
+        const convo = await (manager as any)._loadOrCreateConversation('Chat', false, '/c');
+        expect(convo.getMessages()).toHaveLength(0);
+      });
+
+      it('rethrows unexpected errors', async () => {
+        fs.readJsonlFile = jest.fn().mockRejectedValue(new Error('fail'));
+        await expect((manager as any)._loadOrCreateConversation('Chat', false, '/c')).rejects.toThrow('fail');
+      });
+    });
+
+    describe('_cleanupEditorFile', () => {
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      afterEach(() => {
+        logSpy.mockClear();
+        warnSpy.mockClear();
+      });
+
+      it('deletes existing file', async () => {
+        fs.access = jest.fn().mockResolvedValue(undefined);
+        fs.deleteFile = jest.fn().mockResolvedValue(undefined);
+        await (manager as any)._cleanupEditorFile('/e');
+        expect(fs.deleteFile).toHaveBeenCalledWith('/e');
+      });
+
+      it('handles missing file gracefully', async () => {
+        fs.access = jest.fn().mockRejectedValue({ code: 'ENOENT' });
+        fs.deleteFile = jest.fn();
+        await (manager as any)._cleanupEditorFile('/e');
+        expect(fs.deleteFile).not.toHaveBeenCalled();
+        expect(logSpy).toHaveBeenCalled();
+      });
+    });
+
+    describe('_findRelevantHistorySlice and _summarizeHistory', () => {
+      it('returns slice after last success marker', () => {
+        const convo = new Conversation();
+        convo.addMessage('user', 'a');
+        convo.addMessage('system', '[System: Consolidation Completed Successfully]');
+        convo.addMessage('assistant', 'b');
+        const slice = (manager as any)._findRelevantHistorySlice(convo);
+        expect(slice).toHaveLength(1);
+        const summary = (manager as any)._summarizeHistory(slice);
+        expect(summary).toContain('assistant');
+      });
+
+      it('returns null summary for empty history', () => {
+        expect((manager as any)._summarizeHistory([])).toBeNull();
+      });
+    });
+  });
 });
 

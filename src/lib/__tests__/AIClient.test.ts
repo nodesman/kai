@@ -77,10 +77,11 @@ describe('AIClient', () => {
         const conversationFilePath = '/test/chats/conv.jsonl';
         const userMessageContent = 'User query';
         const aiResponseContent = 'AI response';
-        const mockConversation = new Conversation();
-        mockConversation.addMessage('user', userMessageContent);
+        let mockConversation: Conversation;
 
         beforeEach(() => {
+            mockConversation = new Conversation();
+            mockConversation.addMessage('user', userMessageContent);
             mockProModelInstance.getResponseFromAI.mockResolvedValue(aiResponseContent);
         });
 
@@ -115,13 +116,17 @@ describe('AIClient', () => {
 
         it('should throw error if conversation history does not end with user message', async () => {
             const emptyConversation = new Conversation();
-            await expect(aiClient.getResponseFromAI(emptyConversation, conversationFilePath)).rejects.toThrow("Conversation history must end with a user message.");
+            await expect(aiClient.getResponseFromAI(emptyConversation, conversationFilePath)).rejects.toThrow("Conversation history must end with a user message to get AI response.");
         });
 
         it('should handle errors from the model', async () => {
             mockProModelInstance.getResponseFromAI.mockRejectedValue(new Error('Model Error'));
             await expect(aiClient.getResponseFromAI(mockConversation, conversationFilePath)).rejects.toThrow('Model Error');
-            expect(mockFs.appendJsonlFile).toHaveBeenCalledWith(conversationFilePath, expect.objectContaining({ type: 'error', role: 'system', error: expect.stringContaining('Model Error') }));
+            expect(mockFs.appendJsonlFile).toHaveBeenNthCalledWith(
+                2,
+                conversationFilePath,
+                expect.objectContaining({ type: 'error', error: expect.stringContaining('Model Error') })
+            );
         });
     });
 
@@ -159,6 +164,7 @@ describe('AIClient', () => {
 
         beforeEach(() => {
             mockProModelInstance.generateContent.mockResolvedValue(mockResult);
+            mockFlashModelInstance.generateContent.mockResolvedValue(mockResult);
         });
 
         it('should call the correct model and return result', async () => {

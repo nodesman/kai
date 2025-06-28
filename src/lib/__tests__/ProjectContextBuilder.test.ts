@@ -41,3 +41,42 @@ describe('ProjectContextBuilder.buildContext (analysis_cache mode)', () => {
     await expect(builder.buildContext()).rejects.toThrow(/Analysis cache/);
   });
 });
+
+describe('ProjectContextBuilder utilities', () => {
+  const fsMock = { readAnalysisCache: jest.fn() } as any;
+  const gitMock = {} as any;
+  const aiClient = { getResponseTextFromAI: jest.fn() } as any;
+  const config: any = {
+    analysis: { cache_file_path: 'cache.json' },
+    context: { mode: 'dynamic' },
+    gemini: { max_prompt_tokens: 1000 },
+    project: {}
+  };
+  let builder: ProjectContextBuilder;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
+  });
+
+  it('requires user query in dynamic mode', async () => {
+    await expect(builder.buildContext()).rejects.toThrow(/User query is required/);
+  });
+
+  it('formats cache for relevance', () => {
+    const cache: ProjectAnalysisCache = {
+      overallSummary: '',
+      entries: [
+        { filePath: 'a.ts', type: 'text_analyze', size: 2048, loc: 10, summary: 'details', lastAnalyzed: 'now' }
+      ]
+    };
+    const summary = (builder as any)._formatCacheForRelevance(cache);
+    expect(summary).toContain('a.ts [text analyze]');
+    expect(summary).toContain('Summary: details');
+  });
+
+  it('optimizes whitespace', () => {
+    const res = (builder as any).optimizeWhitespace('a \n\n\n b  ');
+    expect(res).toBe('a\n\n b');
+  });
+});
