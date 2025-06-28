@@ -87,6 +87,50 @@ describe('UserInterface', () => {
   it('returns null when no prompt is entered', () => {
     const ui = new UserInterface({} as any);
     const sep = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
-    expect(ui.extractNewPrompt(`   \n${sep}\n`)).toBeNull();
+    expect(ui.extractNewPrompt(`    \n${sep}\n`)).toBeNull();
+  });
+
+  describe('getPromptViaSublimeLoop', () => {
+    let ui: UserInterface;
+    const origSpawn = jest.requireActual('child_process').spawn;
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface({ chatsDir: '/chats', context: {} } as any);
+      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
+      jest.spyOn(ui.fs, 'readFile');
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
+    });
+    afterEach(() => jest.unmock('child_process'));
+
+    it('returns null when editor close code != 0', async () => {
+      const fakeSpawn = { on: (_: string, cb: any) => cb(1) } as any;
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue(fakeSpawn);
+      const result = await ui.getPromptViaSublimeLoop('conv', [], '/tmp/edit');
+      expect(result.newPrompt).toBeNull();
+    });
+
+    it('returns extracted prompt when content changed', async () => {
+      const modified = 'new prompt\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---\nhist';
+      (ui.fs.readFile as jest.Mock).mockResolvedValue(modified);
+      const fakeSpawn = { on: (_: string, cb: any) => cb(0) } as any;
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue(fakeSpawn);
+      const res = await ui.getPromptViaSublimeLoop('conv', [], '/tmp/edit');
+      expect(res.newPrompt).toBe('new prompt');
+    });
+
+    it('falls back from JetBrains IDE to Sublime when spawn errors ENOENT', async () => {
+      const error = { code: 'ENOENT' };
+      let call = 0;
+      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
+        call++;
+        if (call === 1) throw error;
+        return { on: (_: string, cb: any) => cb(0) } as any;
+      });
+      (ui.fs.readFile as jest.Mock).mockResolvedValue('p\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
+    await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/e')).rejects.toMatchObject({ code: 'ENOENT' });
+    });
   });
 });

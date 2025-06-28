@@ -1,44 +1,195 @@
-jest.mock('chalk');
+
+import fs from 'fs';
+import fsPromises from 'fs/promises';
+import path from 'path';
 import { FileSystem } from '../FileSystem';
 
 describe('FileSystem', () => {
-    it('reads file and returns content when file exists', async () => {
-        const content = 'hello';
-        jest.spyOn(require('fs/promises'), 'readFile').mockResolvedValue(content);
-        const fs = new (require('../FileSystem').FileSystem)();
-        await expect(fs.readFile('path.txt')).resolves.toBe(content);
+  let tempDir: string;
+  let fsUtil: FileSystem;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(__dirname, 'fs-test-'));
+    fsUtil = new FileSystem();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('writes and reads a file', async () => {
+    const filePath = path.join(tempDir, 'sub', 'file.txt');
+    await fsUtil.writeFile(filePath, 'hello');
+    const content = await fsUtil.readFile(filePath);
+    expect(content).toBe('hello');
+  });
+
+  it('readFile returns null for missing file and stat returns null', async () => {
+    const missing = path.join(tempDir, 'nope.txt');
+    expect(await fsUtil.readFile(missing)).toBeNull();
+    expect(await fsUtil.stat(missing)).toBeNull();
+  });
+
+  it('isDirectoryEmptyOrSafe handles non-existent, safe-only, and unsafe dirs', async () => {
+    // non-existent dir
+    const dirA = path.join(tempDir, 'A');
+    expect(await fsUtil.isDirectoryEmptyOrSafe(dirA)).toBe(true);
+    // safe-only dir (.DS_Store)
+    const dirB = path.join(tempDir, 'B');
+    fs.mkdirSync(dirB);
+    fs.writeFileSync(path.join(dirB, '.DS_Store'), '');
+    expect(await fsUtil.isDirectoryEmptyOrSafe(dirB)).toBe(true);
+    // unsafe dir (contains other file)
+    const dirC = path.join(tempDir, 'C');
+    fs.mkdirSync(dirC);
+    fs.writeFileSync(path.join(dirC, 'foo.txt'), '');
+    expect(await fsUtil.isDirectoryEmptyOrSafe(dirC)).toBe(false);
+  });
+
+  it('ensureDirExists creates nested directories', async () => {
+    const nested = path.join(tempDir, 'x', 'y', 'z');
+    await fsUtil.ensureDirExists(nested);
+    expect(fs.existsSync(nested)).toBe(true);
+  });
+
+  it('listJsonlFiles lists only .jsonl basenames', async () => {
+    const dir = path.join(tempDir, 'logs');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'one.jsonl'), '');
+    fs.writeFileSync(path.join(dir, 'two.txt'), '');
+    fs.writeFileSync(path.join(dir, 'three.jsonl'), '');
+    const list = await fsUtil.listJsonlFiles(dir);
+    expect(list.sort()).toEqual(['one', 'three']);
+  });
+
+  it('readFileContents returns map for existing files only', async () => {
+    const f1 = path.join(tempDir, 'a.txt');
+    const f2 = path.join(tempDir, 'b.txt');
+    fs.writeFileSync(f1, 'A');
+    const map = await fsUtil.readFileContents([f1, f2]);
+    expect(map).toEqual({ [f1]: 'A' });
+  });
+
+  it('isTextFile detects text vs binary', async () => {
+    const textPath = path.join(tempDir, 't.txt');
+    const binPath = path.join(tempDir, 'b.bin');
+    fs.writeFileSync(textPath, 'hello');
+    fs.writeFileSync(binPath, Buffer.from([0, 1, 2, 3, 0]));
+    expect(await fsUtil.isTextFile(textPath)).toBe(true);
+    expect(await fsUtil.isTextFile(binPath)).toBe(false);
+  });
+
+  describe('error and edge cases', () => {
+    const spyErr = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spyWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    afterEach(() => {
+      jest.restoreAllMocks();
     });
 
-    it('returns null when readFile encounters ENOENT', async () => {
-        const err: any = new Error('no file'); err.code = 'ENOENT';
-        jest.spyOn(require('fs/promises'), 'readFile').mockRejectedValue(err);
-        const fs = new (require('../FileSystem').FileSystem)();
-        await expect(fs.readFile('missing.txt')).resolves.toBeNull();
+    it('rethrows non-ENOENT in readFile', async () => {
+      jest.spyOn(fsPromises, 'readFile').mockRejectedValue({ code: 'EACCES', message: 'denied' });
+      await expect(fsUtil.readFile('/no')).rejects.toMatchObject({ code: 'EACCES' });
     });
 
-    it('throws error on other readFile failures', async () => {
-        const err = new Error('fail');
-        jest.spyOn(require('fs/promises'), 'readFile').mockRejectedValue(err);
-        const fs = new (require('../FileSystem').FileSystem)();
-        await expect(fs.readFile('err.txt')).rejects.toBe(err);
+    it('rethrows non-ENOENT in stat', async () => {
+      jest.spyOn(fsPromises, 'stat').mockRejectedValue({ code: 'EACCES', message: 'denied' });
+      await expect(fsUtil.stat('/no')).rejects.toMatchObject({ code: 'EACCES' });
     });
 
-    it('writes file content and creates directory if missing', async () => {
-        const fsPromises = require('fs/promises');
-        const spyMk = jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined);
-        const spyWrite = jest.spyOn(fsPromises, 'writeFile').mockResolvedValue(undefined);
-        const fsys = new (require('../FileSystem').FileSystem)();
-        jest.spyOn(fsys, 'ensureDirExists').mockResolvedValue(undefined);
-        await expect(fsys.writeFile('a/b/c.txt', 'data')).resolves.toBeUndefined();
-        expect(fsys.ensureDirExists).toHaveBeenCalledWith('a/b');
-        expect(spyWrite).toHaveBeenCalledWith('a/b/c.txt', 'data', 'utf-8');
+    it('rethrows non-ENOENT in isDirectoryEmptyOrSafe', async () => {
+      jest.spyOn(fsPromises, 'readdir').mockRejectedValue({ code: 'EACCES', message: 'denied' });
+      await expect(fsUtil.isDirectoryEmptyOrSafe('/no')).rejects.toMatchObject({ code: 'EACCES' });
     });
 
-    it('throws error when writeFile fails', async () => {
-        const bad = new Error('write fail');
-        const fsys = new (require('../FileSystem').FileSystem)();
-        jest.spyOn(fsys, 'ensureDirExists').mockResolvedValue(undefined);
-        jest.spyOn(require('fs/promises'), 'writeFile').mockRejectedValue(bad);
-        await expect(fsys.writeFile('x.txt', 'd')).rejects.toBe(bad);
+    it('rethrows non-ENOENT in ensureDirExists.access', async () => {
+      jest.spyOn(fsPromises, 'access').mockRejectedValue({ code: 'EACCES', message: 'denied' });
+      await expect(fsUtil.ensureDirExists('/no')).rejects.toMatchObject({ code: 'EACCES' });
     });
+
+    it('getProjectFiles requires ignore rules', async () => {
+      await expect(fsUtil.getProjectFiles(__dirname as any)).rejects.toThrow(/requires an Ignore object/);
+    });
+
+    it('assumes text when isTextFile open/read fails', async () => {
+      jest.spyOn(fsPromises, 'open' as any).mockRejectedValue({ message: 'fail' });
+      expect(await fsUtil.isTextFile('any')).toBe(true);
+    });
+
+    it('propagates error when ensureDirExists fails', async () => {
+      jest.spyOn(fsUtil, 'ensureDirExists').mockRejectedValue(new Error('fail'));
+      await expect(fsUtil.listJsonlFiles('/no')).rejects.toThrow('fail');
+    });
+
+    describe('readJsonlFile', () => {
+      const tmp = path.join(__dirname, 'tmp-jsonl');
+      const file = path.join(tmp, 'a.jsonl');
+      beforeAll(() => fs.mkdirSync(tmp, { recursive: true }));
+      afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+      it('returns [] when file missing', async () => {
+        await expect(fsUtil.readJsonlFile(file)).resolves.toEqual([]);
+      });
+
+      it('returns [] when empty file', async () => {
+        fs.writeFileSync(file, '');
+        await expect(fsUtil.readJsonlFile(file)).resolves.toEqual([]);
+      });
+
+      it('parses JSON lines', async () => {
+        fs.writeFileSync(file, JSON.stringify({ x: 1 }) + '\n' + JSON.stringify({ x: 2 }) + '\n');
+        await expect(fsUtil.readJsonlFile(file)).resolves.toEqual([{ x: 1 }, { x: 2 }]);
+      });
+
+      it('throws on invalid JSON', async () => {
+        fs.writeFileSync(file, '{bad json}\n');
+        await expect(fsUtil.readJsonlFile(file)).rejects.toThrow(/Failed to parse/);
+      });
+    });
+
+    describe('appendJsonlFile', () => {
+      const tmpf = path.join(__dirname, 'tmp-append.jsonl');
+      afterEach(() => fs.existsSync(tmpf) && fs.unlinkSync(tmpf));
+
+      it('appends entries to file', async () => {
+        await fsUtil.appendJsonlFile(tmpf, { a: 1 });
+        await fsUtil.appendJsonlFile(tmpf, { b: 2 });
+        const lines = fs.readFileSync(tmpf, 'utf8').trim().split('\n');
+        expect(lines).toEqual([JSON.stringify({ a: 1 }), JSON.stringify({ b: 2 })]);
+      });
+
+      it('throws on append error', async () => {
+        jest.spyOn(fsPromises, 'appendFile').mockRejectedValue(new Error('fail'));
+        await expect(fsUtil.appendJsonlFile(tmpf, {})).rejects.toThrow('fail');
+      });
+    });
+
+    describe('analysis cache read/write', () => {
+      const tmpc = path.join(__dirname, 'tmp-cache.json');
+      afterEach(() => fs.existsSync(tmpc) && fs.unlinkSync(tmpc));
+
+      it('readAnalysisCache returns null on missing and invalid', async () => {
+        await expect(fsUtil.readAnalysisCache(tmpc)).resolves.toBeNull();
+        fs.writeFileSync(tmpc, 'not json');
+        await expect(fsUtil.readAnalysisCache(tmpc)).resolves.toBeNull();
+      });
+
+      it('readAnalysisCache returns null on wrong schema', async () => {
+        fs.writeFileSync(tmpc, JSON.stringify({ foo: 1 }));
+        await expect(fsUtil.readAnalysisCache(tmpc)).resolves.toBeNull();
+      });
+
+      it('readAnalysisCache returns valid cache', async () => {
+        const data = { overallSummary: 'ok', entries: [] };
+        fs.writeFileSync(tmpc, JSON.stringify(data));
+        await expect(fsUtil.readAnalysisCache(tmpc)).resolves.toEqual(data);
+      });
+
+      it('writeAnalysisCache writes file', async () => {
+        const cache = { overallSummary: 's', entries: [] };
+        await fsUtil.writeAnalysisCache(tmpc, cache);
+        const content = fs.readFileSync(tmpc, 'utf8');
+        expect(JSON.parse(content)).toEqual(cache);
+      });
+    });
+  });
 });

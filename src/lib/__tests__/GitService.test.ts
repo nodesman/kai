@@ -136,3 +136,110 @@ describe('GitService.commitAll', () => {
     expect(typeof call[3]).toBe('function');
   });
 });
+
+describe('GitService error branches', () => {
+  let run: jest.Mock;
+  let svc: GitService;
+
+  beforeEach(() => {
+    run = jest.fn();
+    svc = new GitService({ run } as any, {} as any);
+  });
+
+  it('listModifiedFiles rejects on git status error', async () => {
+    run.mockRejectedValue(new Error('fail-status'));
+    await expect(svc.listModifiedFiles('/repo')).rejects.toThrow('fail-status');
+  });
+
+  it('getDiff rejects on git diff error', async () => {
+    run.mockRejectedValue(new Error('fail-diff'));
+    await expect(svc.getDiff('/repo')).rejects.toThrow('fail-diff');
+  });
+
+  it('stageAllChanges rejects on git add failure', async () => {
+    run.mockRejectedValue(new Error('fail-add'));
+    await expect(svc.stageAllChanges('/repo')).rejects.toThrow('fail-add');
+  });
+
+  it('checkCleanStatus throws on unexpected error code', async () => {
+    run.mockResolvedValue({ stdout: ' M foo', stderr: '' });
+    await expect(svc.checkCleanStatus('/repo')).rejects.toThrow('Git working directory not clean');
+  });
+});
+describe('GitService.getIgnoreRules', () => {
+  it('returns defaults when no .gitignore or .kaiignore exist', async () => {
+    const mockFs: any = { readFile: jest.fn().mockResolvedValue(null) };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    const ig = await svc.getIgnoreRules('/proj');
+    expect(mockFs.readFile).toHaveBeenCalledWith('/proj/.gitignore');
+    expect(mockFs.readFile).toHaveBeenCalledWith('/proj/.kaiignore');
+    expect(ig.ignores('.git')).toBe(true);
+    expect(ig.ignores('.kai/somefile')).toBe(true);
+    expect(ig.ignores('other.txt')).toBe(false);
+  });
+
+  it('applies rules from .gitignore and .kaiignore', async () => {
+    const gitignore = 'foo/\nbar.js';
+    const kaiignore = 'baz/\n';
+    const mockFs: any = {
+      readFile: jest.fn().mockImplementation((p: string) =>
+        p.endsWith('.gitignore') ? Promise.resolve(gitignore) : Promise.resolve(kaiignore)
+      ),
+    };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    const ig = await svc.getIgnoreRules('/proj');
+    expect(ig.ignores('foo/file.txt')).toBe(true);
+    expect(ig.ignores('bar.js')).toBe(true);
+    expect(ig.ignores('baz/x')).toBe(true);
+    expect(ig.ignores('keep.me')).toBe(false);
+  });
+});
+
+describe('GitService.createAnnotatedTag', () => {
+  let svc: GitService;
+  let runMock: jest.Mock;
+
+  beforeEach(() => {
+    runMock = jest.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    svc = new GitService({ run: runMock } as any, {} as any);
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('throws for invalid tag names', async () => {
+    await expect(svc.createAnnotatedTag('/proj', '', 'msg')).rejects.toThrow(/Invalid tag name/);
+    await expect(svc.createAnnotatedTag('/proj', 'bad tag', 'msg')).rejects.toThrow(/Invalid tag name/);
+  });
+
+  it('creates a tag on success', async () => {
+    await expect(svc.createAnnotatedTag('/proj', 'v1.0.0', 'release')).resolves.toBeUndefined();
+    expect(runMock).toHaveBeenCalledWith(
+      'git tag -a "v1.0.0" -m "release"',
+      { cwd: '/proj' }
+    );
+  });
+
+  it('handles ENOENT (git not found)', async () => {
+    const err: any = new Error('no git'); err.code = 'ENOENT';
+    runMock.mockRejectedValueOnce(err);
+    await expect(svc.createAnnotatedTag('/proj', 'v1', 'm')).rejects.toThrow(/Ensure Git is installed/);
+  });
+
+  it('handles existing tag stderr', async () => {
+    const err: any = new Error('exists'); err.stderr = 'fatal: tag already exists'; err.code = 0;
+    runMock.mockRejectedValueOnce(err);
+    await expect(svc.createAnnotatedTag('/proj', 'v1', 'm')).rejects.toThrow(/Tag 'v1' already exists/);
+  });
+
+  it('handles other stderr cases', async () => {
+    const err: any = new Error('oops'); err.stderr = 'some error'; err.code = 2;
+    runMock.mockRejectedValueOnce(err);
+    await expect(svc.createAnnotatedTag('/proj', 'v2', 'm')).rejects.toThrow(/Stderr: some error/);
+  });
+
+  it('handles other exit codes', async () => {
+    const err: any = new Error('oops2'); err.code = 5;
+    runMock.mockRejectedValueOnce(err);
+    await expect(svc.createAnnotatedTag('/proj', 'v3', 'm')).rejects.toThrow(/Exit Code: 5/);
+  });
+});

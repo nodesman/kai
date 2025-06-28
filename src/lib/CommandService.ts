@@ -1,10 +1,6 @@
 // File: src/lib/CommandService.ts
 import { exec as execCb, ExecOptions } from 'child_process';
-import { promisify } from 'util';
 import chalk from 'chalk';
-
-// Promisify exec for async/await usage
-const exec = promisify(execCb);
 
 // Define the result type for successful command execution
 export interface CommandResult {
@@ -37,7 +33,16 @@ export class CommandService {
         console.log(chalk.dim(`🔩 Executing command: ${logCommand}${effectiveOptions.cwd ? ` in ${effectiveOptions.cwd}` : ''}`));
 
         try {
-            const { stdout, stderr } = await exec(command, effectiveOptions);
+            const { stdout, stderr } = await new Promise<CommandResult>((resolve, reject) => {
+                execCb(command, effectiveOptions as ExecOptions, (error, stdout, stderr) => {
+                    if (error) {
+                        (error as any).stdout = stdout;
+                        (error as any).stderr = stderr;
+                        return reject(error);
+                    }
+                    resolve({ stdout, stderr });
+                });
+            });
 
             if (stderr) {
                 // Log stderr even on success, as some commands use it for warnings/info
