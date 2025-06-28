@@ -29,8 +29,19 @@ export class CommitMessageService {
 
     async generateCommitMessage(projectRoot: string): Promise<string> {
         const diff = await this.git.getDiff(projectRoot);
-        const chunks = this.chunkByTokens(diff, this.maxTokens - 500);
+        const files = await this.git.listModifiedFiles(projectRoot);
+        const combined = `Changed files:\n${files.join('\n')}\n\n${diff}`;
+
         const system = 'Generate a concise git commit message describing the following changes.';
+        if (countTokens(combined) <= this.maxTokens) {
+            const messages: Message[] = [
+                { role: 'user', content: `${system}\n${combined}` }
+            ];
+            const response = await this.aiClient.getResponseTextFromAI(messages, true);
+            return response.replace(/^commit:\s*/i, '').trim();
+        }
+
+        const chunks = this.chunkByTokens(combined, this.maxTokens - 500);
         let messages: Message[] = [ { role: 'user', content: system + ' I will provide diff chunks. Reply with "COMMIT:" followed by the message when ready or "CONTINUE" if you need more.' } ];
         let response = '';
         for (const chunk of chunks) {
