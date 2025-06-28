@@ -33,6 +33,7 @@ interface ProjectConfig {
     chats_dir?: string; // Directory for conversation logs
     typescript_autofix?: boolean;
     autofix_iterations?: number;
+    coverage_iterations?: number;
 }
 
 // *** ADDED: Analysis Config Interface ***
@@ -148,6 +149,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             chats_dir: yamlConfig.project?.chats_dir || ".kai/logs", // Using the updated default
             typescript_autofix: yamlConfig.project?.typescript_autofix ?? false,
             autofix_iterations: yamlConfig.project?.autofix_iterations ?? 3,
+            coverage_iterations: yamlConfig.project?.coverage_iterations ?? 3,
         };
 
         // *** ADDED: Default and Loading for Analysis Config ***
@@ -195,6 +197,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 chats_dir: this.project.chats_dir, // Save the relative path
                 typescript_autofix: this.project.typescript_autofix,
                 autofix_iterations: this.project.autofix_iterations,
+                coverage_iterations: this.project.coverage_iterations,
             },
             analysis: {
                 cache_file_path: this.analysis.cache_file_path,

@@ -3,6 +3,9 @@ project:
   prompts_dir: "prompts"
   prompt_template: "prompt_template.yaml"
   chats_dir: ".kai/logs" # Default location for conversation logs
+  typescript_autofix: false
+  autofix_iterations: 3
+  coverage_iterations: 3
 
 gemini:
   model_name: "gemini-2.5-flash" # Default primary model (Flash)
