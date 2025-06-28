@@ -31,8 +31,9 @@ describe('ConsolidationService feedback loops', () => {
         const fs:any = {};
         const ai:any = { logConversation: jest.fn() };
         const git:any = { checkCleanStatus: jest.fn() };
-
-        const service = new ConsolidationService(config, fs, ai, '/p', git, [loop]);
+        const ui:any = { displayChangedFiles: jest.fn(), promptGenerateCommit: jest.fn(), confirmCommitMessage: jest.fn() };
+        const commitSvc:any = { generateCommitMessage: jest.fn() };
+        const service = new ConsolidationService(config, fs, ai, '/p', git, ui, commitSvc, [loop]);
         (service as any).consolidationAnalyzer = new DummyAnalyzer();
         const gen = new DummyGenerator();
         (service as any).consolidationGenerator = gen;

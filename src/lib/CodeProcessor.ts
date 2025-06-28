@@ -13,6 +13,7 @@ import { GitService } from './GitService';
 import { ConversationManager } from './ConversationManager'; // <-- ADDED Import
 import { toSnakeCase } from './utils'; // <-- Added for path generation duplication
 import { TypeScriptLoop } from './consolidation/feedback/TypeScriptLoop';
+import { CommitMessageService } from './CommitMessageService';
 
 const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
@@ -27,6 +28,7 @@ class CodeProcessor {
     commandService: CommandService;
     gitService: GitService;
     conversationManager: ConversationManager; // <-- ADDED Property
+    commitMessageService: CommitMessageService;
 
     // --- MODIFIED Constructor ---
     constructor(
@@ -46,6 +48,12 @@ class CodeProcessor {
         this.aiClient = new AIClient(config); // AIClient only needs config (and fs internally)
         this.projectRoot = process.cwd(); // projectRoot derived here
 
+        this.commitMessageService = new CommitMessageService(
+            this.aiClient,
+            this.gitService,
+            this.config.gemini.max_prompt_tokens
+        );
+
         const feedbackLoops = [
             new TypeScriptLoop(this.commandService, this.fs, this.config)
         ];
@@ -57,6 +65,8 @@ class CodeProcessor {
             this.aiClient,
             this.projectRoot,
             this.gitService,
+            this.ui,
+            this.commitMessageService,
             feedbackLoops
         );
 
