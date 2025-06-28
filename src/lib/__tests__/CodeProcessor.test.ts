@@ -13,7 +13,6 @@ import Conversation, { Message } from '../models/Conversation';
 import { CONSOLIDATION_SUCCESS_MARKER } from '../consolidation/constants';
 
 // Mock all dependencies
-jest.mock('../Config');
 jest.mock('../FileSystem');
 jest.mock('../CommandService');
 jest.mock('../GitService');
@@ -31,7 +30,7 @@ jest.spyOn(console, 'error').mockImplementation(() => {});
 jest.spyOn(console, 'info').mockImplementation(() => {});
 
 describe('CodeProcessor', () => {
-    let mockConfig: jest.Mocked<Config>;
+    let mockConfig: Config;
     let mockFs: jest.Mocked<FileSystem>;
     let mockCommandService: jest.Mocked<CommandService>;
     let mockGitService: jest.Mocked<GitService>;
@@ -48,7 +47,26 @@ describe('CodeProcessor', () => {
         jest.clearAllMocks();
 
         // Instantiate mocks
-        mockConfig = new Config() as jest.Mocked<Config>;
+        mockConfig = {
+            gemini: {
+                api_key: 'key',
+                model_name: 'model',
+                subsequent_chat_model_name: 'flash',
+                max_output_tokens: 100,
+                max_prompt_tokens: 100,
+            },
+            project: {
+                root_dir: 'root',
+                prompts_dir: 'prompts',
+                prompt_template: 'tpl',
+                chats_dir: '.kai/logs',
+                typescript_autofix: false,
+                autofix_iterations: 3,
+            },
+            analysis: { cache_file_path: '.kai/project_analysis.json' },
+            context: { mode: 'full' },
+            chatsDir: '/project/.kai/logs'
+        } as unknown as Config;
         mockFs = new FileSystem() as jest.Mocked<FileSystem>;
         mockCommandService = new CommandService() as jest.Mocked<CommandService>;
         mockGitService = new GitService(mockCommandService, mockFs) as jest.Mocked<GitService>;
@@ -110,16 +128,16 @@ describe('CodeProcessor', () => {
         mockConversation.addMessage('user', 'initial prompt');
 
         beforeEach(() => {
-            mockFs.readJsonlFile.mockResolvedValueOnce([{ type: 'request', role: 'user', content: 'initial prompt', timestamp: '2023' }]);
+            mockFs.readJsonlFile.mockResolvedValue([{ type: 'request', role: 'user', content: 'initial prompt', timestamp: '2023' }]);
             mockContextBuilder.buildContext.mockResolvedValue({ context: 'mock_context', tokenCount: 100 });
             mockConfig.context.mode = 'full'; // Default mode for simplicity
         });
 
         it('should load conversation and delegate to consolidationService.process', async () => {
             await codeProcessor.processConsolidationRequest(convName);
-            expect(mockFs.readJsonlFile).toHaveBeenCalledWith(expect.stringContaining(convName));
+            expect(mockFs.readJsonlFile).toHaveBeenCalledWith(expect.stringContaining('testconv'));
             expect(mockContextBuilder.buildContext).toHaveBeenCalled();
-            expect(mockConsolidationService.process).toHaveBeenCalledWith(convName, expect.any(Conversation), 'mock_context', expect.stringContaining(convName));
+            expect(mockConsolidationService.process).toHaveBeenCalledWith(convName, expect.any(Conversation), 'mock_context', expect.stringContaining('testconv'));
         });
 
         it('should warn and exit if conversation is empty', async () => {
@@ -134,7 +152,7 @@ describe('CodeProcessor', () => {
             await codeProcessor.processConsolidationRequest(convName);
             expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Error triggering consolidation process'), expect.any(Error));
             expect(mockAIClient.logConversation).toHaveBeenCalledWith(
-                expect.stringContaining(convName),
+                expect.stringContaining('testconv'),
                 expect.objectContaining({ type: 'error', role: 'system', error: expect.stringContaining('File read error') })
             );
         });
@@ -147,7 +165,7 @@ describe('CodeProcessor', () => {
                 'Consolidate recent conversation changes',
                 expect.stringContaining('initial prompt') // Should contain summary of relevant history
             );
-            expect(mockConsolidationService.process).toHaveBeenCalledWith(convName, expect.any(Conversation), 'dynamic_context', expect.stringContaining(convName));
+            expect(mockConsolidationService.process).toHaveBeenCalledWith(convName, expect.any(Conversation), 'dynamic_context', expect.stringContaining('testconv'));
         });
     });
 
