@@ -127,4 +127,46 @@ describe('ProjectContextBuilder.buildContext other modes', () => {
     expect(warnSpy).toHaveBeenCalled();
     expect(res.context).toContain('missing or empty');
   });
+
+  it('builds dynamic context with selected files', async () => {
+    const config: any = {
+      analysis: { cache_file_path: 'cache.json' },
+      context: { mode: 'dynamic' },
+      gemini: { max_prompt_tokens: 1000 },
+      project: {},
+    };
+    const cache: ProjectAnalysisCache = { overallSummary: '', entries: [{ filePath: 'a.ts', type: 'text_analyze', size: 10, loc: 1, summary: 's', lastAnalyzed: 'now' }] };
+    fsMock.readAnalysisCache.mockResolvedValue(cache);
+    aiClient.getResponseTextFromAI.mockResolvedValue('a.ts');
+    fsMock.readFile = jest.fn().mockResolvedValue('code');
+
+    const builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
+    const res = await builder.buildContext('q', 'h');
+
+    expect(aiClient.getResponseTextFromAI).toHaveBeenCalled();
+    expect(fsMock.readFile).toHaveBeenCalledWith('/root/a.ts');
+    expect(res.context).toContain('File: a.ts');
+  });
+
+  it('falls back when relevance check fails', async () => {
+    const config: any = {
+      analysis: { cache_file_path: 'cache.json' },
+      context: { mode: 'dynamic' },
+      gemini: { max_prompt_tokens: 1000 },
+      project: {},
+    };
+    const cache: ProjectAnalysisCache = {
+      overallSummary: 'o',
+      entries: [{ filePath: 'a.ts', type: 'text_analyze', size: 10, loc: 1, summary: 's', lastAnalyzed: 'now' }]
+    };
+    fsMock.readAnalysisCache.mockResolvedValue(cache);
+    aiClient.getResponseTextFromAI.mockRejectedValue(new Error('bad'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
+    const res = await builder.buildContext('q', 'h');
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(res.context).toContain('Project Analysis Overview');
+  });
 });
