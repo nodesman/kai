@@ -12,7 +12,8 @@ import {
     UserInterface,
     UserInteractionResult,
     ChangeModeInteractionResult,
-    ScaffoldProjectInteractionResult
+    ScaffoldProjectInteractionResult,
+    HardenInteractionResult
 } from './lib/UserInterface';
 // REMOVED: KanbanData, KanbanColumn, KanbanCard imports
 import { CodeProcessor } from './lib/CodeProcessor';
@@ -352,6 +353,12 @@ async function main() {
                 await codeProcessor.processConsolidationRequest(targetIdentifier);
                 // --- End call ---
                 console.log(chalk.magenta(`🏁 Consolidation process finished for ${chalk.cyan(targetIdentifier)}.`));
+
+            } else if (mode === 'Harden') {
+                 if (!codeProcessor) throw new Error("CodeProcessor not initialized.");
+                 const hardenResult = interactionResult as HardenInteractionResult;
+                 await codeProcessor.processHardeningRequest(hardenResult.tool);
+                 console.log(chalk.magenta('🏁 Hardening process completed.'));
 
             } else if (mode === 'Delete Conversation...') {
                 if (!config) throw new Error("Config not initialized."); // Guard

@@ -43,6 +43,11 @@ interface ScaffoldProjectInteractionResult {
     directoryName: string;
 }
 
+interface HardenInteractionResult {
+    mode: 'Harden';
+    tool: 'jest';
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -55,7 +60,8 @@ type UserInteractionResult =
     | UserInteractionResultBase
     | DeleteInteractionResult
     | ChangeModeInteractionResult
-    | ScaffoldProjectInteractionResult;
+    | ScaffoldProjectInteractionResult
+    | HardenInteractionResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -158,6 +164,22 @@ class UserInterface {
         } else {
             return { name: selected, isNew: false };
         }
+    }
+
+    private async _detectJest(): Promise<boolean> {
+        const pkgPath = path.join(process.cwd(), 'package.json');
+        try {
+            const pkgRaw = await fs.readFile(pkgPath, 'utf8');
+            const pkg = JSON.parse(pkgRaw);
+            const deps = Object.keys(pkg.dependencies || {});
+            const dev = Object.keys(pkg.devDependencies || {});
+            if (deps.includes('jest') || dev.includes('jest')) return true;
+        } catch {}
+        try {
+            await fs.access(path.join(process.cwd(), 'jest.config.js'));
+            return true;
+        } catch {}
+        return false;
     }
 
     // --- formatHistoryForSublime (Unchanged) ---
@@ -347,6 +369,7 @@ class UserInterface {
                     choices: [
                         'Start/Continue Conversation',
                         'Consolidate Changes...',
+                        'Harden',
                         'Re-run Project Analysis',
                         'Change Context Mode',
                         'Scaffold New Project',
@@ -465,6 +488,25 @@ class UserInterface {
                 return { mode: 'Scaffold New Project', language, framework, directoryName };
             }
 
+            // --- Handle Harden Mode ---
+            if (mode === 'Harden') {
+                const frameworks: string[] = [];
+                if (await this._detectJest()) frameworks.push('Jest');
+                if (frameworks.length === 0) {
+                    console.log(chalk.yellow('No supported test frameworks detected.'));
+                    return null;
+                }
+                const { toolChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'toolChoice',
+                        message: 'Select test framework:',
+                        choices: frameworks,
+                    }
+                ]);
+                return { mode: 'Harden', tool: toolChoice.toLowerCase() as 'jest' };
+            }
+
             // --- Remaining modes require Model selection ---
             const primaryModel = this.config.gemini.model_name; // Already guaranteed to be a string by Config.ts
             const secondaryModel = this.config.gemini.subsequent_chat_model_name; // Already guaranteed to be a string
@@ -550,5 +592,6 @@ export {
     UserInterface,
     UserInteractionResult,
     ChangeModeInteractionResult,
-    ScaffoldProjectInteractionResult
+    ScaffoldProjectInteractionResult,
+    HardenInteractionResult
 };
