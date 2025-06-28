@@ -56,7 +56,16 @@ export class TestCoverageRaiser {
             console.log(chalk.red(`Unable to read ${targetFile}`));
             return;
         }
-        const coverageInfo = JSON.stringify(summary[targetFile] || {});
+
+        // When looking up in summary, the keys are typically either absolute paths
+        // or paths relative to the project root. We need to find the correct key for 'summary'.
+        let coverageInfoEntry = summary[targetFile]; // Try absolute path first
+        if (!coverageInfoEntry) {
+            const relativeTargetPath = path.relative(this.projectRoot, targetFile);
+            coverageInfoEntry = summary[relativeTargetPath]; // Then try relative path
+        }
+        const coverageInfo = JSON.stringify(coverageInfoEntry || {});
+
         const prompt = TestCoveragePrompts.generateTests(targetFile, fileContent, coverageInfo);
         const testContent = await this.aiClient.getResponseTextFromAI([
             { role: 'user', content: prompt }
@@ -101,6 +110,41 @@ export class TestCoverageRaiser {
                 lowest = { path: filePath, pct };
             }
         }
-        return lowest ? path.join(this.projectRoot, lowest.path) : null;
+
+        if (!lowest) {
+            return null;
+        }
+
+        let rawFilePathFromSummary = lowest.path;
+        const absoluteProjectRoot = path.resolve(this.projectRoot); // Ensure projectRoot is absolute and normalized
+
+        // Case 1: The path from summary is already a correctly formed absolute path.
+        if (path.isAbsolute(rawFilePathFromSummary) && rawFilePathFromSummary.startsWith(absoluteProjectRoot)) {
+            return path.normalize(rawFilePathFromSummary);
+        }
+
+        // Case 2: The problematic scenario - a relative path that starts with the
+        // components of the absolute project root (e.g., 'Users/rajsekharan/projects/kai/src/file.ts').
+        // We need to strip this leading redundant part before joining.
+
+        // Get the relative path string of the project root itself.
+        // For `/Users/rajsekharan/projects/kai`, this yields `Users/rajsekharan/projects/kai`.
+        const relativeProjectRootString = path.relative(path.parse(absoluteProjectRoot).root, absoluteProjectRoot);
+
+        if (!path.isAbsolute(rawFilePathFromSummary) && rawFilePathFromSummary.startsWith(relativeProjectRootString)) {
+            // Strip the problematic prefix.
+            const strippedPath = rawFilePathFromSummary.substring(relativeProjectRootString.length);
+            // Ensure a leading path separator if necessary (e.g., for 'src/file.ts' after stripping).
+            const finalRelativePart = path.normalize(
+                strippedPath.startsWith(path.sep) || strippedPath === '' ? strippedPath : path.sep + strippedPath
+            );
+            // Now, join the absolute project root with the correctly relative part.
+            return path.join(absoluteProjectRoot, finalRelativePart);
+        }
+
+        // Case 3: It's a standard relative path (e.g., 'src/file.ts') relative to the project root.
+        // Or an absolute path that didn't start with the project root (less likely for internal files).
+        // `path.resolve` will correctly handle these by joining with the project root.
+        return path.resolve(absoluteProjectRoot, rawFilePathFromSummary);
     }
 }
