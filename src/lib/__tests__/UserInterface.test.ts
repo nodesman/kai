@@ -3,6 +3,7 @@ jest.mock('chalk');
 const inquirer = require('inquirer');
 import chalk from 'chalk';
 import { UserInterface } from '../UserInterface';
+const baseConfig = { chatsDir: '/chats', gemini: { model_name: 'm1', subsequent_chat_model_name: 'm2' }, context: { mode: 'full' } };
 
 describe('UserInterface', () => {
   beforeEach(() => jest.resetAllMocks());
@@ -130,7 +131,137 @@ describe('UserInterface', () => {
         return { on: (_: string, cb: any) => cb(0) } as any;
       });
       (ui.fs.readFile as jest.Mock).mockResolvedValue('p\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
-    await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/e')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/e')).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('retries with Sublime and succeeds when JetBrains launcher fails', async () => {
+      const error = { code: 'ENOENT' };
+      let call = 0;
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      process.env.__CFBundleIdentifier = 'com.jetbrains.WebStorm';
+      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
+        call++;
+        return {
+          on: (ev: string, cb: any) => {
+            if (call === 1 && ev === 'error') cb(error);
+            if (call === 2 && ev === 'close') cb(0);
+          },
+        } as any;
+      });
+      (ui.fs.readFile as jest.Mock).mockResolvedValue('np\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
+      const logSpy = console.log as jest.Mock;
+      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
+      expect(res.newPrompt).toBe('np');
+      expect(call).toBe(2);
+      expect(logSpy).toHaveBeenCalled();
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      delete process.env.__CFBundleIdentifier;
+    });
+
+    it('throws error when fallback editor is also missing', async () => {
+      const error = { code: 'ENOENT' };
+      let call = 0;
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      process.env.__CFBundleIdentifier = 'com.jetbrains.WebStorm';
+      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
+        call++;
+        return {
+          on: (ev: string, cb: any) => {
+            if (ev === 'error') cb(error);
+          },
+        } as any;
+      });
+      (ui.fs.readFile as jest.Mock).mockResolvedValue('x\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
+      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow();
+      expect(call).toBe(2);
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      delete process.env.__CFBundleIdentifier;
+    });
+  });
+
+  describe('getUserInteraction flows', () => {
+    let ui: UserInterface;
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface(baseConfig as any);
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    it('handles Delete Conversation... cancel and confirm', async () => {
+      jest.spyOn(ui.fs, 'ensureKaiDirectoryExists').mockResolvedValue(undefined);
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue(['a']);
+      const logSpy = console.log as jest.Mock;
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Delete Conversation...' })
+        .mockResolvedValueOnce({ conversationsToDelete: ['a'] })
+        .mockResolvedValueOnce({ confirmDelete: false });
+      const res1 = await ui.getUserInteraction();
+      expect(res1).toBeNull();
+      expect(logSpy).toHaveBeenCalled();
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Delete Conversation...' })
+        .mockResolvedValueOnce({ conversationsToDelete: ['a'] })
+        .mockResolvedValueOnce({ confirmDelete: true });
+      const res2 = await ui.getUserInteraction();
+      expect(res2).toEqual({ mode: 'Delete Conversation...', conversationNamesToDelete: ['a'] });
+    });
+
+    it('warns on unhandled mode', async () => {
+      jest.spyOn(ui.fs, 'ensureKaiDirectoryExists').mockResolvedValue(undefined);
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: 'c', isNew: false });
+      const warnSpy = console.warn as jest.Mock;
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Bogus' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it('errors when consolidating a new conversation', async () => {
+      jest.spyOn(ui.fs, 'ensureKaiDirectoryExists').mockResolvedValue(undefined);
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: 'c', isNew: true });
+      const errSpy = console.error as jest.Mock;
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Consolidate Changes...' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('handles isTtyError gracefully', async () => {
+      (inquirer.prompt as jest.Mock).mockRejectedValue({ isTtyError: true });
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('handles fallback error object', async () => {
+      (inquirer.prompt as jest.Mock).mockRejectedValue({ type: 'fallback' });
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('handles command not found errors', async () => {
+      (inquirer.prompt as jest.Mock).mockRejectedValue(new Error('idea command not found'));
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('logs generic errors', async () => {
+      (inquirer.prompt as jest.Mock).mockRejectedValue(new Error('oops'));
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
     });
   });
 });
