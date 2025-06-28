@@ -43,7 +43,7 @@ describe('CodeProcessor', () => {
 
     let codeProcessor: CodeProcessor;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
 
         // Instantiate mocks
@@ -83,7 +83,9 @@ describe('CodeProcessor', () => {
         (ConsolidationService as jest.Mock).mockImplementation(() => mockConsolidationService);
         (ConversationManager as jest.Mock).mockImplementation(() => mockConversationManager);
 
-        codeProcessor = new CodeProcessor(
+        mockGitService.getRepositoryRoot = jest.fn().mockResolvedValue('/repo');
+
+        codeProcessor = await CodeProcessor.create(
             mockConfig,
             mockFs,
             mockCommandService,
@@ -108,7 +110,8 @@ describe('CodeProcessor', () => {
 
         expect(AIClient).toHaveBeenCalledWith(mockConfig);
         expect(CommitMessageService).toHaveBeenCalledWith(mockAIClient, mockGitService, mockConfig.gemini.max_prompt_tokens);
-        expect(ConsolidationService).toHaveBeenCalledWith(mockConfig, mockFs, mockAIClient, process.cwd(), mockGitService, mockUi, mockCommitMessageService, expect.any(Array));
+        expect(ConsolidationService).toHaveBeenCalledWith(mockConfig, mockFs, mockAIClient, '/repo', mockGitService, mockUi, mockCommitMessageService, expect.any(Array));
+        expect(mockGitService.getRepositoryRoot).toHaveBeenCalledWith(process.cwd());
         expect(ConversationManager).toHaveBeenCalledWith(mockConfig, mockFs, mockAIClient, mockUi, mockContextBuilder, mockConsolidationService);
     });
 
