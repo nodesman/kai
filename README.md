@@ -21,6 +21,7 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
 *   **Project Analysis:** Can analyze your project to generate a cache (`.kai/project_analysis.json`) containing file summaries, types, and sizes, enabling efficient context handling for large repositories.
 *   **Direct Filesystem Interaction:** Can create, modify, and delete files based on conversation analysis (Consolidation Mode) or direct instructions (future agentic modes).
 *   **Iterative Compilation:** After applying changes Kai can run `tsc --noEmit` and feed errors back to the AI for another pass.
+*   **AI-assisted Committing:** Optionally generate a commit message with Gemini Flash and commit changes directly from Kai.
 *   **Configurable:** Uses a local `.kai/config.yaml` for settings like AI models, token limits, and directories.
 *   **Editor Integration:** Opens conversations in your default command-line editor (tested with Sublime Text's `subl --wait`, basic support for JetBrains IDEs like WebStorm, CLion, IntelliJ IDEA via their command-line launchers).
 
@@ -105,6 +106,7 @@ Kai is a context-aware, AI-powered coding assistant designed to run locally and 
 **Important Notes:**
 
 *   **Consolidation is direct:** Changes made during Consolidation Mode are applied directly to your files. Always review changes with `git status`, `git diff`, or a Git GUI before committing.
+*   **Optional Auto Commit:** If uncommitted changes are detected, Kai can generate a commit message and commit them for you.
 *   **Context Limits:** Be mindful of your AI model's token limits. For large projects, use the `analysis_cache` or `dynamic` context modes. Re-run analysis if needed.
 *   **Editor Behavior:** Kai relies on the editor's command-line tool supporting a "wait" flag (like `subl -w`) to pause execution until you close the file. If your editor doesn't wait, the conversation loop might proceed prematurely.
 

@@ -83,6 +83,41 @@ class UserInterface {
         return confirm;
     }
 
+    /** Display a list of changed files. */
+    displayChangedFiles(files: string[]): void {
+        if (files.length === 0) return;
+        console.log(chalk.cyan('\nModified files:'));
+        files.forEach(f => console.log('  - ' + f));
+    }
+
+    /** Ask the user whether Kai should generate and commit the changes. */
+    async promptGenerateCommit(): Promise<boolean> {
+        const { commit } = await inquirer.prompt<{ commit: boolean }>([
+            {
+                type: 'confirm',
+                name: 'commit',
+                message: 'Generate commit message with Gemini and commit all changes?',
+                default: true,
+            },
+        ]);
+        return commit;
+    }
+
+    /** Confirm the proposed commit message before committing. */
+    async confirmCommitMessage(message: string): Promise<boolean> {
+        console.log(chalk.blue('\nProposed commit message:\n')); 
+        console.log(message + '\n');
+        const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
+            {
+                type: 'confirm',
+                name: 'confirm',
+                message: 'Use this commit message?',
+                default: true,
+            },
+        ]);
+        return confirm;
+    }
+
     // --- selectOrCreateConversation (Unchanged) ---
     async selectOrCreateConversation(): Promise<{ name: string; isNew: boolean }> {
         const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);

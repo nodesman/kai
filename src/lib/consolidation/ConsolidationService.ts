@@ -6,6 +6,8 @@ import { AIClient, LogEntryData } from '../AIClient';
 import { Config } from '../Config';
 import Conversation, { Message, JsonlLogEntry } from '../models/Conversation';
 import { GitService } from '../GitService';
+import { UserInterface } from '../UserInterface';
+import { CommitMessageService } from '../CommitMessageService';
 // REMOVED: import { ConsolidationReviewer } from './ConsolidationReviewer';
 import { ConsolidationGenerator } from './ConsolidationGenerator';
 import { ConsolidationApplier } from './ConsolidationApplier';
@@ -28,6 +30,8 @@ export class ConsolidationService {
     private aiClient: AIClient;
     private projectRoot: string;
     private gitService: GitService;
+    private ui: UserInterface;
+    private commitMessageService: CommitMessageService;
     // REMOVED: private consolidationReviewer: ConsolidationReviewer;
     private consolidationGenerator: ConsolidationGenerator;
     private consolidationApplier: ConsolidationApplier;
@@ -40,6 +44,8 @@ export class ConsolidationService {
         aiClient: AIClient,
         projectRoot: string,
         gitService: GitService,
+        ui: UserInterface,
+        commitMessageService: CommitMessageService,
         feedbackLoops: FeedbackLoop[] = []
     ) {
         this.config = config;
@@ -47,6 +53,8 @@ export class ConsolidationService {
         this.aiClient = aiClient;
         this.projectRoot = projectRoot;
         this.gitService = gitService;
+        this.ui = ui;
+        this.commitMessageService = commitMessageService;
         // REMOVED: this.consolidationReviewer = new ConsolidationReviewer(this.fs);
         this.consolidationGenerator = new ConsolidationGenerator(
             this.config, this.fs, this.aiClient, this.projectRoot
@@ -196,9 +204,26 @@ export class ConsolidationService {
             await this.gitService.checkCleanStatus(this.projectRoot);
             console.log(chalk.green("  Git status clean. Proceeding..."));
         } catch (gitError: any) {
-            // Log specific error to conversation before re-throwing
-            await this._logError(conversationFilePath, `Git Check Failed: ${gitError.message}`);
-            throw gitError; // Re-throw to stop the process
+            if (gitError.message && gitError.message.includes('not clean')) {
+                const files = await this.gitService.listModifiedFiles(this.projectRoot);
+                this.ui.displayChangedFiles(files);
+                const shouldCommit = await this.ui.promptGenerateCommit();
+                if (shouldCommit) {
+                    const msg = await this.commitMessageService.generateCommitMessage(this.projectRoot);
+                    const ok = await this.ui.confirmCommitMessage(msg);
+                    if (ok) {
+                        await this.gitService.stageAllChanges(this.projectRoot);
+                        await this.gitService.commitAll(this.projectRoot, msg);
+                        console.log(chalk.green('  Changes committed.'));
+                        return;
+                    }
+                }
+                await this._logError(conversationFilePath, 'Git Check Failed: working directory not clean and user declined commit.');
+                throw new Error('Uncommitted changes');
+            } else {
+                await this._logError(conversationFilePath, `Git Check Failed: ${gitError.message}`);
+                throw gitError; // Re-throw to stop the process
+            }
         }
     }
 

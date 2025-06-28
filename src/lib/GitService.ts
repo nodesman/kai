@@ -73,7 +73,7 @@ export class GitService {
     }
 
     // --- checkCleanStatus (remains unchanged) ---
-     async checkCleanStatus(projectRoot: string): Promise<void> {
+    async checkCleanStatus(projectRoot: string): Promise<void> {
         console.log(chalk.blue("  Checking Git working directory status..."));
         const statusCommand = 'git status --porcelain';
         try {
@@ -111,6 +111,33 @@ export class GitService {
                  throw new Error(genericFailMsg);
              }
         }
+    }
+
+    /**
+     * Returns a list of modified files according to `git status --porcelain`.
+     */
+    async listModifiedFiles(projectRoot: string): Promise<string[]> {
+        const { stdout } = await this.commandService.run('git status --porcelain', { cwd: projectRoot });
+        return stdout.split('\n').filter(line => line.trim() !== '').map(line => line.slice(3));
+    }
+
+    /**
+     * Retrieves the diff of pending changes.
+     */
+    async getDiff(projectRoot: string): Promise<string> {
+        const { stdout } = await this.commandService.run('git diff', { cwd: projectRoot });
+        return stdout;
+    }
+
+    /** Stages all changes in the repository. */
+    async stageAllChanges(projectRoot: string): Promise<void> {
+        await this.commandService.run('git add -A', { cwd: projectRoot });
+    }
+
+    /** Commits all staged changes with the provided message. */
+    async commitAll(projectRoot: string, message: string): Promise<void> {
+        const escaped = message.replace(/"/g, '\\"');
+        await this.commandService.run(`git commit -m "${escaped}"`, { cwd: projectRoot });
     }
 
     // --- MOVED FROM FileSystem: ensureGitignoreRules ---
