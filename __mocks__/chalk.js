@@ -9,4 +9,6 @@ module.exports = {
   green: (s) => s,
   blue: (s) => s,
   cyan: (s) => s,
+  magenta: (s) => s,
+  gray: (s) => s,
 };
