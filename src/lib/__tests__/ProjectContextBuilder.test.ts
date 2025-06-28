@@ -80,3 +80,51 @@ describe('ProjectContextBuilder utilities', () => {
     expect(res).toBe('a\n\n b');
   });
 });
+
+describe('ProjectContextBuilder.buildContext other modes', () => {
+  const fsMock: any = {
+    readAnalysisCache: jest.fn(),
+    getProjectFiles: jest.fn(),
+    readFileContents: jest.fn(),
+  };
+  const gitMock: any = { getIgnoreRules: jest.fn() };
+  const aiClient: any = { getResponseTextFromAI: jest.fn() };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('builds full context', async () => {
+    const config: any = {
+      analysis: { cache_file_path: 'cache.json' },
+      context: { mode: 'full' },
+      gemini: { max_prompt_tokens: 1000 },
+      project: {},
+    };
+    fsMock.getProjectFiles.mockResolvedValue(['/root/a.ts']);
+    fsMock.readFileContents.mockResolvedValue({ '/root/a.ts': 'code' });
+    gitMock.getIgnoreRules.mockResolvedValue({ ignores: () => false });
+
+    const builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
+    const res = await builder.buildContext();
+
+    expect(fsMock.getProjectFiles).toHaveBeenCalled();
+    expect(res.context).toContain('File: a.ts');
+  });
+
+  it('warns when dynamic cache missing', async () => {
+    const config: any = {
+      analysis: { cache_file_path: 'cache.json' },
+      context: { mode: 'dynamic' },
+      gemini: { max_prompt_tokens: 1000 },
+      project: {},
+    };
+    fsMock.readAnalysisCache.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
+    const res = await builder.buildContext('q', 'h');
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(res.context).toContain('missing or empty');
+  });
+});
