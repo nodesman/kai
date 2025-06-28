@@ -275,7 +275,7 @@ async function main() {
         // --- End Kanban Web Service ---
 
         // --- Instantiate CodeProcessor once before the loop ---
-        codeProcessor = new CodeProcessor(
+        codeProcessor = await CodeProcessor.create(
             config, // Pass the final config
             fs,
             commandService,

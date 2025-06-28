@@ -32,14 +32,35 @@ class CodeProcessor {
     commitMessageService: CommitMessageService;
     hardenService: TestCoverageRaiser;
 
-    // --- MODIFIED Constructor ---
-    constructor(
+    static async create(
         config: Config,
         fs: FileSystem,
         commandService: CommandService,
         gitService: GitService,
-        ui: UserInterface,                // <-- ADDED Parameter
-        contextBuilder: ProjectContextBuilder // <-- ADDED Parameter
+        ui: UserInterface,
+        contextBuilder: ProjectContextBuilder
+    ): Promise<CodeProcessor> {
+        const projectRoot = await gitService.getRepositoryRoot(process.cwd());
+        return new CodeProcessor(
+            config,
+            fs,
+            commandService,
+            gitService,
+            ui,
+            contextBuilder,
+            projectRoot
+        );
+    }
+
+    // --- MODIFIED Constructor ---
+    private constructor(
+        config: Config,
+        fs: FileSystem,
+        commandService: CommandService,
+        gitService: GitService,
+        ui: UserInterface,
+        contextBuilder: ProjectContextBuilder,
+        projectRoot: string
     ) {
         this.config = config;
         this.fs = fs;
@@ -48,7 +69,7 @@ class CodeProcessor {
         this.ui = ui; // <-- Assign injected instance
         this.contextBuilder = contextBuilder; // <-- Assign injected instance
         this.aiClient = new AIClient(config); // AIClient only needs config (and fs internally)
-        this.projectRoot = process.cwd(); // projectRoot derived here
+        this.projectRoot = projectRoot;
 
         this.commitMessageService = new CommitMessageService(
             this.aiClient,
