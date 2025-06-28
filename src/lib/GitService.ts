@@ -19,6 +19,20 @@ export class GitService {
         this.fs = fileSystem; // <-- Assign injected FileSystem
     }
 
+    /**
+     * Returns the root directory of the current Git repository.
+     * Falls back to the provided cwd if the command fails.
+     */
+    async getRepositoryRoot(cwd: string): Promise<string> {
+        try {
+            const { stdout } = await this.commandService.run('git rev-parse --show-toplevel', { cwd });
+            return stdout.trim();
+        } catch (err) {
+            console.warn(chalk.yellow('Could not determine git repository root, defaulting to current directory.'));
+            return cwd;
+        }
+    }
+
     // --- isGitRepository, initializeRepository (remain unchanged) ---
     async isGitRepository(projectRoot: string): Promise<boolean> {
         console.log(chalk.dim("  Checking if project is a Git repository..."));
