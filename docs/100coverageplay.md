@@ -1,2 +1,124 @@
-You’re exactly right – if almost every module is un‑tested (and many files today are just stubs or thin orchestrators), then “100% branch coverage” really means writing a test suite for every single one of those files, driving every `if/else`, every `switch/case`, every `catch` path, every early‐return, etc.  \n\nBelow is a high‑level roadmap for what that entails. No code changes yet—just the strategy.  \n\n---\n\n## 1. Take stock of what’s un‑tested\n\nRun a quick inventory to see which source files have zero tests. For example, you can do something like:\n\n```bash\n# list all .ts/.js under bin/lib and src/lib...\nfind bin/lib src/lib -type f \\( -name '*.ts' -o -name '*.js' \\) \\\n  | sed 's/\\.\\(ts\\|js\\)$/.test\\.\\1/' \\\n  | xargs -n1 test -e || true\n```\n\nThat’ll spit out the test‐file names that *don’t* exist. You’ll quickly see whole swaths with zero coverage.\n\n---\n\n## 2. Scaffold a test file for every directory\n\nFor each directory that holds real logic, create a corresponding `*.test.ts` or `*.test.js`. For example:\n\n```\nbin/lib/consolidation/ConsolidationAnalyzer.js\n→ bin/lib/consolidation/ConsolidationAnalyzer.test.js\n\nbin/lib/code‑gen/ApplicationStartup.js\n→ bin/lib/code‑gen/ApplicationStartup.test.js\n\nsrc/lib/analysis/ProjectAnalyzerService.ts\n→ src/lib/analysis/ProjectAnalyzerService.test.ts\n```\n…and so on.\n\n---\n\n## 3. Mock‑and‑inject all external dependencies\n\nAlmost every module in this codebase depends on:\n- the AI API client,\n- the file system,\n- Git,\n- Inquirer/user‑prompt,\n- config defaults or internal prompts, etc.\n\nYou’ll want to use Jest’s built‑in mocking (or `jest.mock(...)`) to stub out those services, so your tests can drive **both** success *and* failure paths:\n\n```ts\n// example in Jest + ts‑jest:\njest.mock('../AIClient');\nconst AIClient = require('../AIClient');\nAIClient.prototype.generateResponse = jest.fn();\n\n// then in your test:\nAIClient.prototype.generateResponse.mockResolvedValue({ text: 'OK' });\n```\n\n---\n\n## 4. Write tests to hit **every** branch\n\nFor each file, enumerate its decision points and write at least one test for each branch:\n\n| Kind of branch        | What to test                                          |\n|-----------------------|--------------------------------------------------------|\n| `if (foo) { … } else` | One test with `foo = true`, one with `foo = false`.    |\n| `switch(x) { case… }` | One test per `case` *plus* the `default` if present.    |\n| `try { … } catch(e)`   | One test where the inner call succeeds, one where it throws. |\n| early returns         | Test the scenario that returns early, and one that falls through. |\n| loops (`for/while`)   | Usually one iteration, zero iterations, multiple.      |\n\n---\n\n## 5. Cover edge‑cases & error‑paths\n\nDon’t just write the “happy‐path” tests—also drive:\n- empty or invalid inputs (e.g. empty strings, missing config keys),\n- failure modes (API/network errors, disk errors, git errors),\n- timeouts or bad data from the LLM,\n- file‑system “file not found” or permission errors.\n\n---\n\n## 6. Continuous coverage feedback\n\nKeep your tests running with coverage turned on so you know exactly which lines/branches are still missing:\n\n```bash\n# from project root\nnpm test -- --coverage --coverageReporters=text\n# or\nyarn test --coverage --coverageReporters=text\n```\nThat prints a per‑file table showing “% Branch” and “Uncovered Lines,” so you can tick off missing branches as you write each test.\n\n---\n\n## 7. Estimate the effort\n\nGiven the size of this codebase (dozens of modules across bin/lib and src/lib), reaching ~100% branch coverage will likely mean writing **200–300** new test cases. Plan on a few days of dedicated test‑writing (depending on your familiarity with Jest and the code).\n\n---\n\n## 8. Next steps\n\n1. **Prioritize.** Do you want to go “all‑in” on every module at once, or start with the most critical pieces (CLI commands, analysis logic, consolidation engine)?\n2. **Scaffold a batch of test files.** I can help you generate the first few test skeletons.\n3. **Pair on a couple of modules.** We can walk through a concrete example end‑to‑end (mocking, exercising branches, asserting on results).\n4. **Iterate.** Keep running coverage and fill in the gaps until you hit ≈100%.\n\nLet me know which slice you’d like to tackle first, and I’ll help you scaffold the tests and knock out the missing branches!
-Below is a lean, multi‑phase plan for shoring up tests (and thus branch‑coverage) in priority order.  Each “phase” names the modules you’ll tackle and the kind of test‑effort to apply.  You don’t have to hit everything at once—knock out Phase 1 (the most critical parts) first, then circle back for Phase 2, etc.\n\n---\n\n# 📊 Phase 1 — Foundation & I/O primitives  \n**Why first?**  All higher‑level logic ultimately depends on config loading, user I/O, filesystem and Git abstractions.  If these are shaky, every other test will be brittle or duplicative.\n\n| Module(s)                           | What to test                                              |\n|-------------------------------------|-----------------------------------------------------------|\n| **Config.ts**                       | valid vs. missing keys, default fallback, parse errors    |\n| **FileSystem.ts**                   | file‑exists / read/write success & failure paths          |\n| **GitService.ts**                   | “clean” vs. “dirty” repo, commit‑hash lookup, error cases |\n| **UserInterface.ts**                | prompts answered → paths taken; aborted / invalid input    |\n| **CommandService.ts**               | each CLI command entry‑point, flags on/off, error exit    |\n\n> **Mocks**: stub out real fs and git so your tests drive both success and simulated I/O errors.  \n> **Goal**: ≥ 90% branch coverage on these files before moving on.\n\n---\n\n# 🚀 Phase 2 — Core CLI orchestration  \n**Why next?**  This wiring layer stitches together the foundation into actual “kai” commands.  If your orchestration is fully tested, you’ll catch mis‑wiring as soon as you refactor sub‑systems.\n\n| Module(s)                            | What to test                                              |\n|--------------------------------------|-----------------------------------------------------------|\n| **kai.js** (the bin entry point)     | flag parsing → delegates to CommandService                 |\n| **ConversationManager.ts**           | branching around new vs resume vs rollback flows           |\n| **ProjectContextBuilder.ts**         | success vs missing project files / context errors          |\n| **ProjectScaffolder.ts**             | scaffold path exists, conflicts, dry‑run vs apply          |\n\n> **Focus** on each `if`/`else` in your command‐dispatch (e.g. “if no project, scaffold; else analyse”).  \n> **Mocks**: inject fake `FileSystem`, `GitService`, `Config` so you can force both happy and unhappy paths.\n\n---\n\n# 🧠 Phase 3 — AI‑integration core  \n**Why now?**  Once your I/O and CLI layers are solid, turn to the guts that actually call LLMs.  Testing these early prevents flaky tests later when you get into analysis/consolidation loops.\n\n| Module(s)                          | What to test                                               |\n|------------------------------------|------------------------------------------------------------|\n| **AIClient.ts**                    | success vs. API‐error (network failure, bad credentials)    |\n| **CodeProcessor.ts**               | fallback when LLM output is invalid JSON / schema mismatch  |\n| **CommandService.test.ts** (add AI branches) | branching on LLM‑driven subcommands (analysis vs generation) |\n\n> **Mocks**: `jest.mock('@google/generative-ai')` or your adapter, and force both resolved payloads and rejects.  \n> **Goal**: hit every `try/catch` around the LLM calls.\n\n---\n\n# 🔍 Phase 4 — Analysis & Consolidation engines  \n**Why here?**  These services contain the real business logic (branchy heuristics, multi‑step merges, feedback loops).  They’re high‑value but also the most complex.\n\n| Module(s)                                       | What to test                                                      |\n|-------------------------------------------------|--------------------------------------------------------------------|\n| **analysis/ProjectAnalyzerService.ts**          | each analysis‑path: single‑file vs multi‑file vs no files found     |\n| **consolidation/ConsolidationService.ts**       | “no edits needed” vs “edits applied” vs “conflicts / reviewer abort” |\n| **consolidation/\\*.ts** (Analyzer, Applier, Generator, Reviewer) | every `switch`/`case`, every early‑exit, both happy & sad paths |\n\n> **Strategy**:  \n> 1. Write one “golden” happy‑path test that exercises the full pipeline.  \n> 2. Then write small focused tests to force each error or edge‑branch.\n\n---\n\n# 🛠 Phase 5 — Code‑gen & Interactive Loops  \n**Why next?**  Code‑gen modules and interactive‑feedback loops are peripheral today but start to grow as you flesh out features.  You’ll want tests in place before they become a maintenance headache.\n\n| Module(s)                                              | What to test                                                           |\n|--------------------------------------------------------|------------------------------------------------------------------------|\n| **code‑gen/ApplicationStartup.js**                     | all template branches, missing template keys, prompt errors             |\n| **consolidation/feedback/FeedbackLoop.js**             | loop terminates on accept, on reject, on max‑iterations                 |\n| **typescript/services/test‑runner/TestRunnerService.js** | success vs. test‑fail vs. timeout vs. malformed jest output             |\n\n> **Mocks**: simulate user input, fake test‑run results, drive both loop‑continue and loop‑break conditions.\n\n---\n\n# 📡 Phase 6 — WebService, Sample‑Project, Remaining stubs  \n**Why last?**  These bits are either wrappers around already tested code (so have very little branching) or sample/demo code that doesn’t affect core logic.\n\n| Module(s)                           | What to test                                                        |\n|-------------------------------------|---------------------------------------------------------------------|\n| **WebService.js**                   | routes up/down, JSON vs. text responses, error handling             |\n| **sample‑project/\\*.js**            | ensure the demo flows as advertised (smoke‑tests)                   |\n| leftover stubs                      | minimal “exists” tests to lock in future behavior                   |\n\n> **Optional**: you can keep these as very thin smoke‑tests (just ensure no throw) and consider them “low priority.”\n\n---\n\n## 📈 Maintaining & Measuring Progress\n\n1. **Run coverage after each phase**:  \n   ```bash\n   npm test -- --coverage --coverageReporters=text\n   ```\n2. **Track coverage numbers** for `% Branch` in each file.  Phase 1→2 should boost global branch coverage well into the 60–70% range, and Phases 3–4 into 80–90%.\n3. **Celebrate quick wins**: finishing Phase 1 already gets you major confidence for every subsequent test you write.\n\n---\n\n## 🏁 TL;DR\n\n| Phase | Rough Module Count | Reason                                                     |\n|-------|--------------------|------------------------------------------------------------|\n| 1     | 5 files            | Core I/O & config (largest ripple effect)                  |\n| 2     | 5–6 files          | CLI orchestration (wiring together foundation)             |\n| 3     | 2–3 files          | AI integration (most external‑dependency risk)             |\n| 4     | ~10 files          | Analysis & consolidation (core business logic, branchy)    |\n| 5     | ~8 files           | Code‑gen & feedback loops (growing feature set)            |\n| 6     | ~5 files + stubs   | Web service, sample/demo & low‑risk wrappers               |\n\nStart with **Phase 1** today—once those tests are in place, every subsequent module becomes far easier to exercise and refactor.  Let me know if you’d like starter test‑skeletons for any of the Phase 1 files!
+# Lean, Multi-Phase Test Plan for Branch Coverage
+
+This plan outlines a phased approach to increase test coverage, focusing on critical modules first. Each phase identifies specific modules and testing priorities. You don't need to tackle everything at once; complete Phase 1, then move on to subsequent phases.
+
+-----
+
+## 📊 Phase 1 — Foundation & I/O Primitives
+
+**Why first?** All higher-level logic depends on config loading, user I/O, filesystem, and Git abstractions. Shaky foundations here will lead to brittle or duplicate tests elsewhere.
+
+| Module(s) | What to test |
+|---|---|
+| **Config.ts** | Valid vs. missing keys, default fallback, parse errors |
+| **FileSystem.ts** | File-exists / read/write success & failure paths |
+| **GitService.ts** | "Clean" vs. "dirty" repo, commit-hash lookup, error cases |
+| **UserInterface.ts** | Prompts answered → paths taken; aborted / invalid input |
+| **CommandService.ts** | Each CLI command entry-point, flags on/off, error exit |
+
+> **Mocks**: Stub out real `fs` and `git` so your tests drive both success and simulated I/O errors.
+> **Goal**: $\\ge$ 90% branch coverage on these files before moving on.
+
+-----
+
+## 🚀 Phase 2 — Core CLI Orchestration
+
+**Why next?** This wiring layer stitches together the foundation into actual "kai" commands. Fully testing your orchestration will catch mis-wiring as soon as you refactor sub-systems.
+
+| Module(s) | What to test |
+|---|---|
+| **kai.js** (the bin entry point) | Flag parsing → delegates to `CommandService` |
+| **ConversationManager.ts** | Branching around new vs. resume vs. rollback flows |
+| **ProjectContextBuilder.ts** | Success vs. missing project files / context errors |
+| **ProjectScaffolder.ts** | Scaffold path exists, conflicts, dry-run vs. apply |
+
+> **Focus** on each `if`/`else` in your command-dispatch (e.g., "if no project, scaffold; else analyse").
+> **Mocks**: Inject fake `FileSystem`, `GitService`, `Config` so you can force both happy and unhappy paths.
+
+-----
+
+## 🧠 Phase 3 — AI-Integration Core
+
+**Why now?** Once your I/O and CLI layers are solid, turn to the guts that actually call LLMs. Testing these early prevents flaky tests later when you get into analysis/consolidation loops.
+
+| Module(s) | What to test |
+|---|---|
+| **AIClient.ts** | Success vs. API-error (network failure, bad credentials) |
+| **CodeProcessor.ts** | Fallback when LLM output is invalid JSON / schema mismatch |
+| **CommandService.test.ts** (add AI branches) | Branching on LLM-driven subcommands (analysis vs. generation) |
+
+> **Mocks**: `jest.mock('@google/generative-ai')` or your adapter, and force both resolved payloads and rejects.
+> **Goal**: Hit every `try/catch` around the LLM calls.
+
+-----
+
+## 🔍 Phase 4 — Analysis & Consolidation Engines
+
+**Why here?** These services contain the real business logic (branchy heuristics, multi-step merges, feedback loops). They're high-value but also the most complex.
+
+| Module(s) | What to test |
+|---|---|
+| **analysis/ProjectAnalyzerService.ts** | Each analysis-path: single-file vs. multi-file vs. no files found |
+| **consolidation/ConsolidationService.ts** | "No edits needed" vs. "edits applied" vs. "conflicts / reviewer abort" |
+| **consolidation/\*.ts** (Analyzer, Applier, Generator, Reviewer) | Every `switch`/`case`, every early-exit, both happy & sad paths |
+
+> **Strategy**:
+>
+> 1.  Write one "golden" happy-path test that exercises the full pipeline.
+> 2.  Then write small focused tests to force each error or edge-branch.
+
+-----
+
+## 🛠 Phase 5 — Code-Gen & Interactive Loops
+
+**Why next?** Code-gen modules and interactive-feedback loops are peripheral today but will grow as you flesh out features. You'll want tests in place before they become a maintenance headache.
+
+| Module(s) | What to test |
+|---|---|
+| **code-gen/ApplicationStartup.js** | All template branches, missing template keys, prompt errors |
+| **consolidation/feedback/FeedbackLoop.js** | Loop terminates on accept, on reject, on max-iterations |
+| **typescript/services/test-runner/TestRunnerService.js** | Success vs. test-fail vs. timeout vs. malformed jest output |
+
+> **Mocks**: Simulate user input, fake test-run results, drive both loop-continue and loop-break conditions.
+
+-----
+
+## 📡 Phase 6 — WebService, Sample-Project, Remaining Stubs
+
+**Why last?** These bits are either wrappers around already tested code (so have very little branching) or sample/demo code that doesn’t affect core logic.
+
+| Module(s) | What to test |
+|---|---|
+| **WebService.js** | Routes up/down, JSON vs. text responses, error handling |
+| **sample-project/\*.js** | Ensure the demo flows as advertised (smoke-tests) |
+| Leftover stubs | Minimal "exists" tests to lock in future behavior |
+
+> **Optional**: You can keep these as very thin smoke-tests (just ensure no throw) and consider them "low priority."
+
+-----
+
+## 📈 Maintaining & Measuring Progress
+
+1.  **Run coverage after each phase**:
+    ```bash
+    npm test -- --coverage --coverageReporters=text
+    ```
+2.  **Track coverage numbers** for `% Branch` in each file. Phase 1 $\\to$ 2 should boost global branch coverage well into the 60–70% range, and Phases 3–4 into 80–90%.
+3.  **Celebrate quick wins**: Finishing Phase 1 already gives you major confidence for every subsequent test you write.
+
+-----
+
+## 🏁 TL;DR
+
+| Phase | Rough Module Count | Reason |
+|---|---|---|
+| 1 | 5 files | Core I/O & config (largest ripple effect) |
+| 2 | 5–6 files | CLI orchestration (wiring together foundation) |
+| 3 | 2–3 files | AI integration (most external-dependency risk) |
+| 4 | \~10 files | Analysis & consolidation (core business logic, branchy) |
+| 5 | \~8 files | Code-gen & feedback loops (growing feature set) |
+| 6 | \~5 files + stubs | Web service, sample/demo & low-risk wrappers |
+
+Start with **Phase 1** today. Once those tests are in place, every subsequent module becomes far easier to exercise and refactor.
+
+Which slice would you like to tackle first, and how can I help you get started with the test skeletons?
