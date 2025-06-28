@@ -4,6 +4,10 @@ import path from 'path'; // Import path
 import ignore, { Ignore } from 'ignore'; // Import ignore
 import { CommandService } from './CommandService';
 import { FileSystem } from './FileSystem'; // <-- Import FileSystem
+import { execFile as execFileCb } from 'child_process';
+import { promisify } from 'util';
+
+const execFile = promisify(execFileCb);
 
 export class GitService {
     private commandService: CommandService;
@@ -136,8 +140,7 @@ export class GitService {
 
     /** Commits all staged changes with the provided message. */
     async commitAll(projectRoot: string, message: string): Promise<void> {
-        const escaped = message.replace(/"/g, '\\"');
-        await this.commandService.run(`git commit -m "${escaped}"`, { cwd: projectRoot });
+        await execFile('git', ['commit', '-m', message], { cwd: projectRoot });
     }
 
     // --- MOVED FROM FileSystem: ensureGitignoreRules ---
