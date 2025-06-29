@@ -112,14 +112,25 @@ describe('FileSystem', () => {
       expect(fs.existsSync(filePath)).toBe(false);
     });
 
+    it('applies patch when diff is wrapped in fences', async () => {
+      const filePath = path.join(tempDir, 'wrap.txt');
+      fs.writeFileSync(filePath, 'a\n');
+      const raw = require('diff').createTwoFilesPatch('wrap.txt', 'wrap.txt', 'a\n', 'b\n');
+      const fenced = '```diff\n' + raw.trim() + '\n```';
+      const result = await fsUtil.applyDiffToFile(filePath, fenced);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('b\n');
+    });
+
     it('returns false when patch fails', async () => {
       const cwd = process.cwd();
       process.chdir(tempDir);
       try {
         const filePath = path.join(tempDir, 'fail.txt');
         fs.writeFileSync(filePath, 'original\n');
-        const diff = require('diff').createTwoFilesPatch('fail.txt', 'fail.txt', 'hello\n', 'hi\n');
-        const result = await fsUtil.applyDiffToFile(filePath, diff);
+        const base = require('diff').createTwoFilesPatch('fail.txt', 'fail.txt', 'hello\n', 'hi\n');
+        const fenced = '```diff\n' + base.trim() + '\n```';
+        const result = await fsUtil.applyDiffToFile(filePath, fenced);
         expect(result).toBe(false);
 
         const logFile = path.join(tempDir, '.kai/logs/diff_failures.jsonl');
@@ -127,6 +138,7 @@ describe('FileSystem', () => {
         const line = fs.readFileSync(logFile, 'utf8').trim().split('\n')[0];
         const entry = JSON.parse(line);
         expect(entry.file).toBe(filePath);
+        expect(entry.diff.includes('```')).toBe(false);
       } finally {
         process.chdir(cwd);
       }
