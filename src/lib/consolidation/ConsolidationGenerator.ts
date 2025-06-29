@@ -102,41 +102,54 @@ export class ConsolidationGenerator {
     ): Promise<void> {
         const normalizedPath = path.normalize(filePath).replace(/^[\\\/]+|[\\\/]+$/g, '');
         console.log(chalk.cyan(`      Generating content for: ${normalizedPath}`));
+        const currentContent = await this._readCurrentFileContent(normalizedPath);
+
+        // Build the base prompt (using potentially sliced history)
+        const basePrompt = ConsolidationPrompts.individualFileGenerationPrompt(
+            codeContext,
+            historyString, // Use the passed history string
+            normalizedPath,
+            currentContent
+        );
+
+        // Prepend the hidden instruction directly from import
+        const finalPromptToSend = `${HIDDEN_CONSOLIDATION_GENERATION_INSTRUCTION}\n\n---\n\n${basePrompt}`;
+        console.log(chalk.dim("      Prepended hidden generation instruction (not logged)."));
+
+        const maxAttempts = this.config.gemini.generation_max_retries ?? 3;
         let attempt = 0;
 
         try {
-            const currentContent = await this._readCurrentFileContent(normalizedPath);
+            while (attempt <= maxAttempts) {
+                const responseTextRaw = await this._callGenerationAIWithRetry(
+                    finalPromptToSend,
+                    normalizedPath,
+                    useFlashModel
+                );
 
-            // Build the base prompt (using potentially sliced history)
-            const basePrompt = ConsolidationPrompts.individualFileGenerationPrompt(
-                codeContext,
-                historyString, // Use the passed history string
-                normalizedPath,
-                currentContent
-            );
+                const finalContentOrDelete = this._parseGenerationAIResponse(
+                    responseTextRaw,
+                    normalizedPath,
+                    conversationFilePath
+                );
 
-            // Prepend the hidden instruction directly from import
-            const finalPromptToSend = `${HIDDEN_CONSOLIDATION_GENERATION_INSTRUCTION}\n\n---\n\n${basePrompt}`;
-            console.log(chalk.dim("      Prepended hidden generation instruction (not logged)."));
+                if (finalContentOrDelete !== 'DELETE_CONFIRMED' && finalContentOrDelete.length === 0) {
+                    if (attempt < maxAttempts) {
+                        attempt++;
+                        console.warn(chalk.yellow(`      Empty content generated for ${normalizedPath}. Retrying (${attempt}/${maxAttempts})...`));
+                        continue;
+                    } else {
+                        throw new Error('AI returned empty content');
+                    }
+                }
 
-            // Call AI with the combined prompt
-            const responseTextRaw = await this._callGenerationAIWithRetry(
-                finalPromptToSend, // Send combined prompt
-                normalizedPath,
-                useFlashModel
-            );
-
-            const finalContentOrDelete = this._parseGenerationAIResponse(
-                responseTextRaw,
-                normalizedPath,
-                conversationFilePath
-            );
-
-            finalStates[normalizedPath] = finalContentOrDelete;
-            if (finalContentOrDelete === 'DELETE_CONFIRMED') {
-                 console.log(chalk.yellow(`      AI suggested DELETE for ${normalizedPath}. Marked for deletion.`));
-            } else {
-                console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (${finalContentOrDelete.length} characters)`));
+                finalStates[normalizedPath] = finalContentOrDelete;
+                if (finalContentOrDelete === 'DELETE_CONFIRMED') {
+                    console.log(chalk.yellow(`      AI suggested DELETE for ${normalizedPath}. Marked for deletion.`));
+                } else {
+                    console.log(chalk.green(`      Successfully generated content for ${normalizedPath} (${finalContentOrDelete.length} characters)`));
+                }
+                break;
             }
 
         } catch (error) {
