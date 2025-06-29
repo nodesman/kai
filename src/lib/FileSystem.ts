@@ -48,7 +48,14 @@ class FileSystem {
     }
 
     static rmSync(p: string, options?: fs.RmOptions): void {
-        fs.rmSync(p, options as fs.RmOptions);
+        try {
+            fs.rmSync(p, options as fs.RmOptions);
+        } catch (err: any) {
+            if (options?.force && err?.code === 'ENOENT') {
+                return; // swallow missing path error when force is true
+            }
+            throw err;
+        }
     }
 
     // --- Common FS methods (remain unchanged) ---
