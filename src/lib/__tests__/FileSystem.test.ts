@@ -131,6 +131,15 @@ describe('FileSystem', () => {
       expect(fs.readFileSync(filePath, 'utf8')).toBe('b\n');
     });
 
+    it('fuzzily applies patch when whitespace differs', async () => {
+      const filePath = path.join(tempDir, 'fuzzy.txt');
+      fs.writeFileSync(filePath, '  hello  \n');
+      const diff = require('diff').createTwoFilesPatch('fuzzy.txt', 'fuzzy.txt', 'hello\n', 'hi\n');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('hi\n');
+    });
+
     it('returns false when patch fails', async () => {
       const cwd = process.cwd();
       process.chdir(tempDir);

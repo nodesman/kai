@@ -5,6 +5,7 @@ import path from 'path';
 import ignore, { Ignore } from 'ignore'; // Import ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
 import { applyPatch, parsePatch } from 'diff';
+import type { ParsedDiff, Hunk } from 'diff';
 
 // --- ADDED: Import Analysis Cache Types ---
 // Import M2 structure
@@ -391,10 +392,16 @@ class FileSystem {
             }
 
             const original = isCreate ? '' : (await this.readFile(filePath)) ?? '';
-            const result = applyPatch(original, cleanedDiff);
+            let result = applyPatch(original, cleanedDiff);
             if (result === false) {
-                await logDiffFailure(this, filePath, cleanedDiff);
-                return false;
+                // Attempt a more forgiving application when applyPatch fails
+                const fuzzy = fuzzyApplyPatch(original, patch);
+                if (fuzzy !== null) {
+                    result = fuzzy;
+                } else {
+                    await logDiffFailure(this, filePath, cleanedDiff);
+                    return false;
+                }
             }
             await this.writeFile(filePath, result);
             return true;
@@ -407,6 +414,53 @@ class FileSystem {
 }
 
 export { FileSystem };
+
+/**
+ * Attempts a fuzzier patch application when `applyPatch` fails. It looks for
+ * each hunk's context lines within ±3 lines of the original start position,
+ * ignoring whitespace differences. When a close match is found, the matching
+ * lines are replaced by the hunk's additions.
+ *
+ * @param original The current file contents.
+ * @param patch    Parsed patch object from `parsePatch`.
+ * @returns The patched contents or `null` if no suitable match was found.
+ */
+function fuzzyApplyPatch(original: string, patch: ParsedDiff): string | null {
+    const lines = original.split(/\n/);
+    for (const hunk of patch.hunks) {
+        const expected = hunk.lines
+            .filter((l) => l.startsWith(' ') || l.startsWith('-'))
+            .map((l) => l.slice(1));
+        const start = hunk.oldStart - 1;
+        const searchStart = Math.max(0, start - 3);
+        const searchEnd = Math.min(lines.length - expected.length, start + 3);
+        let matchIndex = -1;
+        outer: for (let i = searchStart; i <= searchEnd; i++) {
+            for (let j = 0; j < expected.length; j++) {
+                const a = (lines[i + j] ?? '').replace(/\s+/g, '');
+                const b = expected[j].replace(/\s+/g, '');
+                if (a !== b) continue outer;
+            }
+            matchIndex = i;
+            break;
+        }
+        if (matchIndex === -1) return null;
+
+        const candidate = lines.slice(matchIndex, matchIndex + expected.length);
+        const replacement: string[] = [];
+        let k = 0;
+        for (const l of hunk.lines) {
+            if (l.startsWith(' ') || l.startsWith('-')) {
+                if (l.startsWith(' ')) replacement.push(candidate[k]);
+                k++;
+            } else if (l.startsWith('+')) {
+                replacement.push(l.slice(1));
+            }
+        }
+        lines.splice(matchIndex, expected.length, ...replacement);
+    }
+    return lines.join('\n');
+}
 
 export async function logDiffFailure(fs: FileSystem, filePath: string, diffContent: string, error?: string): Promise<void> {
     const logsDir = path.resolve('.kai/logs');
