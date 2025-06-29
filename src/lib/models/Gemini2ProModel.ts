@@ -196,7 +196,7 @@ class Gemini2ProModel extends BaseModel {
 
                  console.error(chalk.red(`Error during generateContent (Attempt ${attempts + 1}) using ${this.modelName}:`), error.message);
                  if (error.stack && !isBlockError) {
-                    console.error(chalk.grey(error.stack));
+                    console.error(chalk.gray(error.stack));
                  }
 
                  if (shouldRetry) {
@@ -290,7 +290,7 @@ class Gemini2ProModel extends BaseModel {
 
          console.error(chalk.red(errorMessage));
          if (error.stack && !errorMessage.includes('Google AI Error') && !errorMessage.includes('HTTP Status')) {
-             console.error(chalk.grey(error.stack));
+             console.error(chalk.gray(error.stack));
          }
 
          const originalMsg = (error instanceof Error) ? error.message : JSON.stringify(error);
