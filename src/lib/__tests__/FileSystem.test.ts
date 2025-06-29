@@ -1,7 +1,8 @@
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
-import { FileSystem } from '../FileSystem';
+import { FileSystem, logDiffFailure } from '../FileSystem';
+import ignore from 'ignore';
 import Conversation from '../models/Conversation';
 import { ConversationManager } from '../ConversationManager';
 
@@ -63,6 +64,23 @@ describe('FileSystem', () => {
     expect(list.sort()).toEqual(['one', 'three']);
   });
 
+  it('listJsonlFiles returns [] on readdir error', async () => {
+    jest.spyOn(fsUtil, 'ensureDirExists').mockResolvedValue();
+    const spy = jest.spyOn(fsPromises, 'readdir').mockRejectedValue(new Error('fail'));
+    const res = await fsUtil.listJsonlFiles('/bad');
+    expect(res).toEqual([]);
+    spy.mockRestore();
+  });
+
+  it('access resolves and ensureKaiDirectoryExists delegates', async () => {
+    const file = path.join(tempDir, 'acc.txt');
+    fs.writeFileSync(file, '');
+    await expect(fsUtil.access(file)).resolves.toBeUndefined();
+    const spy = jest.spyOn(fsUtil, 'ensureDirExists').mockResolvedValue();
+    await fsUtil.ensureKaiDirectoryExists('/tmp/kaiDir');
+    expect(spy).toHaveBeenCalledWith('/tmp/kaiDir');
+  });
+
   it('readFileContents returns map for existing files only', async () => {
     const f1 = path.join(tempDir, 'a.txt');
     const f2 = path.join(tempDir, 'b.txt');
@@ -78,6 +96,35 @@ describe('FileSystem', () => {
     fs.writeFileSync(binPath, Buffer.from([0, 1, 2, 3, 0]));
     expect(await fsUtil.isTextFile(textPath)).toBe(true);
     expect(await fsUtil.isTextFile(binPath)).toBe(false);
+  });
+
+  it('isTextFile handles empty and special files', async () => {
+    const empty = path.join(tempDir, 'empty.txt');
+    fs.writeFileSync(empty, '');
+    expect(await fsUtil.isTextFile(empty)).toBe(true);
+
+    const docker = path.join(tempDir, 'Dockerfile');
+    fs.writeFileSync(docker, 'FROM node');
+    expect(await fsUtil.isTextFile(docker)).toBe(true);
+
+    const dot = path.join(tempDir, '.foo');
+    fs.writeFileSync(dot, 'hidden');
+    expect(await fsUtil.isTextFile(dot)).toBe(true);
+
+    const unknown = path.join(tempDir, 'file.abc');
+    fs.writeFileSync(unknown, 'u');
+    expect(await fsUtil.isTextFile(unknown)).toBe(true);
+  });
+
+  it('getProjectFiles respects ignore rules', async () => {
+    const ig = ignore().add('skip.txt');
+    const sub = path.join(tempDir, 'sub');
+    fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(sub, 'a.txt'), 'a');
+    fs.writeFileSync(path.join(sub, 'skip.txt'), 'x');
+    fs.writeFileSync(path.join(tempDir, 'bin.bin'), Buffer.from([0, 0, 0]));
+    const list = await fsUtil.getProjectFiles(tempDir, tempDir, ig);
+    expect(list.map(f => path.relative(tempDir, f))).toEqual(['sub/a.txt']);
   });
 
   describe('applyDiffToFile', () => {
@@ -213,6 +260,58 @@ describe('FileSystem', () => {
       expect(msg?.content).toContain(fsUtil.lastDiffFailure!.diff);
       expect(msg?.content).toContain(fsUtil.lastDiffFailure!.fileContent);
     });
+
+    it('returns false when diff has no hunks', async () => {
+      await new Promise<void>(resolve => {
+        jest.isolateModules(() => {
+          jest.doMock('diff', () => {
+            const actual = jest.requireActual('diff');
+            return { ...actual, parsePatch: () => [] };
+          });
+          const { FileSystem: FS } = require('../FileSystem');
+          const inst = new FS();
+          inst.applyDiffToFile(path.join(tempDir, 'none.txt'), '').then((res: boolean) => {
+            expect(res).toBe(false);
+            resolve();
+          });
+        });
+      });
+    });
+
+    it('fails when patch results in empty file', async () => {
+      const filePath = path.join(tempDir, 'empty.txt');
+      fs.writeFileSync(filePath, 'hi\n');
+      const diff = require('diff').createTwoFilesPatch('empty.txt', 'empty.txt', 'hi\n', '');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(false);
+    });
+
+    it('handles fs errors during applyDiffToFile', async () => {
+      const filePath = path.join(tempDir, 'err.txt');
+      fs.writeFileSync(filePath, 'a\n');
+      jest.spyOn(fsPromises, 'mkdtemp').mockRejectedValue(new Error('fail'));
+      const diff = require('diff').createTwoFilesPatch('err.txt', 'err.txt', 'a\n', 'b\n');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(false);
+    });
+
+    it('handles parsePatch throwing non-Error', async () => {
+      await new Promise<void>(resolve => {
+        jest.isolateModules(() => {
+          jest.doMock('diff', () => {
+            const actual = jest.requireActual('diff');
+            return { ...actual, parsePatch: () => { throw 'oops'; } };
+          });
+          const { FileSystem: FS } = require('../FileSystem');
+          const inst = new FS();
+          inst.applyDiffToFile(path.join(tempDir, 'p.txt'), 'diff').then((r: boolean) => {
+            expect(r).toBe(false);
+            resolve();
+          });
+        });
+      });
+    });
+
   });
 
   describe('error and edge cases', () => {
@@ -280,6 +379,11 @@ describe('FileSystem', () => {
         fs.writeFileSync(file, '{bad json}\n');
         await expect(fsUtil.readJsonlFile(file)).rejects.toThrow(/Failed to parse/);
       });
+
+      it('propagates access errors', async () => {
+        jest.spyOn(fsPromises, 'access').mockRejectedValue({ code: 'EACCES' });
+        await expect(fsUtil.readJsonlFile(file)).rejects.toMatchObject({ code: 'EACCES' });
+      });
     });
 
     describe('appendJsonlFile', () => {
@@ -320,12 +424,31 @@ describe('FileSystem', () => {
         await expect(fsUtil.readAnalysisCache(tmpc)).resolves.toEqual(data);
       });
 
-      it('writeAnalysisCache writes file', async () => {
-        const cache = { overallSummary: 's', entries: [] };
-        await fsUtil.writeAnalysisCache(tmpc, cache);
-        const content = fs.readFileSync(tmpc, 'utf8');
-        expect(JSON.parse(content)).toEqual(cache);
-      });
+    it('writeAnalysisCache writes file', async () => {
+      const cache = { overallSummary: 's', entries: [] };
+      await fsUtil.writeAnalysisCache(tmpc, cache);
+      const content = fs.readFileSync(tmpc, 'utf8');
+      expect(JSON.parse(content)).toEqual(cache);
     });
+
+    it('writeAnalysisCache ignores invalid data and logs errors', async () => {
+      const spy = jest.spyOn(fsUtil, 'writeFile').mockResolvedValue();
+      const bad: any = null;
+      await fsUtil.writeAnalysisCache(tmpc, bad);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('writeAnalysisCache logs error on failure', async () => {
+      jest.spyOn(fsUtil, 'writeFile').mockRejectedValue(new Error('fail'));
+      await fsUtil.writeAnalysisCache(tmpc, { overallSummary: '', entries: [] });
+    });
+
+    it('logDiffFailure handles logging errors', async () => {
+      jest.spyOn(fsUtil, 'ensureDirExists').mockRejectedValue(new Error('fail'));
+      console.error = jest.fn();
+      await logDiffFailure(fsUtil, 'x', 'd');
+      expect(console.error).toHaveBeenCalled();
+    });
+  });
   });
 });
