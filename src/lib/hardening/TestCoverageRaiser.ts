@@ -5,6 +5,7 @@ import { FileSystem, logDiffFailure } from '../FileSystem';
 import { CommandService } from '../CommandService';
 import { AIClient } from '../AIClient';
 import { TestCoveragePrompts } from './TestCoveragePrompts';
+import { applyDiffIteratively } from '../DiffApplier';
 
 export class TestCoverageRaiser {
     private config: Config;
@@ -75,7 +76,7 @@ export class TestCoverageRaiser {
                 { role: 'user', content: prompt }
             ], false);
 
-            const applied = await this.fs.applyDiffToFile(testPath, diff);
+            const applied = await applyDiffIteratively(this.fs, this.aiClient, testPath, diff);
             if (!applied) {
                 const info = this.fs.lastDiffFailure || { file: testPath, diff, fileContent: testContent };
                 await logDiffFailure(this.fs, info.file, info.diff, info.fileContent, info.error);
