@@ -242,4 +242,213 @@ describe('GitService.createAnnotatedTag', () => {
     runMock.mockRejectedValueOnce(err);
     await expect(svc.createAnnotatedTag('/proj', 'v3', 'm')).rejects.toThrow(/Exit Code: 5/);
   });
+
+  it('handles generic errors without code', async () => {
+    runMock.mockRejectedValueOnce(new Error('bad'));
+    await expect(svc.createAnnotatedTag('/proj', 'v4', 'm')).rejects.toThrow('Failed to create Git tag');
+  });
+
+  it('handles missing error message', async () => {
+    const err: any = { code: 1 };
+    runMock.mockRejectedValueOnce(err);
+    await expect(svc.createAnnotatedTag('/proj', 'v5', 'm')).rejects.toThrow('Unknown error');
+  });
+});
+
+// Additional branch coverage tests
+describe('GitService additional branches', () => {
+  beforeEach(() => {
+    (console.warn as jest.Mock).mockClear();
+    (console.error as jest.Mock).mockClear();
+  });
+
+  it('getRepositoryRoot falls back on error', async () => {
+    const run = jest.fn().mockRejectedValue(new Error('fail'));
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.getRepositoryRoot('/cwd')).resolves.toBe('/cwd');
+  });
+
+  it('getRepositoryRoot returns path on success', async () => {
+    const run = jest.fn().mockResolvedValue({ stdout: '/repo\n' });
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.getRepositoryRoot('/cwd')).resolves.toBe('/repo');
+  });
+
+  it('isGitRepository throws generic error', async () => {
+    const err: any = new Error('oops');
+    err.code = 1;
+    err.stderr = 'err';
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.isGitRepository('/repo')).rejects.toThrow('Failed to verify Git repository status');
+  });
+
+  it('isGitRepository handles error without code', async () => {
+    const err = new Error('oops');
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.isGitRepository('/repo')).rejects.toThrow('Failed to verify Git repository status');
+  });
+
+  it('isGitRepository handles code zero', async () => {
+    const err: any = new Error('fail');
+    err.code = 0;
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.isGitRepository('/repo')).rejects.toThrow('Failed to verify Git repository status');
+  });
+
+  it('isGitRepository handles command-not-found message', async () => {
+    const err: any = new Error('command not found');
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.isGitRepository('/repo')).rejects.toThrow('Git command not found');
+  });
+
+  it('initializeRepository includes stderr in error', async () => {
+    const err: any = new Error('bad');
+    err.stderr = 'whoops';
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.initializeRepository('/r')).rejects.toThrow('Stderr: whoops');
+  });
+
+  it('initializeRepository includes exit code', async () => {
+    const err: any = new Error('bad');
+    err.code = 2;
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.initializeRepository('/r')).rejects.toThrow('Exit Code: 2');
+  });
+
+  it('initializeRepository handles generic error', async () => {
+    const run = jest.fn().mockRejectedValue(new Error('fail'));
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.initializeRepository('/r')).rejects.toThrow('Failed to initialize Git repository');
+  });
+
+  it('initializeRepository handles command-not-found message', async () => {
+    const err: any = new Error('command not found');
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.initializeRepository('/r')).rejects.toThrow('Please ensure Git is installed');
+  });
+
+  it('initializeRepository handles missing message', async () => {
+    const err: any = { stderr: 'oops' };
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.initializeRepository('/r')).rejects.toThrow('Stderr: oops');
+  });
+
+  it('ensureGitRepository warns and calls isGitRepository', async () => {
+    const svc = new GitService({ run: jest.fn() } as any, {} as any);
+    const spy = jest.spyOn(svc, 'isGitRepository').mockResolvedValue(true);
+    await svc.ensureGitRepository('/r');
+    expect(spy).toHaveBeenCalledWith('/r');
+    spy.mockRestore();
+  });
+
+  it('checkCleanStatus warns on clean stderr', async () => {
+    const run = jest.fn().mockResolvedValue({ stdout: '', stderr: 'noise' });
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).resolves.toBeUndefined();
+    expect((console.warn as jest.Mock)).toHaveBeenCalled();
+  });
+
+  it('checkCleanStatus handles git not found', async () => {
+    const err: any = new Error('missing');
+    err.code = 'ENOENT';
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('Git command not found');
+  });
+
+  it('checkCleanStatus handles not a repo', async () => {
+    const err: any = new Error('bad');
+    err.stderr = 'not a git repository';
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('not a Git repository');
+  });
+
+  it('checkCleanStatus handles generic error with code', async () => {
+    const err: any = new Error('oops');
+    err.code = 3;
+    err.stderr = 'boom';
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('Exit Code: 3');
+  });
+
+  it('checkCleanStatus handles generic error without code', async () => {
+    const run = jest.fn().mockRejectedValue(new Error('x'));
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('Failed to verify Git status');
+  });
+
+  it('checkCleanStatus handles missing message', async () => {
+    const err: any = { stderr: '' };
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('Unknown error');
+  });
+
+  it('checkCleanStatus handles code zero', async () => {
+    const err: any = new Error('zero');
+    err.code = 0;
+    const run = jest.fn().mockRejectedValue(err);
+    const svc = new GitService({ run } as any, {} as any);
+    await expect(svc.checkCleanStatus('/r')).rejects.toThrow('Failed to verify Git status');
+  });
+
+  it('ensureGitignoreRules skips when rule already exists', async () => {
+    const content = '# Kai internal files (logs, cache, config) - (auto-added by Kai)\n.kai/\n';
+    const mockFs: any = { readFile: jest.fn().mockResolvedValue(content), writeFile: jest.fn() };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    await svc.ensureGitignoreRules('/p');
+    expect(mockFs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('ensureGitignoreRules logs write errors', async () => {
+    const mockFs: any = {
+      readFile: jest.fn().mockResolvedValue(null),
+      writeFile: jest.fn().mockRejectedValue(new Error('fail')),
+    };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    await svc.ensureGitignoreRules('/p');
+    expect(mockFs.writeFile).toHaveBeenCalled();
+    expect((console.error as jest.Mock)).toHaveBeenCalled();
+  });
+
+  it('ensureGitignoreRules logs append errors and handles newline', async () => {
+    const mockFs: any = {
+      readFile: jest
+        .fn()
+        .mockResolvedValueOnce('node_modules/\n')
+        .mockResolvedValueOnce(null),
+      writeFile: jest.fn().mockRejectedValue(new Error('appendFail')),
+    };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    await svc.ensureGitignoreRules('/p');
+    expect(mockFs.writeFile).toHaveBeenCalled();
+    expect((console.error as jest.Mock)).toHaveBeenCalled();
+  });
+
+  it('ensureGitignoreRules handles readFile error', async () => {
+    const mockFs: any = { readFile: jest.fn().mockRejectedValue(new Error('oops')), writeFile: jest.fn() };
+    const svc = new GitService({ run: jest.fn() } as any, mockFs);
+    await svc.ensureGitignoreRules('/p');
+    expect((console.error as jest.Mock)).toHaveBeenCalled();
+  });
+
+  it('getIgnoreRules handles read errors', async () => {
+    const fsMock: any = {
+      readFile: jest.fn().mockRejectedValueOnce(new Error('giterr')).mockRejectedValueOnce(new Error('kaierr')),
+    };
+    const svc = new GitService({ run: jest.fn() } as any, fsMock);
+    const ig = await svc.getIgnoreRules('/root');
+    expect(fsMock.readFile).toHaveBeenCalledTimes(2);
+    expect(ig.ignores('.kai/file')).toBe(true);
+  });
 });
