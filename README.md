@@ -175,7 +175,7 @@ When the TypeScript feedback loop is enabled, Kai runs `npx tsc --noEmit` after 
 
 ### Hardening Workflow
 
-Kai can also raise your test coverage automatically. The `TestCoverageRaiser` utility runs your Jest suite with coverage enabled, identifies the file with the lowest coverage, and asks the AI to write a new test for it. Launch it by running `kai` and choosing **Harden** from the main menu (select the desired test framework). Kai will iterate up to `project.coverage_iterations` times, re-running coverage and generating tests until coverage improves. See [docs/100coverageplay.md](docs/100coverageplay.md) for a phased approach to reaching 100%.
+Kai can also raise your test coverage automatically. The `TestCoverageRaiser` utility runs your Jest suite with coverage enabled, identifies the file with the lowest coverage, and asks the AI to write a new test for it. Launch it by running `kai` and choosing **Harden** from the main menu (select the desired test framework). Kai will iterate up to `project.coverage_iterations` times, re-running coverage and generating tests until coverage improves. See [docs/100coverageplay.md](docs/100coverageplay.md) for a phased approach to reaching 100%. During hardening you can now pick which Gemini model to use, mirroring the options available for conversations and consolidation.
 
 ## Development
 

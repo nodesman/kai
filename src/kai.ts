@@ -357,6 +357,13 @@ async function main() {
             } else if (mode === 'Harden') {
                  if (!codeProcessor) throw new Error("CodeProcessor not initialized.");
                  const hardenResult = interactionResult as HardenInteractionResult;
+                 if (hardenResult.selectedModel && config && config.gemini.model_name !== hardenResult.selectedModel) {
+                     console.log(chalk.blue(`Overriding default model. Using: ${chalk.cyan(hardenResult.selectedModel)}`));
+                     config.gemini.model_name = hardenResult.selectedModel;
+                     codeProcessor.updateAIClient(new AIClient(config));
+                 } else if (config) {
+                     console.log(chalk.blue(`Using AI Model: ${chalk.cyan(config.gemini.model_name)}`));
+                 }
                  await codeProcessor.processHardeningRequest(hardenResult.tool);
                  console.log(chalk.magenta('🏁 Hardening process completed.'));
 

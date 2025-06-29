@@ -46,6 +46,7 @@ interface ScaffoldProjectInteractionResult {
 interface HardenInteractionResult {
     mode: 'Harden';
     tool: 'jest';
+    selectedModel: string;
 }
 
 // Define the structure for the fallback error
@@ -504,7 +505,28 @@ class UserInterface {
                         choices: frameworks,
                     }
                 ]);
-                return { mode: 'Harden', tool: toolChoice.toLowerCase() as 'jest' };
+                const primaryModel = this.config.gemini.model_name;
+                const secondaryModel = this.config.gemini.subsequent_chat_model_name;
+                const modelChoices = [
+                    {
+                        name: `Primary Model (${primaryModel}) - Recommended for complex tasks / generation`,
+                        value: primaryModel
+                    },
+                    {
+                        name: `Secondary Model (${secondaryModel}) - Recommended for quick interactions / analysis`,
+                        value: secondaryModel
+                    },
+                ];
+                const { modelChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'modelChoice',
+                        message: 'Select the AI model to use for this operation:',
+                        choices: modelChoices,
+                        default: primaryModel,
+                    },
+                ]);
+                return { mode: 'Harden', tool: toolChoice.toLowerCase() as 'jest', selectedModel: modelChoice };
             }
 
             // --- Remaining modes require Model selection ---
