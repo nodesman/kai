@@ -13,16 +13,27 @@ var mockGetGenerativeModel = jest.fn(() => ({
   generateContent: mockGenerateContent,
 }));
 
-var mockGoogleGenerativeAI = jest.fn((apiKey: string) => ({
-  getGenerativeModel: mockGetGenerativeModel,
-}));
+// Renamed for clarity: this is the spy that tracks the *constructor calls* for GoogleGenerativeAI.
+var mockGoogleGenerativeAIConstructor = jest.fn();
 
 // Apply the mock to the @google/generative-ai module
 // This ensures that any instantiation of GoogleGenerativeAI within Gemini2ProModel
 // uses our mock instead of the actual library.
-jest.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: mockGoogleGenerativeAI,
-}));
+jest.mock('@google/generative-ai', () => {
+  // Define a mock class that matches the constructor signature and has the expected method
+  class MockGoogleGenerativeAI {
+    getGenerativeModel: typeof mockGetGenerativeModel; // Type declaration for the method
+
+    constructor(apiKey: string) {
+      mockGoogleGenerativeAIConstructor(apiKey); // Track constructor call
+      this.getGenerativeModel = mockGetGenerativeModel; // Assign the mocked method
+    }
+  }
+
+  return {
+    GoogleGenerativeAI: MockGoogleGenerativeAI,
+  };
+});
 // --- End Mocks ---
 
 // Mock the Config module
@@ -80,7 +91,7 @@ describe('Gemini2ProModel', () => {
     // This test covers the validation branch inside the constructor
     const configWithoutApiKey = createMockConfig('');
     expect(() => new Gemini2ProModel(configWithoutApiKey)).toThrow('Gemini API key is missing in the configuration.');
-    expect(mockGoogleGenerativeAI).not.toHaveBeenCalled(); // Ensure the client is not instantiated
+    expect(mockGoogleGenerativeAIConstructor).not.toHaveBeenCalled(); // Ensure the client is not instantiated
   });
 
   it('should initialize with provided API key and default model name', () => {
@@ -88,8 +99,8 @@ describe('Gemini2ProModel', () => {
     const mockConfigInstance = createMockConfig(MOCK_API_KEY, 'gemini-pro'); // Default name
     const model = new Gemini2ProModel(mockConfigInstance);
     expect(model).toBeInstanceOf(Gemini2ProModel);
-    expect(mockGoogleGenerativeAI).toHaveBeenCalledTimes(1);
-    expect(mockGoogleGenerativeAI).toHaveBeenCalledWith(MOCK_API_KEY);
+    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledTimes(1);
+    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledWith(MOCK_API_KEY);
   });
 
   it('should initialize with provided API key and a custom model name', () => {
@@ -98,8 +109,8 @@ describe('Gemini2ProModel', () => {
     const customConfigInstance = createMockConfig(MOCK_API_KEY, customModelName);
     const model = new Gemini2ProModel(customConfigInstance);
     expect(model).toBeInstanceOf(Gemini2ProModel);
-    expect(mockGoogleGenerativeAI).toHaveBeenCalledTimes(1);
-    expect(mockGoogleGenerativeAI).toHaveBeenCalledWith(MOCK_API_KEY);
+    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledTimes(1);
+    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledWith(MOCK_API_KEY);
   });
 
   // Define the GenerateContentRequest for the tests
