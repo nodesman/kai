@@ -3,18 +3,17 @@ import { Config } from '../Config'; // Import Config for type reference
 import Gemini2ProModel from './Gemini2ProModel';
 
 // --- Mocks for @google/generative-ai ---
-// Create mock functions for the API response components
-const mockResponseText = jest.fn();
-const mockResponse = { text: mockResponseText };
+// Using 'var' for top-level mocks referenced in jest.mock to avoid ReferenceError
+// due to hoisting behavior differences between 'const'/'let' and 'var'.
+var mockResponseText = jest.fn();
+var mockResponse = { text: mockResponseText };
 
-// The generateContent method returns a result object with an async 'response' property
-// that resolves to the mockResponse.
-const mockGenerateContent = jest.fn();
-const mockGetGenerativeModel = jest.fn(() => ({
+var mockGenerateContent = jest.fn();
+var mockGetGenerativeModel = jest.fn(() => ({
   generateContent: mockGenerateContent,
 }));
-// Define mockGoogleGenerativeAI to correctly simulate the constructor's expected arguments
-const mockGoogleGenerativeAI = jest.fn((apiKey: string) => ({
+
+var mockGoogleGenerativeAI = jest.fn((apiKey: string) => ({
   getGenerativeModel: mockGetGenerativeModel,
 }));
 
