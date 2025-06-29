@@ -52,4 +52,46 @@ describe('ConsolidationApplier', () => {
     expect(mockFs.writeFile).toHaveBeenCalledTimes(2); // Two writes
     expect(mockFs.deleteFile).toHaveBeenCalledTimes(1); // One delete
   });
+
+  it('should skip deletion if a file no longer exists', async () => {
+    const enoent = Object.assign(new Error('no'), { code: 'ENOENT' });
+    mockFs.access.mockRejectedValueOnce(enoent);
+    const finalStates: FinalFileStates = { 'gone.txt': 'DELETE_CONFIRMED' };
+
+    const result = await applier.apply(finalStates, projectRoot);
+
+    expect(result).toEqual({ success: 0, failed: 0, skipped: 1, summary: [expect.stringContaining('Skipped delete')] });
+    expect(mockFs.deleteFile).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it('should handle delete errors', async () => {
+    const err = Object.assign(new Error('denied'), { code: 'EACCES' });
+    mockFs.access.mockRejectedValueOnce(err);
+    const finalStates: FinalFileStates = { 'bad.txt': 'DELETE_CONFIRMED' };
+
+    const result = await applier.apply(finalStates, projectRoot);
+
+    expect(result.failed).toBe(1);
+    expect(result.success).toBe(0);
+    expect(mockFs.deleteFile).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('should handle write errors', async () => {
+    mockFs.writeFile.mockRejectedValueOnce(new Error('boom'));
+    const finalStates: FinalFileStates = { 'a.ts': 'x' };
+
+    const result = await applier.apply(finalStates, projectRoot);
+
+    expect(result.failed).toBe(1);
+    expect(result.success).toBe(0);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('should treat non-string content as empty on write', async () => {
+    const result = await (applier as any)._applyOperationToFile('weird.txt', 123 as any, projectRoot);
+    expect(result.status).toBe('success');
+    expect(mockFs.writeFile).toHaveBeenCalledWith(expect.any(String), '');
+  });
 });
