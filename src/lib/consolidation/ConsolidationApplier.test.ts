@@ -45,7 +45,7 @@ describe('ConsolidationApplier', () => {
 
     const result = await applier.apply(finalStates, projectRoot);
 
-    expect(result.success).toBe(2); // Two files written/deleted successfully
+    expect(result.success).toBe(3); // Two files written + one file deleted successfully
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(0);
     expect(result.summary.length).toBe(3); // One message per operation

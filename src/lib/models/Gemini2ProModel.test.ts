@@ -1,0 +1,1 @@
+describe('Gemini2ProModel', () => {});
