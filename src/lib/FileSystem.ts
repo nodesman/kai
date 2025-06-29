@@ -356,6 +356,8 @@ class FileSystem {
      * fences are stripped and the remaining diff trimmed before parsing.
      * Returns `true` if the patch was applied, `false` if the patch failed.
      */
+    lastDiffFailure: DiffFailureInfo | null = null;
+
     async applyDiffToFile(filePath: string, diffContent: string): Promise<boolean> {
 
         let cleanedDiff = diffContent;
@@ -369,11 +371,14 @@ class FileSystem {
         try {
             patches = parsePatch(cleanedDiff);
         } catch (err) {
-            await logDiffFailure(this, filePath, cleanedDiff, err instanceof Error ? err.message : String(err));
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: await this.readFile(filePath) ?? '', error: errorMsg };
+            await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, errorMsg);
             return false;
         }
         if (patches.length === 0) {
-            await logDiffFailure(this, filePath, cleanedDiff);
+            this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: await this.readFile(filePath) ?? '', error: 'No patch data' };
+            await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, 'No patch data');
             return false;
         }
 
@@ -399,14 +404,17 @@ class FileSystem {
                 if (fuzzy !== null) {
                     result = fuzzy;
                 } else {
-                    await logDiffFailure(this, filePath, cleanedDiff);
+                    this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: original, error: 'Fuzzy patch failed' };
+                    await logDiffFailure(this, filePath, cleanedDiff, original, 'Fuzzy patch failed');
                     return false;
                 }
             }
             await this.writeFile(filePath, result);
             return true;
         } catch (err) {
-            await logDiffFailure(this, filePath, cleanedDiff, err instanceof Error ? err.message : String(err));
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: await this.readFile(filePath) ?? '', error: errorMsg };
+            await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, errorMsg);
             return false;
         }
     }
@@ -462,14 +470,29 @@ function fuzzyApplyPatch(original: string, patch: ParsedDiff): string | null {
     return lines.join('\n');
 }
 
-export async function logDiffFailure(fs: FileSystem, filePath: string, diffContent: string, error?: string): Promise<void> {
+export interface DiffFailureInfo {
+    file: string;
+    diff: string;
+    fileContent: string;
+    error?: string;
+}
+
+export async function logDiffFailure(
+    fs: FileSystem,
+    filePath: string,
+    diffContent: string,
+    fileContent?: string,
+    error?: string
+): Promise<void> {
     const logsDir = path.resolve('.kai/logs');
     const logFile = path.join(logsDir, 'diff_failures.jsonl');
-    const entry: { file: string; timestamp: string; diff?: string; error?: string } = {
+    const entry: DiffFailureInfo & { timestamp: string } = {
         file: filePath,
+        diff: diffContent,
+        fileContent: fileContent ?? '',
         timestamp: new Date().toISOString(),
     };
-    if (error) entry.error = error; else entry.diff = diffContent;
+    if (error) entry.error = error;
     try {
         await fs.ensureDirExists(logsDir);
         await fs.appendJsonlFile(logFile, entry);

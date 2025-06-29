@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import chalk from 'chalk';
 import { Config } from './Config';
-import { FileSystem } from './FileSystem';
+import { FileSystem, DiffFailureInfo } from './FileSystem';
 import { AIClient, LogEntryData } from './AIClient';
 import { UserInterface } from './UserInterface';
 import Conversation, { Message, JsonlLogEntry } from './models/Conversation';
@@ -301,6 +301,29 @@ export class ConversationManager {
             }
         } else {
             console.error(chalk.red("Could not log error to conversation file (path or AI client unavailable)."));
+        }
+    }
+
+    /** Logs a diff failure to the conversation so the AI can correct it. */
+    async handleDiffFailure(
+        conversation: Conversation,
+        conversationFilePath: string,
+        info: DiffFailureInfo
+    ): Promise<void> {
+        const lines = [
+            `[Diff Apply Failure] File: ${info.file}`,
+            info.error ? `Error: ${info.error}` : undefined,
+            'Current file contents:',
+            info.fileContent,
+            'Failed diff:',
+            info.diff
+        ].filter(Boolean).join('\n');
+
+        conversation.addMessage('system', lines);
+        try {
+            await this.aiClient.logConversation(conversationFilePath, { type: 'system', role: 'system', content: lines });
+        } catch (err) {
+            console.error(chalk.red('Failed to log diff failure:'), err);
         }
     }
 

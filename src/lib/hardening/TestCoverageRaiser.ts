@@ -77,7 +77,8 @@ export class TestCoverageRaiser {
 
             const applied = await this.fs.applyDiffToFile(testPath, diff);
             if (!applied) {
-                await logDiffFailure(this.fs, testPath, diff);
+                const info = this.fs.lastDiffFailure || { file: testPath, diff, fileContent: testContent };
+                await logDiffFailure(this.fs, info.file, info.diff, info.fileContent, info.error);
                 break;
             }
 
