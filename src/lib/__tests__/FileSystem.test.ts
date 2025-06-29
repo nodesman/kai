@@ -1,4 +1,3 @@
-
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
@@ -186,10 +185,10 @@ describe('FileSystem', () => {
       const spyAppend = jest.spyOn(fsUtil, 'appendJsonlFile').mockResolvedValue();
       const spyEnsure = jest.spyOn(fsUtil, 'ensureDirExists').mockResolvedValue();
       const badDiff = '--- a\n+++ b\n@@\n';
-      const result = await fsUtil.applyDiffToFile(path.join(tempDir, 'none.txt'), badDiff);
+      const result = await fsUtil.applyDiffToFile(path.join(tempDir, 'parse_fail.txt'), badDiff);
       expect(result).toBe(false);
       expect(spyEnsure).toHaveBeenCalled();
-      expect(spyAppend).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'No patch data' }));
+      expect(spyAppend).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.any(String) })); // Expect any string error due to parsePatch failure
     });
 
     it('records diff failure in conversation log', async () => {

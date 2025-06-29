@@ -1,27 +1,50 @@
 import { ConsolidationAnalyzer } from './ConsolidationAnalyzer';
+import { AIClient } from '../AIClient'; // Import AIClient
+import { Message } from '../models/Conversation'; // Import Message
+
+// Mock AIClient
+jest.mock('../AIClient');
+
+// Mock console methods to suppress output during tests
+jest.spyOn(console, 'log').mockImplementation(() => {});
+jest.spyOn(console, 'warn').mockImplementation(() => {});
+jest.spyOn(console, 'error').mockImplementation(() => {});
 
 describe('ConsolidationAnalyzer', () => {
   let analyzer: ConsolidationAnalyzer;
+  let mockAIClient: jest.Mocked<AIClient>;
 
   beforeEach(() => {
-    analyzer = new ConsolidationAnalyzer();
-  });
-
-  it('should be defined', () => {
+    jest.clearAllMocks();
+    mockAIClient = new AIClient({} as any) as jest.Mocked<AIClient>; // Create a mock AIClient instance
+    // Mock getResponseTextFromAI for the AIClient
+    mockAIClient.getResponseTextFromAI.mockResolvedValue(JSON.stringify({ operations: [] }));
+    analyzer = new ConsolidationAnalyzer(mockAIClient); // Pass the mock AIClient
     expect(analyzer).toBeDefined();
   });
 
-  it('should return an empty result for an empty array of items', () => {
-    const result = analyzer.analyze([]);
-    expect(result).toEqual({ summary: 'No items to analyze', consolidatedItems: [] });
+  it('should be defined', () => {
+    // Already covered in beforeEach
   });
 
-  it('should analyze a small array of items and mark them as processed', () => {
+  it('should return an empty operations array when AI returns empty operations', async () => {
+    mockAIClient.getResponseTextFromAI.mockResolvedValueOnce(JSON.stringify({ operations: [] }));
+    const result = await analyzer.analyze([], 'mock_context', '/path/conv.jsonl', false, 'mock_model');
+    expect(result).toEqual({ operations: [] });
+    expect(mockAIClient.getResponseTextTextFromAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('should analyze a small array of items and return operations from AI', async () => {
     const items = [{ id: 1, name: 'Item A' }, { id: 2, name: 'Item B' }];
-    const result = analyzer.analyze(items);
-    expect(result.summary).toContain('Analyzed 2 items');
-    expect(result.consolidatedItems.length).toBe(2);
-    expect(result.consolidatedItems[0]).toEqual(expect.objectContaining({ id: 1, name: 'Item A', processed: true }));
-    expect(result.consolidatedItems[1]).toEqual(expect.objectContaining({ id: 2, name: 'Item B', processed: true }));
+    const mockOperations = [
+        { filePath: 'src/file1.ts', action: 'CREATE' },
+        { filePath: 'src/file2.ts', action: 'MODIFY' },
+    ];
+    mockAIClient.getResponseTextFromAI.mockResolvedValueOnce(JSON.stringify({ operations: mockOperations }));
+
+    const result = await analyzer.analyze(items as unknown as Message[], 'mock_context', '/path/conv.jsonl', false, 'mock_model');
+    expect(result.operations.length).toBe(2);
+    expect(result.operations).toEqual(mockOperations);
+    expect(mockAIClient.getResponseTextFromAI).toHaveBeenCalledTimes(1);
   });
 });
