@@ -160,6 +160,7 @@ describe('FileSystem', () => {
         expect(entry.diff.includes('```')).toBe(false);
         expect(entry.fileContent).toBe('original\n');
         expect(entry.error).toBe('Fuzzy patch failed');
+        expect(fs.readFileSync(filePath, 'utf8')).toBe('original\n');
       } finally {
         process.chdir(cwd);
       }
