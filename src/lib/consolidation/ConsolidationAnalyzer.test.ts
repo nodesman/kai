@@ -30,8 +30,8 @@ describe('ConsolidationAnalyzer', () => {
   it('should return an empty operations array when AI returns empty operations', async () => {
     mockAIClient.getResponseTextFromAI.mockResolvedValueOnce(JSON.stringify({ operations: [] }));
     const result = await analyzer.analyze([], 'mock_context', '/path/conv.jsonl', false, 'mock_model');
-    expect(result).toEqual({ operations: [] });
-    expect(mockAIClient.getResponseTextTextFromAI).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ operations: [] }); // Expect the structure returned by analyze
+    expect(mockAIClient.getResponseTextFromAI).toHaveBeenCalledTimes(1);
   });
 
   it('should analyze a small array of items and return operations from AI', async () => {
