@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, GenerateContentRequest, Content } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerateContentRequest, Content, FinishReason } from '@google/generative-ai';
 import { Config } from '../Config'; // Import Config for type reference
 import Gemini2ProModel from './Gemini2ProModel';
 
@@ -31,6 +31,13 @@ jest.mock('@google/generative-ai', () => {
   }
 
   return {
+    // Crucially, export FinishReason here so the model can access it
+    // Mock only the values actually used in the model's logic
+    FinishReason: {
+      STOP: 'STOP',
+      SAFETY: 'SAFETY',
+      MAX_TOKENS: 'MAX_TOKENS',
+    },
     GoogleGenerativeAI: MockGoogleGenerativeAI,
   };
 });
@@ -124,10 +131,10 @@ describe('Gemini2ProModel', () => {
     let defaultMockConfig: Config;
 
     beforeEach(() => {
-      // Re-initialize the model for each 'generateContent' test to ensure a clean state
+      jest.clearAllMocks(); // <--- Moved clearAllMocks to before model instantiation
+      // Re-initialize the model for each 'generateContent' test to ensure a clean state after clearing mocks
       defaultMockConfig = createMockConfig(MOCK_API_KEY, 'gemini-pro');
       model = new Gemini2ProModel(defaultMockConfig);
-      jest.clearAllMocks(); // Clear mocks for the new model instance
 
       // Reset mock implementations for the generation process
       mockResponseText.mockReturnValue(MOCK_GENERATED_TEXT);
