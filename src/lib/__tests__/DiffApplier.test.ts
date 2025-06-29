@@ -98,4 +98,45 @@ describe('applyDiffIteratively', () => {
     // The current test for logDiffFailure in FileSystem.test.ts covers that.
     // So, this test should not assert logDiffFailure calls, as it's testing applyDiffIteratively's retry logic.
   });
+
+  it('returns false immediately when AI call fails', async () => {
+    const filePath = 'src/file.ts';
+    const initialDiff = 'initial-diff';
+
+    fsMock.applyDiffToFile.mockResolvedValue(false);
+    // No lastDiffFailure so applyDiffIteratively falls back to reading the file
+    fsMock.readFile = jest.fn().mockResolvedValue('current');
+
+    const err = new Error('network');
+    aiMock.getResponseTextFromAI.mockRejectedValue(err);
+
+    const result = await applyDiffIteratively(fsMock, aiMock, filePath, initialDiff, 2);
+
+    expect(result).toBe(false);
+    expect(fsMock.applyDiffToFile).toHaveBeenCalledTimes(1);
+    expect(fsMock.readFile).toHaveBeenCalledWith(filePath);
+    expect(aiMock.getResponseTextFromAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses empty string when file read returns nullish', async () => {
+    const filePath = 'src/file.ts';
+    const initialDiff = 'initial-diff';
+    const correctedDiff = 'corrected-diff';
+
+    fsMock.applyDiffToFile
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    fsMock.readFile = jest.fn().mockResolvedValue(undefined);
+    aiMock.getResponseTextFromAI.mockResolvedValueOnce(correctedDiff);
+
+    const result = await applyDiffIteratively(fsMock, aiMock, filePath, initialDiff, 2);
+
+    expect(result).toBe(true);
+    expect(fsMock.readFile).toHaveBeenCalledWith(filePath);
+    expect(aiMock.getResponseTextFromAI).toHaveBeenCalledWith([
+      { role: 'user', content: DiffFixPrompts.fixPatch(filePath, '', initialDiff, '') }
+    ], false);
+    expect(fsMock.applyDiffToFile).toHaveBeenCalledTimes(2);
+  });
 });

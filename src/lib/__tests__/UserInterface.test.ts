@@ -91,6 +91,13 @@ describe('UserInterface', () => {
     expect(ui.extractNewPrompt(`    \n${sep}\n`)).toBeNull();
   });
 
+  it('warns when separator missing', () => {
+    const ui = new UserInterface({} as any);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(ui.extractNewPrompt('hello')).toBe('hello');
+    expect(warn).toHaveBeenCalled();
+  });
+
   describe('getPromptViaSublimeLoop', () => {
     let ui: UserInterface;
     const origSpawn = jest.requireActual('child_process').spawn;
@@ -262,6 +269,247 @@ describe('UserInterface', () => {
       const res = await ui.getUserInteraction();
       expect(res).toBeNull();
       expect(errSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('selectOrCreateConversation', () => {
+    let ui: UserInterface;
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface(baseConfig as any);
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    it('returns existing conversation when selected', async () => {
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue(['c1']);
+      (inquirer.prompt as jest.Mock).mockResolvedValueOnce({ selected: 'c1' });
+      const res = await ui.selectOrCreateConversation();
+      expect(res).toEqual({ name: 'c1', isNew: false });
+    });
+
+    it('creates new conversation when name not taken', async () => {
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue(['c1']);
+      let question: any;
+      (inquirer.prompt as jest.Mock)
+        .mockImplementationOnce(async qs => { return { selected: '<< Create New Conversation >>' }; })
+        .mockImplementationOnce(async qs => { question = qs[0]; return { newName: 'My Chat' }; });
+      const res = await ui.selectOrCreateConversation();
+      expect(question.validate('')).toBe('Conversation name cannot be empty.');
+      expect(question.validate('x')).toBe(true);
+      expect(question.filter('  x ')).toBe('x');
+      expect(res).toEqual({ name: 'My Chat', isNew: true });
+    });
+
+    it('reuses conversation when name already exists', async () => {
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue(['my_chat']);
+      const warn = console.warn as jest.Mock;
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ selected: '<< Create New Conversation >>' })
+        .mockResolvedValueOnce({ newName: 'My Chat' });
+      const res = await ui.selectOrCreateConversation();
+      expect(res).toEqual({ name: 'my_chat', isNew: false });
+      expect(warn).toHaveBeenCalled();
+    });
+  });
+
+  describe('_detectJest', () => {
+    let ui: UserInterface;
+    const fsPromises = require('fs/promises');
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface(baseConfig as any);
+    });
+
+    it('detects jest via package.json', async () => {
+      jest.spyOn(fsPromises, 'readFile').mockResolvedValue(JSON.stringify({ devDependencies: { jest: '^1' } }));
+      const res = await (ui as any)._detectJest();
+      expect(res).toBe(true);
+    });
+
+    it('detects jest via config file', async () => {
+      jest.spyOn(fsPromises, 'readFile').mockRejectedValue(new Error('x'));
+      jest.spyOn(fsPromises, 'access').mockResolvedValue(undefined);
+      const res = await (ui as any)._detectJest();
+      expect(res).toBe(true);
+    });
+
+    it('returns false when not detected', async () => {
+      jest.spyOn(fsPromises, 'readFile').mockRejectedValue(new Error('x'));
+      jest.spyOn(fsPromises, 'access').mockRejectedValue(new Error('x'));
+      const res = await (ui as any)._detectJest();
+      expect(res).toBe(false);
+    });
+  });
+
+  describe('additional getPromptViaSublimeLoop flows', () => {
+    let ui: UserInterface;
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface({ chatsDir: '/chats', context: {} } as any);
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    it('handles missing editor file', async () => {
+      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
+      jest.spyOn(require('fs/promises'), 'access').mockRejectedValue(Object.assign(new Error('x'), { code: 'ENOENT' }));
+      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
+      expect(res.newPrompt).toBeNull();
+    });
+
+    it('returns null when no changes made', async () => {
+      let content = '';
+      jest.spyOn(ui.fs, 'writeFile').mockImplementation((_f, d) => { content = d; return Promise.resolve(); });
+      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
+      jest.spyOn(ui.fs, 'readFile').mockImplementation(async () => content);
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
+      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
+      expect(res.newPrompt).toBeNull();
+    });
+
+    it('returns null when no prompt extracted', async () => {
+      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
+      jest.spyOn(ui.fs, 'readFile').mockResolvedValue('   \n--- TYPE YOUR PROMPT ABOVE THIS LINE ---\nold');
+      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
+      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
+      expect(res.newPrompt).toBeNull();
+    });
+
+    it('throws when readFile fails unexpectedly', async () => {
+      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
+      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
+      jest.spyOn(ui.fs, 'readFile').mockRejectedValue(new Error('boom'));
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
+      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow('boom');
+    });
+
+    it('throws when writeFile fails', async () => {
+      jest.spyOn(ui.fs, 'writeFile').mockRejectedValue(new Error('fail'));
+      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
+      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow('fail');
+    });
+  });
+
+  describe('additional getUserInteraction modes', () => {
+    let ui: UserInterface;
+    beforeEach(() => {
+      jest.resetAllMocks();
+      ui = new UserInterface(baseConfig as any);
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(ui.fs, 'ensureKaiDirectoryExists').mockResolvedValue(undefined);
+    });
+
+    it('exits on Exit Kai selection', async () => {
+      (inquirer.prompt as jest.Mock).mockResolvedValueOnce({ mode: 'Exit Kai' });
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+    });
+
+    it('handles Re-run Project Analysis', async () => {
+      (inquirer.prompt as jest.Mock).mockResolvedValueOnce({ mode: 'Re-run Project Analysis' });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Re-run Project Analysis', conversationName: null, isNewConversation: false, selectedModel: '' });
+    });
+
+    it('changes context mode', async () => {
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Change Context Mode' })
+        .mockResolvedValueOnce({ newModeChoice: 'analysis_cache' });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Change Context Mode', newMode: 'analysis_cache' });
+    });
+
+    it('scaffolds new project', async () => {
+      let question: any;
+      (inquirer.prompt as jest.Mock)
+        .mockImplementationOnce(async qs => { return { mode: 'Scaffold New Project' }; })
+        .mockImplementationOnce(async qs => { question = qs[0]; return { directoryName: 'dir' }; })
+        .mockResolvedValueOnce({ language: 'TypeScript' })
+        .mockResolvedValueOnce({ framework: 'Node' });
+      const res = await ui.getUserInteraction();
+      expect(question.validate('')).toBe('Directory name cannot be empty.');
+      expect(question.validate('a')).toBe(true);
+      expect(res).toEqual({ mode: 'Scaffold New Project', language: 'TypeScript', framework: 'Node', directoryName: 'dir' });
+    });
+
+    it('handles Harden mode with no frameworks', async () => {
+      jest.spyOn(ui as any, '_detectJest').mockResolvedValue(false);
+      (inquirer.prompt as jest.Mock).mockResolvedValueOnce({ mode: 'Harden' });
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+    });
+
+    it('handles Harden mode with jest', async () => {
+      jest.spyOn(ui as any, '_detectJest').mockResolvedValue(true);
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Harden' })
+        .mockResolvedValueOnce({ toolChoice: 'Jest' })
+        .mockResolvedValueOnce({ modelChoice: 'm2' });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Harden', tool: 'jest', selectedModel: 'm2' });
+    });
+
+    it('returns null when no conversations exist to delete', async () => {
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue([]);
+      (inquirer.prompt as jest.Mock).mockResolvedValueOnce({ mode: 'Delete Conversation...' });
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+    });
+
+    it('returns null when no conversations selected for deletion', async () => {
+      jest.spyOn(ui.fs, 'listJsonlFiles').mockResolvedValue(['a']);
+      let question:any;
+      (inquirer.prompt as jest.Mock)
+        .mockImplementationOnce(async qs => { return { mode: 'Delete Conversation...' }; })
+        .mockImplementationOnce(async qs => { question = qs[0]; return { conversationsToDelete: [] }; });
+      const res = await ui.getUserInteraction();
+      expect(question.validate([])).toBe(true);
+      expect(res).toBeNull();
+    });
+
+    it('start conversation errors when missing name', async () => {
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: undefined, isNew: false } as any);
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Start/Continue Conversation' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('consolidate errors when name missing', async () => {
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: undefined, isNew: false } as any);
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Consolidate Changes...' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const errSpy = console.error as jest.Mock;
+      const res = await ui.getUserInteraction();
+      expect(res).toBeNull();
+      expect(errSpy).toHaveBeenCalled();
+    });
+
+    it('returns start conversation details', async () => {
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: 'c', isNew: false });
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Start/Continue Conversation' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Start/Continue Conversation', conversationName: 'c', isNewConversation: false, selectedModel: 'm1' });
+    });
+
+    it('returns consolidate conversation details', async () => {
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: 'c', isNew: false });
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Consolidate Changes...' })
+        .mockResolvedValueOnce({ modelChoice: 'm1' });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Consolidate Changes...', conversationName: 'c', isNewConversation: false, selectedModel: 'm1' });
     });
   });
 });
