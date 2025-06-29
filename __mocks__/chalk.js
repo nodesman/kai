@@ -14,5 +14,6 @@ module.exports = {
     cyan: (s) => s,
     magenta: (s) => s,
     gray: (s) => s,
+    grey: (s) => s,
   },
 };
