@@ -3,6 +3,8 @@ import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { FileSystem } from '../FileSystem';
+import Conversation from '../models/Conversation';
+import { ConversationManager } from '../ConversationManager';
 
 describe('FileSystem', () => {
   let tempDir: string;
@@ -157,6 +159,8 @@ describe('FileSystem', () => {
         const entry = JSON.parse(line);
         expect(entry.file).toBe(filePath);
         expect(entry.diff.includes('```')).toBe(false);
+        expect(entry.fileContent).toBe('original\n');
+        expect(entry.error).toBe('Fuzzy patch failed');
       } finally {
         process.chdir(cwd);
       }
@@ -172,7 +176,10 @@ describe('FileSystem', () => {
       expect(result).toBe(false);
       const logPath = path.join(path.resolve('.kai/logs'), 'diff_failures.jsonl');
       expect(spyEnsure).toHaveBeenCalledWith(path.resolve('.kai/logs'));
-      expect(spyAppend).toHaveBeenCalledWith(logPath, expect.objectContaining({ file: filePath }));
+      expect(spyAppend).toHaveBeenCalledWith(
+        logPath,
+        expect.objectContaining({ file: filePath, fileContent: 'orig\n' })
+      );
     });
 
     it('logs failure when no patch data', async () => {
@@ -182,7 +189,29 @@ describe('FileSystem', () => {
       const result = await fsUtil.applyDiffToFile(path.join(tempDir, 'none.txt'), badDiff);
       expect(result).toBe(false);
       expect(spyEnsure).toHaveBeenCalled();
-      expect(spyAppend).toHaveBeenCalled();
+      expect(spyAppend).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'No patch data' }));
+    });
+
+    it('records diff failure in conversation log', async () => {
+      const ai = { logConversation: jest.fn().mockResolvedValue(undefined) } as any;
+      const manager = new ConversationManager({ chatsDir: tempDir, context: { mode: 'full' } } as any, fsUtil, ai, {} as any, {} as any, {} as any);
+      const convo = new Conversation();
+      const convoPath = path.join(tempDir, 'c.jsonl');
+
+      const filePath = path.join(tempDir, 'convfail.txt');
+      fs.writeFileSync(filePath, 'orig\n');
+      const diff = require('diff').createTwoFilesPatch('convfail.txt', 'convfail.txt', 'a\n', 'b\n');
+      const fenced = '```diff\n' + diff.trim() + '\n```';
+      const applied = await fsUtil.applyDiffToFile(filePath, fenced);
+      expect(applied).toBe(false);
+
+      await manager.handleDiffFailure(convo, convoPath, fsUtil.lastDiffFailure!);
+
+      expect(ai.logConversation).toHaveBeenCalledWith(convoPath, expect.objectContaining({ type: 'system', role: 'system' }));
+      const msg = convo.getLastMessage();
+      expect(msg?.role).toBe('system');
+      expect(msg?.content).toContain(fsUtil.lastDiffFailure!.diff);
+      expect(msg?.content).toContain(fsUtil.lastDiffFailure!.fileContent);
     });
   });
 
