@@ -1,6 +1,7 @@
 // File: src/lib/FileSystem.ts
 import fsPromises from 'fs/promises'; // Use promises API
 import { Stats } from 'fs'; // Import Stats type from base 'fs'
+import os from 'os';
 import path from 'path';
 import ignore, { Ignore } from 'ignore'; // Import ignore type as well
 import chalk from 'chalk'; // Import chalk for logging
@@ -419,7 +420,13 @@ class FileSystem {
                 return false;
             }
 
-            await this.writeFile(filePath, result);
+            // Write to a temporary file first to avoid corrupting the original
+            // if something goes wrong during the write.
+            const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'kai-diff-'));
+            const tmpFile = path.join(tmpDir, path.basename(filePath));
+            await this.writeFile(tmpFile, result);
+            await fsPromises.copyFile(tmpFile, filePath);
+            await fsPromises.rm(tmpDir, { recursive: true, force: true });
             return true;
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
