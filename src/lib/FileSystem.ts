@@ -409,6 +409,16 @@ class FileSystem {
                     return false;
                 }
             }
+
+            // If the patch was not a delete operation but produced an empty
+            // result, treat this as a failure. This prevents truncating files
+            // when the diff is incomplete (e.g., missing additions).
+            if (!isDelete && original.trim().length > 0 && result.trim().length === 0) {
+                this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: original, error: 'Patch resulted in empty file' };
+                await logDiffFailure(this, filePath, cleanedDiff, original, 'Patch resulted in empty file');
+                return false;
+            }
+
             await this.writeFile(filePath, result);
             return true;
         } catch (err) {
