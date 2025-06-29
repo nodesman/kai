@@ -280,6 +280,7 @@ class FileSystem {
             throw error;
         }
     }
+
     // --- END JSONL/Directory methods ---
 
     // --- ADDED: Analysis Cache Methods (Milestone 2 - Object Structure) ---
@@ -353,9 +354,15 @@ class FileSystem {
      */
     async applyDiffToFile(filePath: string, diffContent: string): Promise<boolean> {
 
-        const patches = parsePatch(diffContent);
+        let patches;
+        try {
+            patches = parsePatch(diffContent);
+        } catch (err) {
+            await logDiffFailure(this, filePath, diffContent, err instanceof Error ? err.message : String(err));
+            return false;
+        }
         if (patches.length === 0) {
-            console.error(chalk.red('applyDiffToFile: No patch data found.'));
+            await logDiffFailure(this, filePath, diffContent);
             return false;
         }
 
@@ -376,13 +383,13 @@ class FileSystem {
             const original = isCreate ? '' : (await this.readFile(filePath)) ?? '';
             const result = applyPatch(original, diffContent);
             if (result === false) {
-                console.error(chalk.red(`applyDiffToFile: Patch failed for ${filePath}.`));
+                await logDiffFailure(this, filePath, diffContent);
                 return false;
             }
             await this.writeFile(filePath, result);
             return true;
         } catch (err) {
-            console.error(chalk.red(`applyDiffToFile: Error applying patch to ${filePath}:`), err);
+            await logDiffFailure(this, filePath, diffContent, err instanceof Error ? err.message : String(err));
             return false;
         }
     }
@@ -390,3 +397,21 @@ class FileSystem {
 }
 
 export { FileSystem };
+
+export async function logDiffFailure(fs: FileSystem, filePath: string, diffContent: string, error?: string): Promise<void> {
+    const logsDir = path.resolve('.kai/logs');
+    const logFile = path.join(logsDir, 'diff_failures.jsonl');
+    const entry: { file: string; timestamp: string; diff?: string; error?: string } = {
+        file: filePath,
+        timestamp: new Date().toISOString(),
+    };
+    if (error) entry.error = error; else entry.diff = diffContent;
+    try {
+        await fs.ensureDirExists(logsDir);
+        await fs.appendJsonlFile(logFile, entry);
+    } catch (logErr) {
+        console.error(chalk.red(`Error logging diff failure for ${filePath}:`), logErr);
+        return;
+    }
+    console.error(chalk.red(`Failed to apply diff for ${filePath}. Details logged at ${logFile}`));
+}

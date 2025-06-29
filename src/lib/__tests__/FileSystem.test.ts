@@ -113,6 +113,29 @@ describe('FileSystem', () => {
       const result = await fsUtil.applyDiffToFile(filePath, diff);
       expect(result).toBe(false);
     });
+
+    it('logs failure when patch fails', async () => {
+      const filePath = path.join(tempDir, 'logfail.txt');
+      fs.writeFileSync(filePath, 'orig\n');
+      const diff = require('diff').createTwoFilesPatch('logfail.txt', 'logfail.txt', 'a\n', 'b\n');
+      const spyAppend = jest.spyOn(fsUtil, 'appendJsonlFile').mockResolvedValue();
+      const spyEnsure = jest.spyOn(fsUtil, 'ensureDirExists').mockResolvedValue();
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(false);
+      const logPath = path.join(path.resolve('.kai/logs'), 'diff_failures.jsonl');
+      expect(spyEnsure).toHaveBeenCalledWith(path.resolve('.kai/logs'));
+      expect(spyAppend).toHaveBeenCalledWith(logPath, expect.objectContaining({ file: filePath }));
+    });
+
+    it('logs failure when no patch data', async () => {
+      const spyAppend = jest.spyOn(fsUtil, 'appendJsonlFile').mockResolvedValue();
+      const spyEnsure = jest.spyOn(fsUtil, 'ensureDirExists').mockResolvedValue();
+      const badDiff = '--- a\n+++ b\n@@\n';
+      const result = await fsUtil.applyDiffToFile(path.join(tempDir, 'none.txt'), badDiff);
+      expect(result).toBe(false);
+      expect(spyEnsure).toHaveBeenCalled();
+      expect(spyAppend).toHaveBeenCalled();
+    });
   });
 
   describe('error and edge cases', () => {
