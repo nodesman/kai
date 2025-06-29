@@ -12,7 +12,7 @@ export async function applyDiffIteratively(
     ai: AIClient,
     filePath: string,
     diff: string,
-    maxAttempts = 3
+    maxAttempts = 10
 ): Promise<boolean> {
     let currentDiff = diff;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {

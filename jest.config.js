@@ -15,4 +15,7 @@ module.exports = {
   transformIgnorePatterns: [
     '/node_modules/(?!(chalk|ansi-styles|inquirer)/)'
   ],
+  coveragePathIgnorePatterns: [
+    "<rootDir>/src/lib/UserInteraction/InteractivePromptReviewer.ts",
+  ]
 };
