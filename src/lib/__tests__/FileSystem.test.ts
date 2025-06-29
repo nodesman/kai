@@ -103,6 +103,15 @@ describe('FileSystem', () => {
       expect(fs.readFileSync(filePath, 'utf8')).toBe('newfile\n');
     });
 
+    it('creates a new file when diff is wrapped in fences', async () => {
+      const filePath = path.join(tempDir, 'fenced.txt');
+      const diff = require('diff').createTwoFilesPatch('/dev/null', 'fenced.txt', '', 'hello\n');
+      const fenced = '```diff\n' + diff.trim() + '\n```';
+      const result = await fsUtil.applyDiffToFile(filePath, fenced);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('hello\n');
+    });
+
     it('deletes a file from patch', async () => {
       const filePath = path.join(tempDir, 'del.txt');
       fs.writeFileSync(filePath, 'remove\n');
