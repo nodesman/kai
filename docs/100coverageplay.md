@@ -2,6 +2,8 @@
 
 This plan outlines a phased approach to increase test coverage, focusing on critical modules first. Each phase identifies specific modules and testing priorities. You don't need to tackle everything at once; complete Phase 1, then move on to subsequent phases.
 
+For details on Kai's automated hardening command, see the [Hardening Workflow](../README.md#hardening-workflow) section in the README.
+
 -----
 
 ## 📊 Phase 1 — Foundation & I/O Primitives
