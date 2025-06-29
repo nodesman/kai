@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI, GenerateContentRequest, Content, FinishReason } from '@google/generative-ai';
 import { Config } from '../Config'; // Import Config for type reference
 import Gemini2ProModel from './Gemini2ProModel';
+import { InteractivePromptReviewer } from '../UserInteraction/InteractivePromptReviewer';
 
 // --- Mocks for @google/generative-ai ---
 // Using 'var' for top-level mocks referenced in jest.mock to avoid ReferenceError
@@ -207,7 +208,7 @@ describe('Gemini2ProModel', () => {
       expect(text).toBe(MOCK_GENERATED_TEXT); // Check actual text content
     });
 
-    it('should handle errors from the Gemini API during content generation', async () => {
+  it('should handle errors from the Gemini API during content generation', async () => {
       const errorMessage = 'API error occurred during generation';
       // Simulate a rejected promise from generateContent
       mockGenerateContent.mockRejectedValue(new Error(errorMessage));
@@ -216,6 +217,185 @@ describe('Gemini2ProModel', () => {
       expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
       expect(mockGenerateContent).toHaveBeenCalledTimes(1);
       expect(mockResponseText).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Additional method coverage ---
+  describe('convertToGeminiConversation', () => {
+    it('merges consecutive roles and warns when ending with model message', () => {
+      const config = createMockConfig(MOCK_API_KEY);
+      const model = new Gemini2ProModel(config);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const messages = [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+        { role: 'assistant', content: 'c' }
+      ];
+      const conv = model.convertToGeminiConversation(messages as any);
+      expect(conv).toEqual([
+        { role: 'user', parts: [{ text: 'a' }] },
+        { role: 'model', parts: [{ text: 'b' }, { text: 'c' }] }
+      ]);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('getResponseFromAI', () => {
+    it('throws on empty history', async () => {
+      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      await expect(model.getResponseFromAI([] as any)).rejects.toThrow('Cannot get AI response with empty message history.');
+    });
+
+    it('converts messages then queries chat', async () => {
+      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      const convertSpy = jest.spyOn(model, 'convertToGeminiConversation').mockReturnValue([{ role: 'user', parts: [{ text: 'q' }] }]);
+      const querySpy = jest.spyOn(model, 'queryGeminiChat').mockResolvedValue('resp');
+      const messages = [{ role: 'user', content: 'hi' }];
+      const result = await model.getResponseFromAI(messages as any);
+      expect(convertSpy).toHaveBeenCalledWith(messages as any);
+      expect(querySpy).toHaveBeenCalledWith([{ role: 'user', parts: [{ text: 'q' }] }]);
+      expect(result).toBe('resp');
+    });
+  });
+
+  describe('queryGeminiChat', () => {
+    let model: Gemini2ProModel;
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockSendMessage.mockResolvedValue({ response: { text: () => 'ok' } });
+      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+    });
+
+    it('sends prompt directly when interactive review disabled', async () => {
+      const convo = [
+        { role: 'user', parts: [{ text: 'a' }] }
+      ];
+      const res = await model.queryGeminiChat(convo as any);
+      expect(mockStartChat).toHaveBeenCalled();
+      expect(mockSendMessage).toHaveBeenCalledWith('a');
+      expect(res).toBe('ok');
+    });
+
+    it('handles interactive review', async () => {
+      const config = createMockConfig(MOCK_API_KEY);
+      config.gemini.interactive_prompt_review = true;
+      mockReviewPrompt.mockResolvedValue('edited');
+      model = new Gemini2ProModel(config);
+      await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
+      expect(mockReviewPrompt).toHaveBeenCalledWith('a');
+      expect(mockSendMessage).toHaveBeenCalledWith('edited');
+    });
+
+    it('returns empty string when user cancels', async () => {
+      const config = createMockConfig(MOCK_API_KEY);
+      config.gemini.interactive_prompt_review = true;
+      mockReviewPrompt.mockResolvedValue(null);
+      model = new Gemini2ProModel(config);
+      const res = await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
+      expect(res).toBe('');
+    });
+
+    it('calls handleError on sendMessage failure', async () => {
+      const err = new Error('boom');
+      mockSendMessage.mockRejectedValue(err);
+      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      const handleSpy = jest.spyOn(model, 'handleError').mockImplementation(() => {});
+      const res = await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
+      expect(handleSpy).toHaveBeenCalledWith(err, 'gemini-pro');
+      expect(res).toBe('');
+    });
+  });
+
+  describe('handleError', () => {
+    let model: Gemini2ProModel;
+    beforeEach(() => {
+      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+    });
+
+    const cases: [any, string][] = [
+      [Object.assign(new Error('FETCH_ERROR'), { name: 'FetchError' }), 'NETWORK_ERROR'],
+      [new Error('[GoogleGenerativeAI Error] 429'), 'RATE_LIMIT'],
+      [new Error('[GoogleGenerativeAI Error] 400 Bad Request: model not found'), 'INVALID_MODEL'],
+      [{ status: 400, message: 'model not found' }, 'INVALID_MODEL'],
+      [{ status: 503, message: 'backend error' }, 'SERVER_OVERLOADED'],
+      [{ code: 'EACCES', message: 'denied' }, 'EACCES'],
+      [new Error('[GoogleGenerativeAI Error] recitation'), 'RECITATION_BLOCK'],
+      [new Error('oops'), 'UNKNOWN'],
+    ];
+
+    for (const [err, code] of cases) {
+      it(`classifies error code ${code}`, () => {
+        try {
+          model.handleError(err, 'gemini-pro');
+        } catch (e: any) {
+          expect(e.code).toBe(code);
+        }
+      });
+    }
+  });
+
+  describe('constructor error handling', () => {
+    it('throws when generative model cannot be created', () => {
+      mockGetGenerativeModel.mockImplementation(() => { throw new Error('bad'); });
+      const cfg = createMockConfig(MOCK_API_KEY);
+      expect(() => new Gemini2ProModel(cfg)).toThrow('Failed to get generative model for gemini-pro');
+    });
+  });
+
+  describe('queryGeminiChat error paths', () => {
+    it('handles missing content error via handleError', async () => {
+      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      mockSendMessage.mockResolvedValue({ response: {} });
+      await expect(model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any)).rejects.toThrow(/AI API Error/);
+    });
+
+    it('propagates safety block reason', async () => {
+      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      mockSendMessage.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.SAFETY, safetyRatings: { score: 1 } }] } });
+      await expect(model.queryGeminiChat([{ role: 'user', parts: [{ text: 'x' }] }] as any)).rejects.toThrow(/SAFETY/);
+    });
+  });
+
+  describe('generateContent edge cases', () => {
+    let model: Gemini2ProModel;
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockResponseText.mockReturnValue('done');
+      mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat });
+      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+    });
+
+    it('throws when result missing', async () => {
+      mockGenerateContent.mockResolvedValue({});
+      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(/unexpectedly empty/);
+    });
+
+    it('throws block error on safety finishReason', async () => {
+      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.SAFETY, safetyRatings: {flag:true} }] } });
+      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(/generation blocked/);
+    });
+
+    it('warns when no text with stop reason', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.STOP, content: { parts: [] } }] } });
+      await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('produced no text'));
+      warn.mockRestore();
+    });
+
+    it('retries on network error then succeeds', async () => {
+      jest.spyOn(global.Math, 'random').mockReturnValue(0);
+      const cfg = createMockConfig(MOCK_API_KEY);
+      cfg.gemini.generation_max_retries = 1;
+      cfg.gemini.generation_retry_base_delay_ms = 0;
+      mockGenerateContent
+        .mockRejectedValueOnce(Object.assign(new Error('ECONNRESET'), { message: 'ECONNRESET' }))
+        .mockResolvedValueOnce({ response: { text: () => 'hi' } });
+      model = new Gemini2ProModel(cfg);
+      const result = await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
+      expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+      expect(result.response.text()).toBe('hi');
     });
   });
 });
