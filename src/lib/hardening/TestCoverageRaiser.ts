@@ -1,7 +1,7 @@
 import path from 'path';
 import chalk from 'chalk';
 import { Config } from '../Config';
-import { FileSystem } from '../FileSystem';
+import { FileSystem, logDiffFailure } from '../FileSystem';
 import { CommandService } from '../CommandService';
 import { AIClient } from '../AIClient';
 import { TestCoveragePrompts } from './TestCoveragePrompts';
@@ -37,9 +37,9 @@ export class TestCoverageRaiser {
             return;
         }
 
-        await this._runJestCoverage();
         const summaryPath = path.join(this.projectRoot, 'coverage', 'coverage-summary.json');
-        const summary = await this._readCoverageSummary(summaryPath);
+        await this._runJestCoverage();
+        let summary = await this._readCoverageSummary(summaryPath);
         if (!summary) {
             console.log(chalk.red('Coverage summary not found.'));
             return;
@@ -50,29 +50,45 @@ export class TestCoverageRaiser {
             console.log(chalk.green('All files fully covered.'));
             return;
         }
+
         console.log(chalk.cyan(`Generating tests for ${targetFile}...`));
-        const fileContent = await this.fs.readFile(targetFile);
-        if (!fileContent) {
-            console.log(chalk.red(`Unable to read ${targetFile}`));
-            return;
-        }
-
-        // When looking up in summary, the keys are typically either absolute paths
-        // or paths relative to the project root. We need to find the correct key for 'summary'.
-        let coverageInfoEntry = summary[targetFile]; // Try absolute path first
-        if (!coverageInfoEntry) {
-            const relativeTargetPath = path.relative(this.projectRoot, targetFile);
-            coverageInfoEntry = summary[relativeTargetPath]; // Then try relative path
-        }
-        const coverageInfo = JSON.stringify(coverageInfoEntry || {});
-
-        const prompt = TestCoveragePrompts.generateTests(targetFile, fileContent, coverageInfo);
-        const testContent = await this.aiClient.getResponseTextFromAI([
-            { role: 'user', content: prompt }
-        ], false);
         const testPath = this._deriveTestPath(targetFile);
-        await this.fs.writeFile(testPath, testContent);
-        console.log(chalk.green(`Test written to ${testPath}`));
+        let testContent = await this.fs.readFile(testPath);
+
+        if (testContent === null) {
+            const stub = `describe('${path.basename(targetFile, path.extname(targetFile))}', () => {});`;
+            await this.fs.writeFile(testPath, stub);
+            testContent = stub;
+        }
+
+        for (let i = 0; i < (this.config.project.coverage_iterations ?? 1); i++) {
+            let coverageInfoEntry = summary[targetFile];
+            if (!coverageInfoEntry) {
+                const rel = path.relative(this.projectRoot, targetFile);
+                coverageInfoEntry = summary[rel];
+            }
+            const coverageInfo = JSON.stringify(coverageInfoEntry || {});
+
+            testContent = (await this.fs.readFile(testPath)) ?? '';
+            const prompt = TestCoveragePrompts.generateTestDiff(testPath, testContent, coverageInfo);
+            const diff = await this.aiClient.getResponseTextFromAI([
+                { role: 'user', content: prompt }
+            ], false);
+
+            const applied = await this.fs.applyDiffToFile(testPath, diff);
+            if (!applied) {
+                await logDiffFailure(this.fs, testPath, diff);
+                break;
+            }
+
+            await this._runJestCoverage();
+            summary = await this._readCoverageSummary(summaryPath);
+            if (!summary) break;
+            coverageInfoEntry = summary[targetFile] || summary[path.relative(this.projectRoot, targetFile)];
+            if (coverageInfoEntry?.lines?.pct === 100) {
+                break;
+            }
+        }
     }
 
     private _deriveTestPath(file: string): string {
