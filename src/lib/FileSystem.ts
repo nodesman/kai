@@ -1,4 +1,5 @@
 // File: src/lib/FileSystem.ts
+import fs from 'fs';
 import fsPromises from 'fs/promises'; // Use promises API
 import { Stats } from 'fs'; // Import Stats type from base 'fs'
 import os from 'os';
@@ -26,6 +27,29 @@ const SAFE_TO_IGNORE_FOR_EMPTY_CHECK = new Set([
 ]);
 
 class FileSystem {
+
+    // Synchronous wrappers for backward compatibility
+    static existsSync(p: string): boolean {
+        return fs.existsSync(p);
+    }
+
+    static readFileSync(p: string, encoding: BufferEncoding = 'utf-8'): string {
+        return fs.readFileSync(p, { encoding }) as unknown as string;
+    }
+
+    static writeFileSync(p: string, content: string): void {
+        const dir = path.dirname(p);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(p, content, 'utf-8');
+    }
+
+    static mkdirSync(dir: string): void {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+
+    static rmSync(p: string, options?: fs.RmOptions): void {
+        fs.rmSync(p, options as fs.RmOptions);
+    }
 
     // --- Common FS methods (remain unchanged) ---
     async access(filePath: string): Promise<void> {
