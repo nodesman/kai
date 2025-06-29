@@ -80,6 +80,12 @@ describe('FileSystem', () => {
   });
 
   describe('applyDiffToFile', () => {
+    afterEach(() => {
+      const logDir = path.join(tempDir, '.kai');
+      if (fs.existsSync(logDir)) {
+        fs.rmSync(logDir, { recursive: true, force: true });
+      }
+    });
     it('applies patch to modify file', async () => {
       const filePath = path.join(tempDir, 'a.txt');
       fs.writeFileSync(filePath, 'hello\n');
@@ -107,11 +113,23 @@ describe('FileSystem', () => {
     });
 
     it('returns false when patch fails', async () => {
-      const filePath = path.join(tempDir, 'fail.txt');
-      fs.writeFileSync(filePath, 'original\n');
-      const diff = require('diff').createTwoFilesPatch('fail.txt', 'fail.txt', 'hello\n', 'hi\n');
-      const result = await fsUtil.applyDiffToFile(filePath, diff);
-      expect(result).toBe(false);
+      const cwd = process.cwd();
+      process.chdir(tempDir);
+      try {
+        const filePath = path.join(tempDir, 'fail.txt');
+        fs.writeFileSync(filePath, 'original\n');
+        const diff = require('diff').createTwoFilesPatch('fail.txt', 'fail.txt', 'hello\n', 'hi\n');
+        const result = await fsUtil.applyDiffToFile(filePath, diff);
+        expect(result).toBe(false);
+
+        const logFile = path.join(tempDir, '.kai/logs/diff_failures.jsonl');
+        expect(fs.existsSync(logFile)).toBe(true);
+        const line = fs.readFileSync(logFile, 'utf8').trim().split('\n')[0];
+        const entry = JSON.parse(line);
+        expect(entry.file).toBe(filePath);
+      } finally {
+        process.chdir(cwd);
+      }
     });
 
     it('logs failure when patch fails', async () => {
