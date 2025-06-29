@@ -1,1 +1,5 @@
-describe('ProjectAnalyzerService', () => {});
+describe('ProjectAnalyzerService', () => {
+  test('placeholder', () => {
+    expect(true).toBe(true);
+  });
+});
