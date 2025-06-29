@@ -19,6 +19,12 @@ export async function applyDiffIteratively(
         const applied = await fs.applyDiffToFile(filePath, currentDiff);
         if (applied) return true;
 
+        // If this was the last allowed attempt, exit early without
+        // requesting another diff from the AI.
+        if (attempt === maxAttempts - 1) {
+            return false;
+        }
+
         const info: DiffFailureInfo = fs.lastDiffFailure || {
             file: filePath,
             diff: currentDiff,
