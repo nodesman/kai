@@ -32,7 +32,7 @@ export class CommitMessageService {
         const files = await this.git.listModifiedFiles(projectRoot);
         const combined = `Changed files:\n${files.join('\n')}\n\n${diff}`;
 
-        const system = 'Generate a concise git commit message describing the following changes.';
+        const system = 'Generate a single, concise git commit message describing the following changes. Provide only one final message and do not offer multiple options.';
         if (countTokens(combined) <= this.maxTokens) {
             const messages: Message[] = [
                 { role: 'user', content: `${system}\n${combined}` }
@@ -42,7 +42,7 @@ export class CommitMessageService {
         }
 
         const chunks = this.chunkByTokens(combined, this.maxTokens - 500);
-        let messages: Message[] = [ { role: 'user', content: system + ' I will provide diff chunks. Reply with "COMMIT:" followed by the message when ready or "CONTINUE" if you need more.' } ];
+        let messages: Message[] = [ { role: 'user', content: system + ' I will provide diff chunks. Reply with "COMMIT:" followed by the single best message when ready or "CONTINUE" if you need more.' } ];
         let response = '';
         for (const chunk of chunks) {
             messages.push({ role: 'user', content: chunk });

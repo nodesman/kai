@@ -18,6 +18,7 @@ describe('CommitMessageService', () => {
         const call = (ai.getResponseTextFromAI as jest.Mock).mock.calls[0][0];
         expect(call[0].content).toMatch('a.ts');
         expect(call[0].content).toMatch('diff');
+        expect(call[0].content).toMatch(/single, concise git commit message/i);
     });
 
     test('chunks diff when it exceeds maxTokens', async () => {
@@ -32,5 +33,7 @@ describe('CommitMessageService', () => {
         const msg = await service.generateCommitMessage('/p');
         expect(msg).toBe('msg');
         expect(ai.getResponseTextFromAI as jest.Mock).toHaveBeenCalledTimes(2);
+        const firstCall = (ai.getResponseTextFromAI as jest.Mock).mock.calls[0][0];
+        expect(firstCall[0].content).toMatch(/single, concise git commit message/i);
     });
 });
