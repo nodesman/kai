@@ -132,6 +132,30 @@ describe('TestCoverageRaiser', () => {
         expect(logSpy).toHaveBeenCalled();
     });
 
+    it('logs diff failure using default info when lastDiffFailure missing', async () => {
+        const config: any = { project: { coverage_iterations: 1 } };
+        const fs = {
+            readFile: jest.fn(async (p: string) => {
+                if (p === '/p/coverage/coverage-summary.json') {
+                    return JSON.stringify({ '/p/a.ts': { lines: { pct: 80 } }, total: {} });
+                }
+                if (p === '/p/a.test.ts') return 'content';
+                if (p === '/p/a.ts') return 'src';
+                return null;
+            }),
+            writeFile: jest.fn(),
+            applyDiffToFile: jest.fn().mockResolvedValue(false)
+        } as unknown as FileSystem;
+        const cmd = { run: jest.fn().mockResolvedValue({}) } as unknown as CommandService;
+        const ai = { getResponseTextFromAI: jest.fn().mockResolvedValue('diff') } as unknown as AIClient;
+        const fsModule = await import('../../FileSystem');
+        const logSpy = jest.spyOn(fsModule, 'logDiffFailure').mockResolvedValue();
+        const raiser = new TestCoverageRaiser(config, fs, cmd, ai, '/p');
+        await raiser.process('jest');
+        expect(fs.applyDiffToFile).toHaveBeenCalled();
+        expect(logSpy).toHaveBeenCalled();
+    });
+
     it('updates AI client instance', async () => {
         const config = { project: { coverage_iterations: 1 } } as any;
         const fs = {
@@ -172,5 +196,116 @@ describe('TestCoverageRaiser', () => {
         await raiser.process('jest');
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('All files fully covered.'));
         logSpy.mockRestore();
+    });
+
+    it('skips iteration loop when configured for zero iterations', async () => {
+        const config: any = { project: { coverage_iterations: 0 } };
+        const fs = {
+            readFile: jest.fn(async (p: string) => {
+                if (p === '/p/coverage/coverage-summary.json') {
+                    return JSON.stringify({ '/p/a.ts': { lines: { pct: 80 } }, total: {} });
+                }
+                if (p === '/p/a.test.ts') return null;
+                if (p === '/p/a.ts') return 'src';
+                return null;
+            }),
+            writeFile: jest.fn(),
+            applyDiffToFile: jest.fn()
+        } as unknown as FileSystem;
+        const cmd = { run: jest.fn().mockResolvedValue({}) } as unknown as CommandService;
+        const ai = { getResponseTextFromAI: jest.fn() } as unknown as AIClient;
+        const raiser = new TestCoverageRaiser(config, fs, cmd, ai, '/p');
+        await raiser.process('jest');
+        expect(fs.writeFile).toHaveBeenCalled();
+        expect(fs.applyDiffToFile).not.toHaveBeenCalled();
+    });
+
+    it('handles relative coverage paths and null test reads', async () => {
+        const config: any = { project: { coverage_iterations: 2 } };
+        let summaryCall = 0;
+        let testReadCall = 0;
+        const fs = {
+            readFile: jest.fn(async (p: string) => {
+                if (p === '/p/coverage/coverage-summary.json') {
+                    summaryCall++;
+                    if (summaryCall <= 2) return JSON.stringify({ 'src/a.ts': { lines: { pct: 80 } }, total: {} });
+                    return JSON.stringify({ 'src/a.ts': { lines: { pct: 100 } }, total: {} });
+                }
+                if (p === '/p/src/a.test.ts') {
+                    testReadCall++;
+                    if (testReadCall === 1) return 'existing';
+                    if (testReadCall === 2) return null;
+                    return 'patched';
+                }
+                if (p === '/p/src/a.ts') return 'src';
+                return null;
+            }),
+            writeFile: jest.fn(),
+            applyDiffToFile: jest.fn().mockResolvedValue(true)
+        } as unknown as FileSystem;
+        const cmd = { run: jest.fn().mockResolvedValue({}) } as unknown as CommandService;
+        const ai = { getResponseTextFromAI: jest.fn().mockResolvedValue('diff') } as unknown as AIClient;
+        const raiser = new TestCoverageRaiser(config, fs, cmd, ai, '/p');
+        await raiser.process('jest');
+        expect(fs.writeFile).not.toHaveBeenCalled();
+        expect(fs.applyDiffToFile).toHaveBeenCalled();
+    });
+
+    it('stops when coverage summary missing mid-iteration', async () => {
+        const config: any = { project: { coverage_iterations: 2 } };
+        let summaryCall = 0;
+        const fs = {
+            readFile: jest.fn(async (p: string) => {
+                if (p === '/p/coverage/coverage-summary.json') {
+                    summaryCall++;
+                    if (summaryCall === 1) return JSON.stringify({ '/p/a.ts': { lines: { pct: 80 } }, total: {} });
+                    return null; // missing on second read
+                }
+                if (p === '/p/a.test.ts') return 'existing';
+                if (p === '/p/a.ts') return 'src';
+                return null;
+            }),
+            writeFile: jest.fn(),
+            applyDiffToFile: jest.fn().mockResolvedValue(true)
+        } as unknown as FileSystem;
+        const cmd = { run: jest.fn().mockResolvedValue({}) } as unknown as CommandService;
+        const ai = { getResponseTextFromAI: jest.fn().mockResolvedValue('diff') } as unknown as AIClient;
+        const raiser = new TestCoverageRaiser(config, fs, cmd, ai, '/p');
+        await raiser.process('jest');
+        expect(fs.applyDiffToFile).toHaveBeenCalled();
+    });
+
+    it('selects lowest coverage file among multiple entries', () => {
+        const raiser = new TestCoverageRaiser({} as any, new FileSystem(), new CommandService(), {} as any, '/root');
+        const find = (raiser as any)._findLowestCoverageFile.bind(raiser);
+        const summary = {
+            '/root/a.ts': { lines: { pct: 70 } },
+            '/root/b.ts': { lines: { pct: 40 } },
+            '/root/c.ts': { lines: { pct: 90 } },
+            total: {}
+        };
+        const result = find(summary);
+        expect(result).toBe(path.normalize('/root/b.ts'));
+    });
+
+    it('handles path needing prefix insertion when normalizing', () => {
+        const raiser = new TestCoverageRaiser({} as any, new FileSystem(), new CommandService(), {} as any, '/root');
+        const find = (raiser as any)._findLowestCoverageFile.bind(raiser);
+        const weird = 'rootsrc/a.ts';
+        const summary = { [weird]: { lines: { pct: 10 } }, total: {} };
+        const result = find(summary);
+        expect(result).toBe(path.join('/root', 'src', 'a.ts'));
+    });
+
+    it('defaults to 100 pct when coverage entry missing', () => {
+        const raiser = new TestCoverageRaiser({} as any, new FileSystem(), new CommandService(), {} as any, '/root');
+        const find = (raiser as any)._findLowestCoverageFile.bind(raiser);
+        const summary = {
+            '/root/a.ts': {},
+            '/root/b.ts': { lines: { pct: 20 } },
+            total: {}
+        };
+        const result = find(summary);
+        expect(result).toBe(path.normalize('/root/b.ts'));
     });
 });
