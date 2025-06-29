@@ -138,7 +138,7 @@ describe('Gemini2ProModel', () => {
 
       // Reset mock implementations for the generation process
       mockResponseText.mockReturnValue(MOCK_GENERATED_TEXT);
-      mockGenerateContent.mockResolvedValue({ response: Promise.resolve(mockResponse) });
+      mockGenerateContent.mockResolvedValue({ response: mockResponse });
       mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent }); // Ensure it's set for this test
     });
 
@@ -150,20 +150,24 @@ describe('Gemini2ProModel', () => {
       expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
       expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: expectedModelName });
       expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      expect(mockGenerateContent).toHaveBeenCalledWith(MOCK_GENERATE_CONTENT_REQUEST);
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        contents: MOCK_GENERATE_CONTENT_REQUEST.contents,
+        generationConfig: { maxOutputTokens: defaultMockConfig.gemini.max_output_tokens },
+      });
+      const text = result.response?.text();
       expect(mockResponseText).toHaveBeenCalledTimes(1);
-      expect(result.response?.text()).toBe(MOCK_GENERATED_TEXT); // Check actual text content
+      expect(text).toBe(MOCK_GENERATED_TEXT); // Check actual text content
     });
 
     it('should call the Gemini API with a custom model and return the generated text', async () => {
       const customModelName = 'my-custom-gemini-model';
       const customConfigInstance = createMockConfig(MOCK_API_KEY, customModelName);
+      jest.clearAllMocks(); // Clear any calls from the default model setup
       model = new Gemini2ProModel(customConfigInstance);
-      jest.clearAllMocks(); // Clear mocks again after model instantiation
 
-      // Reset generateContent related mocks
+      // Reset generateContent related mocks after clearing
       mockResponseText.mockReturnValue(MOCK_GENERATED_TEXT);
-      mockGenerateContent.mockResolvedValue({ response: Promise.resolve(mockResponse) });
+      mockGenerateContent.mockResolvedValue({ response: mockResponse });
       mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent }); // Ensure it's set for this test
 
       const result = await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
@@ -171,9 +175,13 @@ describe('Gemini2ProModel', () => {
       expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
       expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: customModelName });
       expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      expect(mockGenerateContent).toHaveBeenCalledWith(MOCK_GENERATE_CONTENT_REQUEST);
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        contents: MOCK_GENERATE_CONTENT_REQUEST.contents,
+        generationConfig: { maxOutputTokens: customConfigInstance.gemini.max_output_tokens },
+      });
+      const text = result.response?.text();
       expect(mockResponseText).toHaveBeenCalledTimes(1);
-      expect(result.response?.text()).toBe(MOCK_GENERATED_TEXT); // Check actual text content
+      expect(text).toBe(MOCK_GENERATED_TEXT); // Check actual text content
     });
 
     it('should handle errors from the Gemini API during content generation', async () => {
