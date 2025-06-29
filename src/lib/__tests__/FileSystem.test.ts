@@ -79,6 +79,42 @@ describe('FileSystem', () => {
     expect(await fsUtil.isTextFile(binPath)).toBe(false);
   });
 
+  describe('applyDiffToFile', () => {
+    it('applies patch to modify file', async () => {
+      const filePath = path.join(tempDir, 'a.txt');
+      fs.writeFileSync(filePath, 'hello\n');
+      const diff = require('diff').createTwoFilesPatch('a.txt', 'a.txt', 'hello\n', 'hi\n');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('hi\n');
+    });
+
+    it('creates a new file from patch', async () => {
+      const filePath = path.join(tempDir, 'new.txt');
+      const diff = require('diff').createTwoFilesPatch('/dev/null', 'new.txt', '', 'newfile\n');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('newfile\n');
+    });
+
+    it('deletes a file from patch', async () => {
+      const filePath = path.join(tempDir, 'del.txt');
+      fs.writeFileSync(filePath, 'remove\n');
+      const diff = require('diff').createTwoFilesPatch('del.txt', '/dev/null', 'remove\n', '');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(true);
+      expect(fs.existsSync(filePath)).toBe(false);
+    });
+
+    it('returns false when patch fails', async () => {
+      const filePath = path.join(tempDir, 'fail.txt');
+      fs.writeFileSync(filePath, 'original\n');
+      const diff = require('diff').createTwoFilesPatch('fail.txt', 'fail.txt', 'hello\n', 'hi\n');
+      const result = await fsUtil.applyDiffToFile(filePath, diff);
+      expect(result).toBe(false);
+    });
+  });
+
   describe('error and edge cases', () => {
     const spyErr = jest.spyOn(console, 'error').mockImplementation(() => {});
     const spyWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
