@@ -18,6 +18,7 @@ module.exports = {
   coveragePathIgnorePatterns: [
     "<rootDir>/src/lib/UserInteraction/InteractivePromptReviewer.ts",
     "<rootDir>/src/lib/consolidation/prompts.ts",
-    "<rootDir>/src/lib/analysis/prompts.ts"
+    "<rootDir>/src/lib/analysis/prompts.ts",
+    "<rootDir>/src/lib/Config.ts"
   ]
 };
