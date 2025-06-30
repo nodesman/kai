@@ -60,7 +60,7 @@ describe('applyDiffIteratively', () => {
     expect(fsMock.applyDiffToFile).toHaveBeenNthCalledWith(1, filePath, initialDiff);
     expect(fsMock.applyDiffToFile).toHaveBeenNthCalledWith(2, filePath, correctedDiff);
     expect(aiMock.getResponseTextFromAI).toHaveBeenCalledTimes(1);
-    expect(aiMock.getResponseTextFromAI).toHaveBeenCalledWith([{ role: 'user', content: DiffFixPrompts.fixPatch(filePath, 'old-content', initialDiff, 'Patch failed') }], false);
+    expect(aiMock.getResponseTextFromAI).toHaveBeenCalledWith([{ role: 'user', content: DiffFixPrompts.fixPatch(filePath, 'old-content', initialDiff, 'Patch failed') }], false, aiMock.useOpenAIDiffs);
     expect(logDiffFailure).toHaveBeenCalledTimes(0); // Should not log failure to file if eventually successful
   });
 
@@ -136,7 +136,7 @@ describe('applyDiffIteratively', () => {
     expect(fsMock.readFile).toHaveBeenCalledWith(filePath);
     expect(aiMock.getResponseTextFromAI).toHaveBeenCalledWith([
       { role: 'user', content: DiffFixPrompts.fixPatch(filePath, '', initialDiff, '') }
-    ], false);
+    ], false, aiMock.useOpenAIDiffs);
     expect(fsMock.applyDiffToFile).toHaveBeenCalledTimes(2);
   });
 
