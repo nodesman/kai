@@ -1,16 +1,13 @@
 // File: src/lib/UserInterface.ts
 import inquirer from 'inquirer';
-import { spawn, SpawnOptionsWithoutStdio } from 'child_process'; // Import SpawnOptions
 import path from 'path';
 import fs from 'fs/promises'; // Use fs.promises for async operations
-import crypto from 'crypto'; // For checking file changes
 import { FileSystem } from './FileSystem';
 import { toSnakeCase } from './utils'; // Import the utility function
 import { Config } from './Config'; // Import Config
 import Conversation, { Message } from './models/Conversation'; // Import Conversation types
 import chalk from 'chalk'; // Import chalk for logging
-
-const HISTORY_SEPARATOR = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
+import { PromptEditor, HISTORY_SEPARATOR } from './UserInteraction/PromptEditor';
 
 // Define the expected return type for getUserInteraction
 interface UserInteractionResultBase {
@@ -67,10 +64,12 @@ type UserInteractionResult =
 class UserInterface {
     fs: FileSystem;
     config: Config;
+    promptEditor: PromptEditor;
 
     constructor(config: Config) {
         this.fs = new FileSystem();
         this.config = config;
+        this.promptEditor = new PromptEditor(this.fs, this.config);
     }
 
     // --- confirmInitialization (Unchanged) ---
@@ -183,180 +182,127 @@ class UserInterface {
         return false;
     }
 
-    // --- formatHistoryForSublime (Unchanged) ---
+    private async _handleDeletion(): Promise<DeleteInteractionResult | null> {
+        await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
+        const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
+        if (existingConversations.length === 0) {
+            console.log(chalk.yellow('No conversations found to delete.'));
+            return null;
+        }
+        const { conversationsToDelete } = await inquirer.prompt<{ conversationsToDelete: string[] }>([
+            {
+                type: 'checkbox',
+                name: 'conversationsToDelete',
+                message: 'Select conversations to DELETE (use spacebar, press Enter when done):',
+                choices: existingConversations,
+                loop: false,
+                validate: () => true,
+            },
+        ]);
+
+        if (!conversationsToDelete || conversationsToDelete.length === 0) {
+            console.log(chalk.yellow('No conversations selected for deletion.'));
+            return null;
+        }
+
+        const { confirmDelete } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'confirmDelete',
+                message: `Are you sure you want to permanently delete the following ${conversationsToDelete.length} conversation(s)?\n- ${conversationsToDelete.join('\n- ')}`,
+                default: false,
+            },
+        ]);
+        if (confirmDelete) {
+            return { mode: 'Delete Conversation...', conversationNamesToDelete: conversationsToDelete };
+        } else {
+            console.log(chalk.yellow('Deletion cancelled.'));
+            return null;
+        }
+    }
+
+    private async _handleScaffold(): Promise<ScaffoldProjectInteractionResult> {
+        const { directoryName } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'directoryName',
+                message: 'Project directory name:',
+                validate: input => (input.trim() ? true : 'Directory name cannot be empty.'),
+            },
+        ]);
+        const { language } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'language',
+                message: 'Select primary language:',
+                choices: ['TypeScript', 'JavaScript'],
+            },
+        ]);
+        const { framework } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'framework',
+                message: 'Select framework:',
+                choices: ['Node', 'None'],
+            },
+        ]);
+        return { mode: 'Scaffold New Project', language, framework, directoryName };
+    }
+
+    private async _handleHarden(): Promise<HardenInteractionResult | null> {
+        const frameworks: string[] = [];
+        if (await this._detectJest()) frameworks.push('Jest');
+        if (frameworks.length === 0) {
+            console.log(chalk.yellow('No supported test frameworks detected.'));
+            return null;
+        }
+        const { toolChoice } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'toolChoice',
+                message: 'Select test framework:',
+                choices: frameworks,
+            },
+        ]);
+        const primaryModel = this.config.gemini.model_name;
+        const secondaryModel = this.config.gemini.subsequent_chat_model_name;
+        const modelChoices = [
+            {
+                name: `Primary Model (${primaryModel}) - Recommended for complex tasks / generation`,
+                value: primaryModel,
+            },
+            {
+                name: `Secondary Model (${secondaryModel}) - Recommended for quick interactions / analysis`,
+                value: secondaryModel,
+            },
+        ];
+        const { modelChoice } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'modelChoice',
+                message: 'Select the AI model to use for this operation:',
+                choices: modelChoices,
+                default: primaryModel,
+            },
+        ]);
+        return { mode: 'Harden', tool: toolChoice.toLowerCase() as 'jest', selectedModel: modelChoice };
+    }
+
     formatHistoryForSublime(messages: Message[]): string {
-        let historyBlock = '';
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            const timestampStr = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : 'Unknown Time';
-            const roleLabel = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'LLM' : 'System';
-
-            historyBlock += `${roleLabel}: [${timestampStr}]\n\n`;
-            historyBlock += `${msg.content.trim()}\n\n`;
-        }
-
-        if (historyBlock) {
-            return '\n\n' + HISTORY_SEPARATOR + '\n\n' + historyBlock.trimEnd();
-        } else {
-            return HISTORY_SEPARATOR + '\n\n';
-        }
+        return this.promptEditor.formatHistoryForSublime(messages);
     }
 
-    // --- extractNewPrompt (Unchanged) ---
     extractNewPrompt(fullContent: string): string | null {
-        const separatorIndex = fullContent.indexOf(HISTORY_SEPARATOR);
-        let promptRaw: string;
-
-        if (separatorIndex !== -1) {
-            promptRaw = fullContent.substring(0, separatorIndex);
-        } else {
-            console.warn(chalk.yellow("Warning: History separator not found in editor file. Treating entire content as prompt."));
-            promptRaw = fullContent;
-        }
-
-        const promptTrimmed = promptRaw.trim();
-        return promptTrimmed ? promptTrimmed : null;
+        return this.promptEditor.extractNewPrompt(fullContent);
     }
 
-    // --- getPromptViaSublimeLoop (Unchanged from provided context) ---
     async getPromptViaSublimeLoop(
         conversationName: string,
         currentMessages: Message[],
         editorFilePath: string,
-        isFallbackAttempt = false // Added flag to prevent infinite loops
+        isFallbackAttempt = false
     ): Promise<{ newPrompt: string | null; conversationFilePath: string; editorFilePath: string }> {
-        const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
-        const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-
-        const contentToWrite = this.formatHistoryForSublime(currentMessages || []);
-        const initialHash = crypto.createHash('sha256').update(contentToWrite).digest('hex');
-
-        try {
-            await this.fs.writeFile(editorFilePath, contentToWrite);
-        } catch (writeError) {
-            console.error(`Error writing temporary edit file ${editorFilePath}:`, writeError);
-            throw writeError;
-        }
-
-        // --- Editor Detection Logic ---
-        let editorCommand = 'subl'; // Default to Sublime Text
-        let editorArgs = ['-w', editorFilePath];
-        let editorName = 'Sublime Text';
-
-        if (process.platform === 'darwin' && !isFallbackAttempt) { // Only detect IDE if not already a fallback
-            const bundleId = process.env.__CFBundleIdentifier;
-            if (bundleId === 'com.jetbrains.WebStorm') {
-                editorCommand = 'webstorm';
-                editorArgs = ['--wait', editorFilePath];
-                editorName = 'WebStorm';
-                console.log(chalk.blue(`Detected running inside WebStorm (macOS). Using '${editorCommand}' command...`));
-            } else if (bundleId === 'com.jetbrains.CLion') {
-                editorCommand = 'clion';
-                editorArgs = ['--wait', editorFilePath];
-                editorName = 'CLion';
-                console.log(chalk.blue(`Detected running inside CLion (macOS). Using '${editorCommand}' command...`));
-            } else if (bundleId === 'com.jetbrains.intellij') { // <<<--- ADDED INTELLIJ DETECTION
-                editorCommand = 'idea'; // Assumes 'idea' command-line launcher is installed and in PATH
-                editorArgs = ['--wait', editorFilePath]; // Use --wait flag
-                editorName = 'IntelliJ IDEA';
-                console.log(chalk.blue(`Detected running inside IntelliJ IDEA (macOS). Using '${editorCommand}' command...`));
-            }
-             // Add more else if for other JetBrains IDEs (e.g., GoLand, PyCharm) if needed
-             // else if (bundleId === 'com.jetbrains.goland') { editorCommand = 'goland'; ... }
-             // else if (bundleId === 'com.jetbrains.pycharm') { editorCommand = 'charm'; ... }
-        }
-        // TODO: Add detection for other platforms (Windows, Linux) if possible
-        //       - Windows might check for env vars like WT_SESSION or specific paths.
-        //       - Linux might check TERMINAL_EMULATOR or other DE-specific vars.
-        // --- End Editor Detection Logic ---
-
-        console.log(`\nOpening conversation "${conversationName}" in ${editorName}...`);
-        console.log(`(Type your prompt above the '${HISTORY_SEPARATOR}', save, and close the editor tab/window to send)`);
-        console.log(`(Close without saving OR save without changes to exit conversation)`);
-
-        let exitCode: number | null = null;
-        let processError: Error | FallbackError | null = null;
-
-        try {
-            const editorProcess = spawn(editorCommand, editorArgs, { stdio: 'inherit' });
-
-            exitCode = await new Promise<number | null>((resolve, reject) => {
-                editorProcess.on('close', (code) => resolve(code));
-                editorProcess.on('error', (error) => {
-                    if ((error as any).code === 'ENOENT') {
-                        const errorMsg = `❌ Error: '${editorCommand}' command not found.`;
-                        // --- Modified Check for JetBrains IDEs ---
-                        const isJetBrainsLauncher = ['webstorm', 'clion', 'idea'].includes(editorCommand); // Add other launchers here if supported
-
-                        if (isJetBrainsLauncher && !isFallbackAttempt) { // Check if IDE launcher failed and not already a fallback
-                            console.error(chalk.red(`\n${errorMsg} Ensure the JetBrains IDE command-line launcher ('${editorCommand}') is created (Tools -> Create Command-line Launcher...) and its directory is in your system's PATH.`));
-                            console.warn(chalk.yellow(`Falling back to 'subl'...`));
-                            // Reject with a special object to trigger fallback
-                            reject({ type: 'fallback', editor: 'subl', args: ['-w', editorFilePath] } as FallbackError);
-                        } else { // Sublime failed or it was already a fallback attempt
-                            console.error(chalk.red(`\n${errorMsg} Make sure ${editorName} is installed and '${editorCommand}' is in your system's PATH.`));
-                            reject(new Error(`'${editorCommand}' command not found.'`)); // Reject with standard error
-                        }
-                        // --- End Modified Check ---
-                    } else {
-                        console.error(chalk.red(`\n❌ Error spawning ${editorName}:`), error);
-                        reject(error); // Reject with the original spawn error
-                    }
-                });
-            });
-        } catch (err: any) {
-             // Catch the rejection from the promise (including fallback object)
-             processError = err;
-        }
-
-         // --- Handle Fallback ---
-         if (processError && (processError as FallbackError).type === 'fallback') {
-             console.log(chalk.blue(`Attempting to open with fallback editor: ${(processError as FallbackError).editor}...`));
-             // Recursive call with fallback flag set to true
-             return this.getPromptViaSublimeLoop(conversationName, currentMessages, editorFilePath, true);
-         } else if (processError) {
-              // If it was a standard error caught, re-throw it to be handled by the main catch block
-              throw processError;
-         }
-         // --- End Handle Fallback ---
-
-        if (exitCode !== 0) {
-            console.warn(chalk.yellow(`\n${editorName} process closed with non-zero code: ${exitCode}. Assuming exit.`));
-            return { newPrompt: null, conversationFilePath, editorFilePath };
-        }
-
-        // --- File reading and prompt extraction (remains the same) ---
-        let modifiedContent: string;
-        try {
-            await fs.access(editorFilePath); // Check existence first
-            modifiedContent = await this.fs.readFile(editorFilePath) || ''; // Read content
-        } catch (readError) {
-            if ((readError as NodeJS.ErrnoException).code === 'ENOENT') {
-                // This case might happen if the --wait flag didn't work as expected or the file was deleted manually
-                console.warn(chalk.yellow(`\nEditor file ${editorFilePath} not found after closing ${editorName}. Assuming exit.`));
-                return { newPrompt: null, conversationFilePath, editorFilePath };
-            }
-            // Rethrow other read errors
-            console.error(chalk.red(`\nError reading editor file ${editorFilePath} after closing:`), readError);
-            throw readError;
-        }
-
-        const modifiedHash = crypto.createHash('sha256').update(modifiedContent).digest('hex');
-
-        if (initialHash === modifiedHash) {
-            console.log(chalk.blue(`\nNo changes detected in ${editorName}. Exiting conversation.`));
-            return { newPrompt: null, conversationFilePath, editorFilePath };
-        }
-
-        const newPrompt = this.extractNewPrompt(modifiedContent);
-
-        if (newPrompt === null) {
-            console.log(chalk.blue("\nNo new prompt entered. Exiting conversation."));
-            return { newPrompt: null, conversationFilePath, editorFilePath };
-        }
-
-        console.log(chalk.green("\nPrompt received, processing with AI..."));
-        return { newPrompt: newPrompt, conversationFilePath, editorFilePath };
+        return this.promptEditor.getPromptViaSublimeLoop(conversationName, currentMessages, editorFilePath, isFallbackAttempt);
     }
 
     // --- getUserInteraction (MODIFIED) ---
@@ -389,47 +335,7 @@ class UserInterface {
              // --- END Handle Exit Kai ---
 
             if (mode === 'Delete Conversation...') {
-                await this.fs.ensureKaiDirectoryExists(this.config.chatsDir);
-                const existingConversations = await this.fs.listJsonlFiles(this.config.chatsDir);
-
-                if (existingConversations.length === 0) {
-                    console.log(chalk.yellow("No conversations found to delete."));
-                    return null;
-                }
-
-                const { conversationsToDelete } = await inquirer.prompt<{ conversationsToDelete: string[] }>([
-                    {
-                        type: 'checkbox',
-                        name: 'conversationsToDelete',
-                        message: 'Select conversations to DELETE (use spacebar, press Enter when done):',
-                        choices: existingConversations,
-                        loop: false,
-                        validate: (answer) => {
-                            return true;
-                        },
-                    },
-                ]);
-
-                if (!conversationsToDelete || conversationsToDelete.length === 0) {
-                    console.log(chalk.yellow("No conversations selected for deletion."));
-                    return null;
-                }
-
-                const { confirmDelete } = await inquirer.prompt([
-                    {
-                        type: 'confirm',
-                        name: 'confirmDelete',
-                        message: `Are you sure you want to permanently delete the following ${conversationsToDelete.length} conversation(s)?\n- ${conversationsToDelete.join('\n- ')}`,
-                        default: false,
-                    },
-                ]);
-
-                if (confirmDelete) {
-                    return { mode, conversationNamesToDelete: conversationsToDelete };
-                } else {
-                    console.log(chalk.yellow("Deletion cancelled."));
-                    return null;
-                }
+                return await this._handleDeletion();
             }
 
             // --- Handle Re-run Project Analysis Mode ---
@@ -462,71 +368,12 @@ class UserInterface {
 
             // --- Handle Scaffold New Project ---
             if (mode === 'Scaffold New Project') {
-                const { directoryName } = await inquirer.prompt([
-                    {
-                        type: 'input',
-                        name: 'directoryName',
-                        message: 'Project directory name:',
-                        validate: (input) => input.trim() ? true : 'Directory name cannot be empty.'
-                    }
-                ]);
-                const { language } = await inquirer.prompt([
-                    {
-                        type: 'list',
-                        name: 'language',
-                        message: 'Select primary language:',
-                        choices: ['TypeScript', 'JavaScript']
-                    }
-                ]);
-                const { framework } = await inquirer.prompt([
-                    {
-                        type: 'list',
-                        name: 'framework',
-                        message: 'Select framework:',
-                        choices: ['Node', 'None']
-                    }
-                ]);
-                return { mode: 'Scaffold New Project', language, framework, directoryName };
+                return await this._handleScaffold();
             }
 
             // --- Handle Harden Mode ---
             if (mode === 'Harden') {
-                const frameworks: string[] = [];
-                if (await this._detectJest()) frameworks.push('Jest');
-                if (frameworks.length === 0) {
-                    console.log(chalk.yellow('No supported test frameworks detected.'));
-                    return null;
-                }
-                const { toolChoice } = await inquirer.prompt([
-                    {
-                        type: 'list',
-                        name: 'toolChoice',
-                        message: 'Select test framework:',
-                        choices: frameworks,
-                    }
-                ]);
-                const primaryModel = this.config.gemini.model_name;
-                const secondaryModel = this.config.gemini.subsequent_chat_model_name;
-                const modelChoices = [
-                    {
-                        name: `Primary Model (${primaryModel}) - Recommended for complex tasks / generation`,
-                        value: primaryModel
-                    },
-                    {
-                        name: `Secondary Model (${secondaryModel}) - Recommended for quick interactions / analysis`,
-                        value: secondaryModel
-                    },
-                ];
-                const { modelChoice } = await inquirer.prompt([
-                    {
-                        type: 'list',
-                        name: 'modelChoice',
-                        message: 'Select the AI model to use for this operation:',
-                        choices: modelChoices,
-                        default: primaryModel,
-                    },
-                ]);
-                return { mode: 'Harden', tool: toolChoice.toLowerCase() as 'jest', selectedModel: modelChoice };
+                return await this._handleHarden();
             }
 
             // --- Remaining modes require Model selection ---
