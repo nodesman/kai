@@ -139,4 +139,19 @@ describe('applyDiffIteratively', () => {
     ], false);
     expect(fsMock.applyDiffToFile).toHaveBeenCalledTimes(2);
   });
+
+  it('stops immediately when diff is empty', async () => {
+    const filePath = 'src/file.ts';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await applyDiffIteratively(fsMock, aiMock, filePath, '   ');
+
+    expect(result).toBe(false);
+    expect(fsMock.applyDiffToFile).not.toHaveBeenCalled();
+    expect(aiMock.getResponseTextFromAI).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Empty diff provided for')
+    );
+    warnSpy.mockRestore();
+  });
 });
