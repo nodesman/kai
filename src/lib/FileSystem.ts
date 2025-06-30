@@ -399,6 +399,17 @@ class FileSystem {
             cleanedDiff = cleanedDiff.slice(start[0].length, cleanedDiff.length - end[0].length).trim();
         }
 
+        if (cleanedDiff.trim().length === 0) {
+            this.lastDiffFailure = {
+                file: filePath,
+                diff: cleanedDiff,
+                fileContent: (await this.readFile(filePath)) ?? '',
+                error: 'Empty diff',
+            };
+            await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, 'Empty diff');
+            return false;
+        }
+
         let patches;
         try {
             patches = parsePatch(cleanedDiff);
@@ -408,7 +419,7 @@ class FileSystem {
             await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, errorMsg);
             return false;
         }
-        if (patches.length === 0) {
+        if (patches.length === 0 || patches.every((p) => p.hunks.length === 0)) {
             this.lastDiffFailure = { file: filePath, diff: cleanedDiff, fileContent: await this.readFile(filePath) ?? '', error: 'No patch data' };
             await logDiffFailure(this, filePath, cleanedDiff, this.lastDiffFailure.fileContent, 'No patch data');
             return false;

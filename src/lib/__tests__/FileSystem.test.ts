@@ -278,6 +278,14 @@ describe('FileSystem', () => {
       });
     });
 
+    it('returns false when diff string is empty', async () => {
+      const filePath = path.join(tempDir, 'emptydiff.txt');
+      fs.writeFileSync(filePath, 'content\n');
+      const result = await fsUtil.applyDiffToFile(filePath, '');
+      expect(result).toBe(false);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('content\n');
+    });
+
     it('fails when patch results in empty file', async () => {
       const filePath = path.join(tempDir, 'empty.txt');
       fs.writeFileSync(filePath, 'hi\n');
