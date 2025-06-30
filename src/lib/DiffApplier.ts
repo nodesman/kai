@@ -16,6 +16,13 @@ export async function applyDiffIteratively(
 ): Promise<boolean> {
     let currentDiff = diff;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (currentDiff.trim().length === 0) {
+            console.warn(
+                chalk.yellow(`Empty diff provided for ${filePath}; stopping.`)
+            );
+            break;
+        }
+
         const applied = await fs.applyDiffToFile(filePath, currentDiff);
         if (applied) return true;
 
