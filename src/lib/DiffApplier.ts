@@ -59,7 +59,8 @@ export async function applyDiffIteratively(
         try {
             currentDiff = await ai.getResponseTextFromAI(
                 [{ role: 'user', content: prompt }],
-                USE_PRO_MODEL
+                USE_PRO_MODEL,
+                ai.useOpenAIDiffs
             );
         } catch (err) {
             console.error(chalk.red('Failed to get corrected diff from AI:'), err);

@@ -4,6 +4,7 @@ import { FileSystem } from './FileSystem';
 // Import BOTH model classes
 import Gemini2ProModel from "./models/Gemini2ProModel";
 import Gemini2FlashModel from "./models/Gemini2FlashModel"; // Added Flash model
+import OpenAIMiniModel from "./models/OpenAIMiniModel";
 // Import Config class itself
 import { Config } from "./Config";
 import Conversation, { Message } from "./models/Conversation";
@@ -35,13 +36,22 @@ class AIClient {
     fs: FileSystem;
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
+    private openAIModel?: OpenAIMiniModel;
+    public useOpenAIDiffs: boolean = false;
     config: Config;
 
     constructor(config: Config) {
         this.config = config;
         this.proModel = new Gemini2ProModel(config);
         this.flashModel = new Gemini2FlashModel(config);
+        if (config.openai?.api_key) {
+            this.openAIModel = new OpenAIMiniModel(config);
+        }
         this.fs = new FileSystem();
+    }
+
+    setUseOpenAIForDiffs(flag: boolean) {
+        this.useOpenAIDiffs = flag && !!this.openAIModel;
     }
 
     private countTokens(text: string): number {
@@ -163,12 +173,19 @@ class AIClient {
     // The ConsolidationGenerator will prepend its specific hidden instruction.
     async getResponseTextFromAI(
         messages: Message[], // Expects caller to format messages correctly
-        useFlashModel: boolean = false
+        useFlashModel: boolean = false,
+        useOpenAI: boolean = false
     ): Promise<string> {
         // ... (Implementation remains the same - no hidden prompt added here) ...
         if (!messages || messages.length === 0) {
             console.error(chalk.red("Cannot get raw AI response with empty message history."));
             throw new Error("Cannot get raw AI response with empty message history.");
+        }
+
+        if (useOpenAI) {
+            if (!this.openAIModel) throw new Error('OpenAI model is not configured.');
+            console.log(chalk.blue(`Querying OpenAI for simple text...`));
+            return this.openAIModel.getResponseFromAI(messages);
         }
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
