@@ -1,12 +1,24 @@
 jest.mock('inquirer');
 jest.mock('chalk');
+jest.mock('../UserInteraction/PromptEditor', () => {
+  return {
+    __esModule: true,
+    HISTORY_SEPARATOR: '--- TYPE YOUR PROMPT ABOVE THIS LINE ---',
+    PromptEditor: jest.fn().mockImplementation(() => ({
+      formatHistoryForSublime: jest.fn(),
+      extractNewPrompt: jest.fn(),
+      getPromptViaSublimeLoop: jest.fn(),
+    }))
+  };
+});
 const inquirer = require('inquirer');
 import chalk from 'chalk';
 import { UserInterface } from '../UserInterface';
+import { PromptEditor } from '../UserInteraction/PromptEditor';
 const baseConfig = { chatsDir: '/chats', gemini: { model_name: 'm1', subsequent_chat_model_name: 'm2' }, context: { mode: 'full' } };
 
 describe('UserInterface', () => {
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => jest.clearAllMocks());
 
   it('prompts user to confirm initialization when directory is safe', async () => {
     (inquirer.prompt as unknown as jest.Mock).mockResolvedValue({ confirm: true });
@@ -66,130 +78,37 @@ describe('UserInterface', () => {
     expect(ans).toBe(false);
   });
 
-  it('formats history for Sublime correctly', () => {
+  it('delegates formatHistoryForSublime to PromptEditor', () => {
     const ui = new UserInterface({} as any);
-    const msgs = [
-      { role: 'user', content: 'first', timestamp: '2020-01-01T00:00:00Z' },
-      { role: 'assistant', content: 'second', timestamp: '2020-01-02T00:00:00Z' }
-    ];
-    const out = ui.formatHistoryForSublime(msgs as any);
-    expect(out).toContain('TYPE YOUR PROMPT ABOVE THIS LINE');
-    expect(out).toContain('User:');
-    expect(out).toContain('LLM:');
+    const instance = (ui as any).promptEditor;
+    instance.formatHistoryForSublime.mockReturnValue('out');
+    const msgs = [] as any;
+    expect(ui.formatHistoryForSublime(msgs)).toBe('out');
+    expect(instance.formatHistoryForSublime).toHaveBeenCalledWith(msgs);
   });
 
-  it('extracts new prompt correctly when separator is present', () => {
+  it('delegates extractNewPrompt to PromptEditor', () => {
     const ui = new UserInterface({} as any);
-    const sep = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
-    const text = `hello\n${sep}\nold`;
-    expect(ui.extractNewPrompt(text)).toBe('hello');
+    const instance = (ui as any).promptEditor;
+    instance.extractNewPrompt.mockReturnValue('p');
+    expect(ui.extractNewPrompt('x')).toBe('p');
+    expect(instance.extractNewPrompt).toHaveBeenCalledWith('x');
   });
 
-  it('returns null when no prompt is entered', () => {
+  it('delegates getPromptViaSublimeLoop to PromptEditor', async () => {
     const ui = new UserInterface({} as any);
-    const sep = '--- TYPE YOUR PROMPT ABOVE THIS LINE ---';
-    expect(ui.extractNewPrompt(`    \n${sep}\n`)).toBeNull();
+    const instance = (ui as any).promptEditor;
+    instance.getPromptViaSublimeLoop.mockResolvedValue({ newPrompt: 'n', conversationFilePath: 'c', editorFilePath: 'e' });
+    const res = await ui.getPromptViaSublimeLoop('c', [], 'f');
+    expect(res).toEqual({ newPrompt: 'n', conversationFilePath: 'c', editorFilePath: 'e' });
+    expect(instance.getPromptViaSublimeLoop).toHaveBeenCalledWith('c', [], 'f', false);
   });
 
-  it('warns when separator missing', () => {
-    const ui = new UserInterface({} as any);
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(ui.extractNewPrompt('hello')).toBe('hello');
-    expect(warn).toHaveBeenCalled();
-  });
-
-  describe('getPromptViaSublimeLoop', () => {
-    let ui: UserInterface;
-    const origSpawn = jest.requireActual('child_process').spawn;
-    beforeEach(() => {
-      jest.resetAllMocks();
-      ui = new UserInterface({ chatsDir: '/chats', context: {} } as any);
-      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
-      jest.spyOn(ui.fs, 'readFile');
-      jest.spyOn(console, 'log').mockImplementation(() => {});
-      jest.spyOn(console, 'error').mockImplementation(() => {});
-      jest.spyOn(console, 'warn').mockImplementation(() => {});
-      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
-    });
-    afterEach(() => jest.unmock('child_process'));
-
-    it('returns null when editor close code != 0', async () => {
-      const fakeSpawn = { on: (_: string, cb: any) => cb(1) } as any;
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue(fakeSpawn);
-      const result = await ui.getPromptViaSublimeLoop('conv', [], '/tmp/edit');
-      expect(result.newPrompt).toBeNull();
-    });
-
-    it('returns extracted prompt when content changed', async () => {
-      const modified = 'new prompt\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---\nhist';
-      (ui.fs.readFile as jest.Mock).mockResolvedValue(modified);
-      const fakeSpawn = { on: (_: string, cb: any) => cb(0) } as any;
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue(fakeSpawn);
-      const res = await ui.getPromptViaSublimeLoop('conv', [], '/tmp/edit');
-      expect(res.newPrompt).toBe('new prompt');
-    });
-
-    it('falls back from JetBrains IDE to Sublime when spawn errors ENOENT', async () => {
-      const error = { code: 'ENOENT' };
-      let call = 0;
-      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
-        call++;
-        if (call === 1) throw error;
-        return { on: (_: string, cb: any) => cb(0) } as any;
-      });
-      (ui.fs.readFile as jest.Mock).mockResolvedValue('p\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
-      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/e')).rejects.toMatchObject({ code: 'ENOENT' });
-    });
-
-    it('retries with Sublime and succeeds when JetBrains launcher fails', async () => {
-      const error = { code: 'ENOENT' };
-      let call = 0;
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      process.env.__CFBundleIdentifier = 'com.jetbrains.WebStorm';
-      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
-        call++;
-        return {
-          on: (ev: string, cb: any) => {
-            if (call === 1 && ev === 'error') cb(error);
-            if (call === 2 && ev === 'close') cb(0);
-          },
-        } as any;
-      });
-      (ui.fs.readFile as jest.Mock).mockResolvedValue('np\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
-      const logSpy = console.log as jest.Mock;
-      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
-      expect(res.newPrompt).toBe('np');
-      expect(call).toBe(2);
-      expect(logSpy).toHaveBeenCalled();
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-      delete process.env.__CFBundleIdentifier;
-    });
-
-    it('throws error when fallback editor is also missing', async () => {
-      const error = { code: 'ENOENT' };
-      let call = 0;
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      process.env.__CFBundleIdentifier = 'com.jetbrains.WebStorm';
-      jest.spyOn(require('child_process'), 'spawn').mockImplementation(() => {
-        call++;
-        return {
-          on: (ev: string, cb: any) => {
-            if (ev === 'error') cb(error);
-          },
-        } as any;
-      });
-      (ui.fs.readFile as jest.Mock).mockResolvedValue('x\n--- TYPE YOUR PROMPT ABOVE THIS LINE ---');
-      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow();
-      expect(call).toBe(2);
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-      delete process.env.__CFBundleIdentifier;
-    });
-  });
 
   describe('getUserInteraction flows', () => {
     let ui: UserInterface;
     beforeEach(() => {
-      jest.resetAllMocks();
+      jest.clearAllMocks();
       ui = new UserInterface(baseConfig as any);
       jest.spyOn(console, 'log').mockImplementation(() => {});
       jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -275,7 +194,7 @@ describe('UserInterface', () => {
   describe('selectOrCreateConversation', () => {
     let ui: UserInterface;
     beforeEach(() => {
-      jest.resetAllMocks();
+      jest.clearAllMocks();
       ui = new UserInterface(baseConfig as any);
       jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
@@ -316,7 +235,7 @@ describe('UserInterface', () => {
     let ui: UserInterface;
     const fsPromises = require('fs/promises');
     beforeEach(() => {
-      jest.resetAllMocks();
+      jest.clearAllMocks();
       ui = new UserInterface(baseConfig as any);
     });
 
@@ -341,62 +260,11 @@ describe('UserInterface', () => {
     });
   });
 
-  describe('additional getPromptViaSublimeLoop flows', () => {
-    let ui: UserInterface;
-    beforeEach(() => {
-      jest.resetAllMocks();
-      ui = new UserInterface({ chatsDir: '/chats', context: {} } as any);
-      jest.spyOn(console, 'log').mockImplementation(() => {});
-      jest.spyOn(console, 'error').mockImplementation(() => {});
-      jest.spyOn(console, 'warn').mockImplementation(() => {});
-    });
-
-    it('handles missing editor file', async () => {
-      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
-      jest.spyOn(require('fs/promises'), 'access').mockRejectedValue(Object.assign(new Error('x'), { code: 'ENOENT' }));
-      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
-      expect(res.newPrompt).toBeNull();
-    });
-
-    it('returns null when no changes made', async () => {
-      let content = '';
-      jest.spyOn(ui.fs, 'writeFile').mockImplementation((_f, d) => { content = d; return Promise.resolve(); });
-      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
-      jest.spyOn(ui.fs, 'readFile').mockImplementation(async () => content);
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
-      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
-      expect(res.newPrompt).toBeNull();
-    });
-
-    it('returns null when no prompt extracted', async () => {
-      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
-      jest.spyOn(ui.fs, 'readFile').mockResolvedValue('   \n--- TYPE YOUR PROMPT ABOVE THIS LINE ---\nold');
-      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
-      const res = await ui.getPromptViaSublimeLoop('c', [], '/tmp/edit');
-      expect(res.newPrompt).toBeNull();
-    });
-
-    it('throws when readFile fails unexpectedly', async () => {
-      jest.spyOn(ui.fs, 'writeFile').mockResolvedValue();
-      jest.spyOn(require('fs/promises'), 'access').mockResolvedValue(undefined);
-      jest.spyOn(ui.fs, 'readFile').mockRejectedValue(new Error('boom'));
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
-      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow('boom');
-    });
-
-    it('throws when writeFile fails', async () => {
-      jest.spyOn(ui.fs, 'writeFile').mockRejectedValue(new Error('fail'));
-      jest.spyOn(require('child_process'), 'spawn').mockReturnValue({ on: (e: string, cb: any) => e === 'close' && cb(0) } as any);
-      await expect(ui.getPromptViaSublimeLoop('c', [], '/tmp/edit')).rejects.toThrow('fail');
-    });
-  });
 
   describe('additional getUserInteraction modes', () => {
     let ui: UserInterface;
     beforeEach(() => {
-      jest.resetAllMocks();
+      jest.clearAllMocks();
       ui = new UserInterface(baseConfig as any);
       jest.spyOn(console, 'log').mockImplementation(() => {});
       jest.spyOn(console, 'warn').mockImplementation(() => {});
