@@ -14,11 +14,6 @@ export async function applyDiffIteratively(
     diff: string,
     maxAttempts = 10
 ): Promise<boolean> {
-    // Always request corrected diffs from the Gemini Pro model (gemini-2.5-pro)
-    // because it generally produces higher-quality patches than the cheaper
-    // Flash model.  The boolean flag is inverted in AIClient: `false` chooses
-    // the primary/pro model.
-    const USE_PRO_MODEL = false;
     let currentDiff = diff;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (currentDiff.trim().length === 0) {
@@ -59,7 +54,8 @@ export async function applyDiffIteratively(
         try {
             currentDiff = await ai.getResponseTextFromAI(
                 [{ role: 'user', content: prompt }],
-                USE_PRO_MODEL
+                false,
+                true
             );
         } catch (err) {
             console.error(chalk.red('Failed to get corrected diff from AI:'), err);

@@ -36,12 +36,17 @@ class AIClient {
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
     config: Config;
+    useOpenAIDiffs: boolean;
 
     constructor(config: Config) {
         this.config = config;
         this.proModel = new Gemini2ProModel(config);
         this.flashModel = new Gemini2FlashModel(config);
         this.fs = new FileSystem();
+        // Automatically enable OpenAI-based diff fixes when credentials exist
+        // The Config type currently has no explicit `openai` property, so cast
+        // to `any` to check for an API key if present.
+        this.useOpenAIDiffs = !!(config as any).openai?.api_key;
     }
 
     private countTokens(text: string): number {
@@ -163,12 +168,20 @@ class AIClient {
     // The ConsolidationGenerator will prepend its specific hidden instruction.
     async getResponseTextFromAI(
         messages: Message[], // Expects caller to format messages correctly
-        useFlashModel: boolean = false
+        useFlashModel: boolean = false,
+        useOpenAI: boolean = false
     ): Promise<string> {
         // ... (Implementation remains the same - no hidden prompt added here) ...
         if (!messages || messages.length === 0) {
             console.error(chalk.red("Cannot get raw AI response with empty message history."));
             throw new Error("Cannot get raw AI response with empty message history.");
+        }
+
+        if (useOpenAI) {
+            if (!this.useOpenAIDiffs) {
+                throw new Error('OpenAI API key not configured');
+            }
+            console.warn(chalk.yellow('OpenAI diff generation not implemented; falling back to Gemini.'));
         }
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;
