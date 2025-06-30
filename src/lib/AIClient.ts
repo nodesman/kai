@@ -37,7 +37,7 @@ class AIClient {
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
     private openAIModel?: OpenAIMiniModel;
-    public useOpenAIDiffs: boolean;
+    public useOpenAIDiffs: boolean = false;
     config: Config;
 
     constructor(config: Config) {
@@ -50,6 +50,10 @@ class AIClient {
         this.fs = new FileSystem();
         // Automatically enable OpenAI-based diff fixes when credentials exist
         this.useOpenAIDiffs = !!config.openai?.api_key;
+    }
+
+    setUseOpenAIForDiffs(flag: boolean) {
+        this.useOpenAIDiffs = flag && !!this.openAIModel;
     }
 
     private countTokens(text: string): number {
