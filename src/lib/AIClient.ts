@@ -4,6 +4,7 @@ import { FileSystem } from './FileSystem';
 // Import BOTH model classes
 import Gemini2ProModel from "./models/Gemini2ProModel";
 import Gemini2FlashModel from "./models/Gemini2FlashModel"; // Added Flash model
+import OpenAIMiniModel from "./models/OpenAIMiniModel";
 // Import Config class itself
 import { Config } from "./Config";
 import Conversation, { Message } from "./models/Conversation";
@@ -35,18 +36,20 @@ class AIClient {
     fs: FileSystem;
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
+    private openAIModel?: OpenAIMiniModel;
+    public useOpenAIDiffs: boolean;
     config: Config;
-    useOpenAIDiffs: boolean;
 
     constructor(config: Config) {
         this.config = config;
         this.proModel = new Gemini2ProModel(config);
         this.flashModel = new Gemini2FlashModel(config);
+        if (config.openai?.api_key) {
+            this.openAIModel = new OpenAIMiniModel(config);
+        }
         this.fs = new FileSystem();
         // Automatically enable OpenAI-based diff fixes when credentials exist
-        // The Config type currently has no explicit `openai` property, so cast
-        // to `any` to check for an API key if present.
-        this.useOpenAIDiffs = !!(config as any).openai?.api_key;
+        this.useOpenAIDiffs = !!config.openai?.api_key;
     }
 
     private countTokens(text: string): number {
@@ -178,10 +181,11 @@ class AIClient {
         }
 
         if (useOpenAI) {
-            if (!this.useOpenAIDiffs) {
-                throw new Error('OpenAI API key not configured');
+            if (!this.openAIModel) {
+                throw new Error('OpenAI model is not configured.');
             }
-            console.warn(chalk.yellow('OpenAI diff generation not implemented; falling back to Gemini.'));
+            console.log(chalk.blue(`Querying OpenAI for simple text...`));
+            return this.openAIModel.getResponseFromAI(messages);
         }
 
         const modelToCall = useFlashModel ? this.flashModel : this.proModel;

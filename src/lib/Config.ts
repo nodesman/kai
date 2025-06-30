@@ -42,6 +42,12 @@ interface AnalysisConfig {
     // phind_command?: string; // REMOVED - Determined automatically
 }
 
+// *** NEW: OpenAI Config Interface ***
+interface OpenAIConfig {
+    api_key?: string;
+    model_name?: string;
+}
+
 // *** ADDED: Context Config Interface ***
 interface ContextConfig {
     mode?: 'full' | 'analysis_cache' | 'dynamic'; // Added 'dynamic' mode
@@ -53,6 +59,7 @@ interface IConfig { // Renamed to IConfig to avoid conflict with Config class na
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
     analysis: Required<AnalysisConfig>; // Add analysis section
     context: ContextConfig; // Add context section (mode is optional until resolved)
+    openai?: Required<OpenAIConfig>; // Optional OpenAI settings when provided
     chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
@@ -62,6 +69,7 @@ type YamlConfigData = {
     project?: Partial<ProjectConfig>;
     analysis?: Partial<AnalysisConfig>; // phind_command is removed from AnalysisConfig itself
     context?: Partial<ContextConfig>; // Added context
+    openai?: Partial<OpenAIConfig>; // Optional OpenAI section
 };
 
 // --- Config Class ---
@@ -70,6 +78,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     project: Required<ProjectConfig>; // Use Required utility type
     analysis: Required<AnalysisConfig>; // Add analysis property
     context: ContextConfig; // Add context property (mode is optional until resolved)
+    openai?: Required<OpenAIConfig>; // Optional OpenAI config
     chatsDir: string; // Absolute path
     private configFilePath: string; // Store path for saving
 
@@ -82,6 +91,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         this.analysis = loadedConfig.analysis; // Assign loaded analysis config
         // 'context' is loaded as potentially undefined here
         this.context = loadedConfig.context;   // Assign loaded context config
+        this.openai = loadedConfig.openai; // Assign optional OpenAI config
         this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 
@@ -125,6 +135,13 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         const defaultGenerationMaxRetries = 3;
         const defaultGenerationRetryBaseDelayMs = 2000; // 2 seconds base
         const defaultInteractivePromptReview = false;
+
+        // OpenAI defaults
+        const openaiApiKey = process.env.OPENAI_API_KEY || yamlConfig.openai?.api_key;
+        const finalOpenAIConfig = openaiApiKey ? {
+            api_key: openaiApiKey,
+            model_name: yamlConfig.openai?.model_name || 'gpt-3.5-turbo',
+        } : undefined;
 
         const finalGeminiConfig: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig } = {
             api_key: apiKey, // Mandatory, loaded from env
@@ -176,7 +193,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             project: finalProjectConfig,
             analysis: finalAnalysisConfig, // Return loaded analysis config
             context: finalContextConfig,   // Return loaded context config
-            chatsDir: absoluteChatsDir // Return the calculated path
+            chatsDir: absoluteChatsDir,
+            ...(finalOpenAIConfig ? { openai: finalOpenAIConfig } : {}) // Include if defined
         };
     }
 
@@ -216,6 +234,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 generation_retry_base_delay_ms: this.gemini.generation_retry_base_delay_ms,
                 interactive_prompt_review: this.gemini.interactive_prompt_review,
             },
+            ...(this.openai ? { openai: { model_name: this.openai.model_name } } : {}),
         };
 
         try {
@@ -268,4 +287,4 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
 // Export the class implementation as 'Config'
 export { ConfigLoader as Config };
 // Export the interface type separately if needed for type hinting elsewhere
-export type { IConfig, GeminiConfig, ProjectConfig, AnalysisConfig, ContextConfig };
+export type { IConfig, GeminiConfig, ProjectConfig, AnalysisConfig, ContextConfig, OpenAIConfig };
