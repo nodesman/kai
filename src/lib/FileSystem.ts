@@ -12,6 +12,7 @@ import type { ParsedDiff, Hunk } from 'diff';
 // --- ADDED: Import Analysis Cache Types ---
 // Import M2 structure
 import { ProjectAnalysisCache, AnalysisCacheEntry } from './analysis/types'; // Adjust path if needed
+import { JsonlFile } from './JsonlFile';
 
 // Define items typically ignored when checking for "emptiness"
 const SAFE_TO_IGNORE_FOR_EMPTY_CHECK = new Set([
@@ -254,64 +255,18 @@ class FileSystem {
     }
     // --- End project file reading methods ---
 
-    // --- JSONL/Directory methods ---
+    // --- JSONL/Directory methods delegated to JsonlFile ---
 
     async listJsonlFiles(dirPath: string): Promise<string[]> {
-        // Ensure the directory exists first using the generic method
-        // It's the caller's responsibility (like UserInterface) to ensure this is the *correct* dir (e.g., config.chatsDir)
-        await this.ensureDirExists(dirPath);
-
-        // Proceed with listing
-        try {
-            const files = await fsPromises.readdir(dirPath);
-            return files
-                .filter(file => file.endsWith('.jsonl'))
-                .map(file => path.basename(file, '.jsonl'));
-        } catch (error) {
-            // EnsureDirExists handles ENOENT, so this catch is for other readdir errors
-             console.error(chalk.red(`Error listing files in ${dirPath}:`), error);
-             return []; // Return empty on error
-        }
+        return new JsonlFile(this, dirPath).list();
     }
 
     async readJsonlFile(filePath: string): Promise<any[]> {
-        try {
-            await fsPromises.access(filePath);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                return [];
-            }
-            console.error(`Error accessing file ${filePath} for reading:`, error);
-            throw error;
-        }
-
-        try {
-            const content = await this.readFile(filePath);
-            if (!content || !content.trim()) {
-                return [];
-            }
-            return content
-                .trim()
-                .split('\n')
-                .map(line => JSON.parse(line));
-        } catch (error) {
-            console.error(`Error reading or parsing JSONL file ${filePath}:`, error);
-            throw new Error(`Failed to parse ${filePath}. Check its format.`);
-        }
+        return new JsonlFile(this, filePath).read();
     }
 
     async appendJsonlFile(filePath: string, data: object): Promise<void> {
-        const logEntry = JSON.stringify(data) + '\n';
-        try {
-            const dir = path.dirname(filePath);
-            // Use ensureDirExists here, assuming the log file might be elsewhere
-            // But typically it will be in .kai/logs which should already exist
-            await this.ensureDirExists(dir);
-            await fsPromises.appendFile(filePath, logEntry, 'utf-8');
-        } catch (error) {
-            console.error(`Error appending to JSONL file ${filePath}:`, error);
-            throw error;
-        }
+        return new JsonlFile(this, filePath).append(data);
     }
 
     // --- END JSONL/Directory methods ---

@@ -4,6 +4,7 @@ import { FileSystem } from './FileSystem';
 // Import BOTH model classes
 import Gemini2ProModel from "./models/Gemini2ProModel";
 import Gemini2FlashModel from "./models/Gemini2FlashModel"; // Added Flash model
+import AnthropicClaudeModel from "./models/AnthropicClaudeModel";
 // Import Config class itself
 import { Config } from "./Config";
 import Conversation, { Message } from "./models/Conversation";
@@ -35,12 +36,16 @@ class AIClient {
     fs: FileSystem;
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
+    private anthropicModel?: AnthropicClaudeModel;
     config: Config;
 
     constructor(config: Config) {
         this.config = config;
         this.proModel = new Gemini2ProModel(config);
         this.flashModel = new Gemini2FlashModel(config);
+        if ((config as any).anthropic?.api_key) {
+            this.anthropicModel = new AnthropicClaudeModel(config);
+        }
         this.fs = new FileSystem();
     }
 
@@ -61,7 +66,8 @@ class AIClient {
         conversation: Conversation,
         conversationFilePath: string,
         contextString?: string,
-        useFlashModel: boolean = false
+        useFlashModel: boolean = false,
+        useAnthropicModel: boolean = false
     ): Promise<string> { // Adjusted: This method ONLY returns string for chat
         const messages = conversation.getMessages();
         const lastMessage = messages[messages.length - 1];
@@ -136,8 +142,18 @@ class AIClient {
         ];
         // --- End AI message preparation ---
 
-        const modelToCall = useFlashModel ? this.flashModel : this.proModel;
-        const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
+        const modelToCall =
+            useAnthropicModel && this.anthropicModel
+                ? this.anthropicModel
+                : useFlashModel
+                ? this.flashModel
+                : this.proModel;
+        const modelLogName =
+            useAnthropicModel && this.anthropicModel
+                ? this.anthropicModel.modelName
+                : useFlashModel
+                ? this.flashModel.modelName
+                : this.proModel.modelName;
         console.log(chalk.blue(`Selecting model instance for chat: ${modelLogName}`));
 
         try {

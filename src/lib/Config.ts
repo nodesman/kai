@@ -47,12 +47,21 @@ interface ContextConfig {
     mode?: 'full' | 'analysis_cache' | 'dynamic'; // Added 'dynamic' mode
 }
 
+// *** ADDED: Anthropic Claude Config Interface ***
+interface AnthropicConfig {
+    api_key: string;
+    model_name: string;
+    max_output_tokens?: number;
+}
+
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig }; // Most fields are required, rate_limit is optional object
     project: Required<ProjectConfig>; // Make project settings required internally after defaults
     analysis: Required<AnalysisConfig>; // Add analysis section
     context: ContextConfig; // Add context section (mode is optional until resolved)
+    /** Optional configuration for Anthropic Claude model */
+    anthropic?: Required<AnthropicConfig>;
     chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
@@ -62,6 +71,7 @@ type YamlConfigData = {
     project?: Partial<ProjectConfig>;
     analysis?: Partial<AnalysisConfig>; // phind_command is removed from AnalysisConfig itself
     context?: Partial<ContextConfig>; // Added context
+    anthropic?: Partial<AnthropicConfig>;
 };
 
 // --- Config Class ---
@@ -70,6 +80,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     project: Required<ProjectConfig>; // Use Required utility type
     analysis: Required<AnalysisConfig>; // Add analysis property
     context: ContextConfig; // Add context property (mode is optional until resolved)
+    /** Optional configuration for Anthropic Claude model */
+    anthropic?: Required<AnthropicConfig>;
     chatsDir: string; // Absolute path
     private configFilePath: string; // Store path for saving
 
@@ -168,15 +180,29 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         };
         // *** END ADDED ***
 
+        // *** ADDED: Default and Loading for Anthropic Config ***
+        // Load API key from environment if not in YAML
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+        const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-20250514';
+        const finalAnthropicConfig: Required<AnthropicConfig> = {
+            api_key: anthropicApiKey || yamlConfig.anthropic?.api_key || '',
+            model_name: yamlConfig.anthropic?.model_name || DEFAULT_CLAUDE_MODEL,
+            max_output_tokens: yamlConfig.anthropic?.max_output_tokens || finalGeminiConfig.max_output_tokens,
+        };
+        // If no API key available, skip anthropic section
+        const anthropicSection = finalAnthropicConfig.api_key ? finalAnthropicConfig : undefined;
+        // *** END ADDED ***
+
         // Calculate absolute chats directory path (DO NOT CREATE IT HERE)
         const absoluteChatsDir = path.resolve(process.cwd(), finalProjectConfig.chats_dir);
 
         return {
             gemini: finalGeminiConfig,
             project: finalProjectConfig,
-            analysis: finalAnalysisConfig, // Return loaded analysis config
-            context: finalContextConfig,   // Return loaded context config
-            chatsDir: absoluteChatsDir // Return the calculated path
+            analysis: finalAnalysisConfig,
+            context: finalContextConfig,
+            anthropic: anthropicSection,
+            chatsDir: absoluteChatsDir,
         };
     }
 
@@ -216,6 +242,12 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 generation_retry_base_delay_ms: this.gemini.generation_retry_base_delay_ms,
                 interactive_prompt_review: this.gemini.interactive_prompt_review,
             },
+            // Save Anthropic settings if defined
+            anthropic: this.anthropic ? {
+                api_key: this.anthropic.api_key,
+                model_name: this.anthropic.model_name,
+                max_output_tokens: this.anthropic.max_output_tokens,
+            } : undefined,
         };
 
         try {

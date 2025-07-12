@@ -158,6 +158,8 @@ Key settings include:
 *   `context.mode`: (`full`, `analysis_cache`, `dynamic`) - Often set automatically, but can be overridden.
 *   `gemini.model_name`: Primary Gemini model to use.
 *   `gemini.subsequent_chat_model_name`: Faster/cheaper Gemini model for subsequent turns (if configured).
+*   `anthropic.api_key`: API key for Anthropic Claude model (loaded from the `ANTHROPIC_API_KEY` environment variable).
+*   `anthropic.model_name`: Claude model to use for Anthropic requests (default: `claude-opus-4-20250514`).
 *   `gemini.max_output_tokens`: Max tokens for the AI's response.
 *   `gemini.max_prompt_tokens`: Max tokens for the input prompt (context limit).
 *   `gemini.generation_max_retries`: Retries for the file generation step in consolidation.
