@@ -276,6 +276,13 @@ class UserInterface {
                 value: secondaryModel,
             },
         ];
+        const anthropicModel = this.config.anthropic?.model_name;
+        if (anthropicModel) {
+            modelChoices.push({
+                name: `Anthropic Model (${anthropicModel}) - Claude from Anthropic`,
+                value: anthropicModel,
+            });
+        }
         const { modelChoice } = await inquirer.prompt([
             {
                 type: 'list',
@@ -390,6 +397,13 @@ class UserInterface {
                     value: secondaryModel
                 },
             ];
+            const anthropicModel = this.config.anthropic?.model_name;
+            if (anthropicModel) {
+                modelChoices.push({
+                    name: `Anthropic Model (${anthropicModel}) - Claude from Anthropic`,
+                    value: anthropicModel
+                });
+            }
 
             const { modelChoice } = await inquirer.prompt([
                 {
