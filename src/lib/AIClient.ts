@@ -66,8 +66,8 @@ class AIClient {
         conversation: Conversation,
         conversationFilePath: string,
         contextString?: string,
-        useFlashModel: boolean = false,
-        useAnthropicModel: boolean = false
+        useFlashModel: boolean = false, // This parameter is now ignored but kept for compatibility
+        useAnthropicModel: boolean = false // This parameter is now ignored but kept for compatibility
     ): Promise<string> { // Adjusted: This method ONLY returns string for chat
         const messages = conversation.getMessages();
         const lastMessage = messages[messages.length - 1];
@@ -142,18 +142,15 @@ class AIClient {
         ];
         // --- End AI message preparation ---
 
+        const currentModelName = this.config.gemini.model_name.toLowerCase();
         const modelToCall =
-            useAnthropicModel && this.anthropicModel
+            currentModelName.startsWith('claude') && this.anthropicModel
                 ? this.anthropicModel
-                : useFlashModel
+                : currentModelName === this.flashModel.modelName.toLowerCase()
                 ? this.flashModel
                 : this.proModel;
-        const modelLogName =
-            useAnthropicModel && this.anthropicModel
-                ? this.anthropicModel.modelName
-                : useFlashModel
-                ? this.flashModel.modelName
-                : this.proModel.modelName;
+
+        const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Selecting model instance for chat: ${modelLogName}`));
 
         try {
@@ -179,7 +176,7 @@ class AIClient {
     // The ConsolidationGenerator will prepend its specific hidden instruction.
     async getResponseTextFromAI(
         messages: Message[], // Expects caller to format messages correctly
-        useFlashModel: boolean = false
+        useFlashModel: boolean = false // This parameter is now ignored but kept for compatibility
     ): Promise<string> {
         // ... (Implementation remains the same - no hidden prompt added here) ...
         if (!messages || messages.length === 0) {
@@ -187,8 +184,15 @@ class AIClient {
             throw new Error("Cannot get raw AI response with empty message history.");
         }
 
-        const modelToCall = useFlashModel ? this.flashModel : this.proModel;
-        const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
+        const currentModelName = this.config.gemini.model_name.toLowerCase();
+        const modelToCall =
+            currentModelName.startsWith('claude') && this.anthropicModel
+                ? this.anthropicModel
+                : currentModelName === this.flashModel.modelName.toLowerCase()
+                ? this.flashModel
+                : this.proModel;
+        
+        const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Querying AI for simple text (using ${modelLogName})...`));
 
         try {
@@ -210,11 +214,19 @@ class AIClient {
     // Callers using function calls are expected to structure the full request.
     async generateContent(
         request: GenerateContentRequest, // Use the SDK's request type
-        useFlashModel: boolean = false
+        useFlashModel: boolean = false, // This parameter is now ignored but kept for compatibility
+        useAnthropicModel: boolean = false // This parameter is now ignored but kept for compatibility
     ): Promise<GenerateContentResult> { // Return the SDK's result type
         // ... (Implementation remains the same - no hidden prompt added here) ...
-        const modelToCall = useFlashModel ? this.flashModel : this.proModel;
-        const modelLogName = useFlashModel ? this.flashModel.modelName : this.proModel.modelName;
+        const currentModelName = this.config.gemini.model_name.toLowerCase();
+        const modelToCall =
+            currentModelName.startsWith('claude') && this.anthropicModel
+                ? this.anthropicModel
+                : currentModelName === this.flashModel.modelName.toLowerCase()
+                ? this.flashModel
+                : this.proModel;
+
+        const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Generating content (potentially with function calls) using ${modelLogName}...`));
 
         try {

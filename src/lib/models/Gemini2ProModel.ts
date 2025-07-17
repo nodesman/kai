@@ -40,9 +40,24 @@ class Gemini2ProModel extends BaseModel {
             throw new Error("Gemini API key is missing in the configuration.");
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        // --- Use Pro model name from config (guaranteed by Config.ts) ---
-        this.modelName = config.gemini.model_name;
-        console.log(chalk.yellow(`Initializing Gemini Model instance with: ${this.modelName}`));
+        const selectedModelName = config.gemini.model_name;
+
+        // If a non-Gemini model (like Claude) is selected, `config.gemini.model_name`
+        // will hold its name. We must avoid initializing a Gemini client with it,
+        // which would cause a crash. The correct model (e.g., Anthropic) will be
+        // selected and used by the AIClient later in the request lifecycle.
+        if (!selectedModelName.toLowerCase().startsWith('gemini')) {
+            this.modelName = selectedModelName; // Store it for logging/debugging
+            console.log(chalk.dim(`Skipping Google AI initialization for non-Gemini model: ${selectedModelName}`));
+            this.model = {} as GenerativeModel; // Assign a dummy object to prevent downstream 'undefined' errors
+            this.promptReviewer = new InteractivePromptReviewer(config);
+            this.maxRetries = config.gemini.generation_max_retries ?? 3;
+            this.retryBaseDelay = config.gemini.generation_retry_base_delay_ms ?? 2000;
+            return; // Exit constructor early
+        }
+
+        this.modelName = selectedModelName;
+        console.log(chalk.yellow(`Initializing Gemini Pro Model instance with: ${this.modelName}`));
         try {
             this.model = this.genAI.getGenerativeModel({ model: this.modelName });
         } catch (error) {

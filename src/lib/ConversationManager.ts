@@ -246,16 +246,19 @@ export class ConversationManager {
             }
             // --- End Context Building Strategy ---
 
-            // Determine if flash model should be used (e.g., based on config or logic)
-            // For now, defaulting to false (use primary model) for standard chat.
-            const useFlashModel = false; // Example: could check config later
+            // Determine if flash or Anthropic model should be used
+            const useFlashModel = false; // TODO: expose via config if needed
+            const useAnthropicModel =
+                this.config.anthropic?.model_name !== undefined
+                && this.config.gemini.model_name === this.config.anthropic.model_name;
 
-            // Use the injected aiClient instance
-             await this.aiClient.getResponseFromAI( // Pass the fetched context
+            // Use the injected aiClient instance, passing Anthropic flag when selected
+            await this.aiClient.getResponseFromAI(
                 conversation,
                 conversationFilePath,
-                contextResult.context, // Pass the potentially dynamic context string
-                useFlashModel
+                contextResult.context,
+                useFlashModel,
+                useAnthropicModel
             );
             // AIClient internally adds the assistant response to the conversation object
 

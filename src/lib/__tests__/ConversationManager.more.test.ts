@@ -28,7 +28,7 @@ describe('ConversationManager additional coverage', () => {
     const newAI = { getResponseFromAI: jest.fn().mockResolvedValue(undefined), logConversation: jest.fn() };
     manager.updateAIClient(newAI as any);
     await (manager as any)._callAIWithContext(convo, 'hi', '/c.jsonl');
-    expect(newAI.getResponseFromAI).toHaveBeenCalledWith(convo, '/c.jsonl', 'ctx', false);
+    expect(newAI.getResponseFromAI).toHaveBeenCalledWith(convo, '/c.jsonl', 'ctx', false, false);
   });
 
   it('handles user loop until null prompt', async () => {

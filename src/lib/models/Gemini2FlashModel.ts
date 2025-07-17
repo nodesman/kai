@@ -33,9 +33,20 @@ class Gemini2FlashModel extends BaseModel {
             throw new Error("Gemini API key is missing in the configuration.");
         }
         this.genAI = new GoogleGenerativeAI(config.gemini.api_key);
-        // --- Use Flash model name from config (guaranteed by Config.ts) ---
-        this.modelName = config.gemini.subsequent_chat_model_name;
-        // --- End Flash model name ---
+        const selectedModelName = config.gemini.subsequent_chat_model_name;
+
+        // If a non-Gemini model (like Claude) is selected elsewhere, the config might
+        // be temporarily inconsistent. This check prevents a crash.
+        if (!selectedModelName.toLowerCase().startsWith('gemini')) {
+            this.modelName = selectedModelName; // Store it for logging/debugging
+            console.log(chalk.dim(`Skipping Google AI initialization for non-Gemini model: ${selectedModelName}`));
+            this.model = {} as GenerativeModel; // Assign a dummy object to prevent downstream 'undefined' errors
+            this.maxRetries = config.gemini.generation_max_retries ?? 3;
+            this.retryBaseDelay = config.gemini.generation_retry_base_delay_ms ?? 2000;
+            return; // Exit constructor early
+        }
+
+        this.modelName = selectedModelName;
         console.log(chalk.yellow(`Initializing Gemini Flash Model instance with: ${this.modelName}`));
         try {
             this.model = this.genAI.getGenerativeModel({ model: this.modelName });

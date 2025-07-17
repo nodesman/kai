@@ -2,6 +2,12 @@ import BaseModel from './BaseModel';
 import { Config } from '../Config';
 import { Message } from './Conversation';
 import chalk from 'chalk';
+import {
+  BlockReason,
+  FinishReason,
+  GenerateContentRequest,
+  GenerateContentResult,
+} from '@google/generative-ai';
 
 /**
  * Model wrapper for Anthropic Claude via the @anthropic-ai/sdk.
@@ -29,6 +35,63 @@ export default class AnthropicClaudeModel extends BaseModel {
     }
   }
 
+  async generateContent(
+    request: GenerateContentRequest
+  ): Promise<GenerateContentResult> {
+    let systemPrompt = '';
+    const messages = request.contents
+      .map((c) => {
+        if (c.role === 'system') {
+          systemPrompt = c.parts.map((p) => ('text' in p ? p.text : '')).join('');
+          return null; // Remove system message from the array
+        }
+        return {
+          role: c.role === 'model' ? 'assistant' : c.role,
+          content: c.parts.map((p) => ('text' in p ? p.text : '')).join(''),
+        };
+      })
+      .filter(Boolean); // Filter out null entries
+
+    const params: any = {
+      model: this.modelName,
+      messages: messages,
+      max_tokens:
+        this.config.anthropic?.max_output_tokens ??
+        this.config.gemini.max_output_tokens,
+    };
+
+    if (systemPrompt) {
+      params.system = systemPrompt;
+    }
+
+    const response = await this.client.messages.create(params);
+
+    const responseText = response.content[0].text;
+
+    return {
+      response: {
+        candidates: [
+          {
+            content: {
+              parts: [{ text: responseText }],
+              role: 'assistant',
+            },
+            finishReason: FinishReason.STOP,
+            index: 0,
+            safetyRatings: [],
+          },
+        ],
+        promptFeedback: {
+          blockReason: BlockReason.BLOCKED_REASON_UNSPECIFIED,
+          safetyRatings: [],
+        },
+        text: () => responseText,
+        functionCall: () => undefined,
+        functionCalls: () => undefined,
+      },
+    };
+  }
+
   /**
    * Sends a chat conversation to Claude and returns the assistant's response.
    */
@@ -36,35 +99,42 @@ export default class AnthropicClaudeModel extends BaseModel {
     if (!messages.length) {
       throw new Error('Cannot get AI response with empty message history.');
     }
-    // Build the prompt using Anthropic's human/AI tags
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { HUMAN_PROMPT, AI_PROMPT } = require('@anthropic-ai/sdk');
-    let prompt = '';
-    for (const msg of messages) {
-      if (msg.role === 'user') {
-        prompt += `${HUMAN_PROMPT} ${msg.content}\n\n`;
-      } else if (msg.role === 'assistant') {
-        prompt += `${AI_PROMPT} ${msg.content}\n\n`;
-      }
-    }
-    prompt += AI_PROMPT;
+
+    let systemPrompt = '';
+    const filteredMessages = messages
+      .map((msg) => {
+        if (msg.role === 'system') {
+          systemPrompt = msg.content;
+          return null;
+        }
+        return {
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.content,
+        };
+      })
+      .filter(Boolean);
 
     const maxTokens =
-      this.config.anthropic.max_output_tokens ?? this.config.gemini.max_output_tokens;
-    const params: Record<string, any> = {
+      this.config.anthropic.max_output_tokens ??
+      this.config.gemini.max_output_tokens;
+    const params: any = {
       model: this.modelName,
-      prompt,
+      messages: filteredMessages,
+      max_tokens: maxTokens,
     };
-    if (typeof maxTokens === 'number') {
-      params.max_tokens_to_sample = maxTokens;
+
+    if (systemPrompt) {
+      params.system = systemPrompt;
     }
 
-    const response = await this.client.complete(params);
-    const completion = response.completion;
+    const response = await this.client.messages.create(params);
+    const completion = response.content[0].text;
     if (!completion) {
       throw new Error(`Anthropic Claude response missing completion text.`);
     }
-    console.log(chalk.blue(`Received response from Claude (${completion.length} characters)`));
+    console.log(
+      chalk.blue(`Received response from Claude (${completion.length} characters)`)
+    );
     return completion;
   }
 }

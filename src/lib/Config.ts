@@ -94,6 +94,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         this.analysis = loadedConfig.analysis; // Assign loaded analysis config
         // 'context' is loaded as potentially undefined here
         this.context = loadedConfig.context;   // Assign loaded context config
+        this.anthropic = loadedConfig.anthropic; // Assign loaded anthropic config
         this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 

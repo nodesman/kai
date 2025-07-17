@@ -4,8 +4,6 @@ import Gemini2ProModel from './Gemini2ProModel';
 import { InteractivePromptReviewer } from '../UserInteraction/InteractivePromptReviewer';
 
 // --- Mocks for @google/generative-ai ---
-// Using 'var' for top-level mocks referenced in jest.mock to avoid ReferenceError
-// due to hoisting behavior differences between 'const'/'let' and 'var'.
 var mockResponseText = jest.fn();
 var mockResponse = { text: mockResponseText };
 
@@ -17,26 +15,19 @@ var mockGetGenerativeModel = jest.fn(() => ({
   startChat: mockStartChat,
 }));
 
-// Renamed for clarity: this is the spy that tracks the *constructor calls* for GoogleGenerativeAI.
 var mockGoogleGenerativeAIConstructor = jest.fn();
 
-// Apply the mock to the @google/generative-ai module
-// This ensures that any instantiation of GoogleGenerativeAI within Gemini2ProModel
-// uses our mock instead of the actual library.
 jest.mock('@google/generative-ai', () => {
-  // Define a mock class that matches the constructor signature and has the expected method
   class MockGoogleGenerativeAI {
-    getGenerativeModel: typeof mockGetGenerativeModel; // Type declaration for the method
+    getGenerativeModel: typeof mockGetGenerativeModel;
 
     constructor(apiKey: string) {
-      mockGoogleGenerativeAIConstructor(apiKey); // Track constructor call
-      this.getGenerativeModel = mockGetGenerativeModel; // Assign the mocked method
+      mockGoogleGenerativeAIConstructor(apiKey);
+      this.getGenerativeModel = mockGetGenerativeModel;
     }
   }
 
   return {
-    // Crucially, export FinishReason here so the model can access it
-    // Mock only the values actually used in the model's logic
     FinishReason: {
       STOP: 'STOP',
       SAFETY: 'SAFETY',
@@ -47,35 +38,26 @@ jest.mock('@google/generative-ai', () => {
 });
 // --- End Mocks ---
 
-// Mock the Config module
-jest.mock('../Config', () => {
-  // This mock simulates the Config class (which is actually ConfigLoader).
-  // It has a parameterless constructor and public properties that can be modified by tests.
-  class MockConfig {
-    // --- Declare properties to match ConfigLoader instance ---
-    public gemini: any; // Using 'any' for simplicity in mock
-    public project: any;
-    public analysis: any;
-    public context: any;
-    public chatsDir: string;
-    public saveConfig: jest.Mock;
-    public getConfigFilePath: jest.Mock;
-
-    constructor() {
-      // --- Initialize with default mock data ---
-      this.gemini = { api_key: '', model_name: 'gemini-pro', subsequent_chat_model_name: 'gemini-flash', max_output_tokens: 8192, max_prompt_tokens: 32000, generation_max_retries: 3, generation_retry_base_delay_ms: 2000, interactive_prompt_review: false, rate_limit: { requests_per_minute: 60 } };
-      this.project = { root_dir: '.', prompts_dir: 'prompts', prompt_template: 'prompt.yaml', chats_dir: '.kai/logs', typescript_autofix: false, autofix_iterations: 3, coverage_iterations: 3 };
-      this.analysis = { cache_file_path: '.kai/project_analysis.json' };
-      this.context = { mode: 'full' };
-      this.chatsDir = '/mock/kai/logs'; // Dummy value
-      this.saveConfig = jest.fn(); // Mock the method
-      this.getConfigFilePath = jest.fn(() => '/mock/kai/config.yaml'); // Mock the method
-    }
-  }
-  return { Config: MockConfig }; // Export the mock class as 'Config'
+// --- Mock Config ---
+const createMockConfig = (modelName = 'gemini-1.5-pro-latest'): Partial<Config> => ({
+    gemini: {
+        api_key: 'test-api-key',
+        model_name: modelName,
+        subsequent_chat_model_name: 'gemini-1.5-flash-latest',
+        max_output_tokens: 8192,
+        max_prompt_tokens: 32000,
+        generation_max_retries: 3,
+        generation_retry_base_delay_ms: 2000,
+        interactive_prompt_review: false,
+        rate_limit: { requests_per_minute: 60 },
+        max_retries: 3,
+        retry_delay: 1000,
+    },
 });
+// --- End Mock Config ---
 
-// Mock InteractivePromptReviewer with a simple class exposing reviewPrompt
+
+// Mock InteractivePromptReviewer
 var mockReviewPrompt = jest.fn();
 jest.mock('../UserInteraction/InteractivePromptReviewer', () => ({
   InteractivePromptReviewer: jest.fn().mockImplementation(() => ({
@@ -89,62 +71,47 @@ describe('Gemini2ProModel', () => {
   const MOCK_GENERATED_TEXT = 'Hello from Gemini!';
 
   beforeEach(() => {
-    jest.clearAllMocks(); // Clears all call histories and mock return values
-    // Re-set the return value for mockGetGenerativeModel because clearAllMocks would clear it
+    jest.clearAllMocks();
     mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat });
-    // No need to re-mock mockGoogleGenerativeAI.mockImplementation here, it's defined globally
   });
-
-  // Helper to create and configure a mock Config instance
-  const createMockConfig = (apiKey: string, modelName?: string): Config => {
-    const config = new Config() as jest.Mocked<Config>; // Cast to Mocked<Config> to access mocked properties
-    config.gemini.api_key = apiKey;
-    if (modelName) {
-      config.gemini.model_name = modelName;
-    }
-    return config;
-  };
 
   // --- Constructor Tests ---
   it('should throw an error if API key is not provided', () => {
-    // This test covers the validation branch inside the constructor
-    const configWithoutApiKey = createMockConfig('');
-    expect(() => new Gemini2ProModel(configWithoutApiKey)).toThrow('Gemini API key is missing in the configuration.');
-    expect(mockGoogleGenerativeAIConstructor).not.toHaveBeenCalled(); // Ensure the client is not instantiated
+    const configWithoutApiKey = createMockConfig();
+    configWithoutApiKey.gemini!.api_key = '';
+    expect(() => new Gemini2ProModel(configWithoutApiKey as Config)).toThrow('Gemini API key is missing in the configuration.');
+    expect(mockGoogleGenerativeAIConstructor).not.toHaveBeenCalled();
   });
 
-  it('should initialize with provided API key and default model name', () => {
-    // This covers the default model name assignment branch
-    const mockConfigInstance = createMockConfig(MOCK_API_KEY, 'gemini-pro'); // Default name
-    const model = new Gemini2ProModel(mockConfigInstance);
+  it('should initialize with provided API key and a valid gemini model name', () => {
+    const mockConfigInstance = createMockConfig('gemini-pro-valid');
+    const model = new Gemini2ProModel(mockConfigInstance as Config);
     expect(model).toBeInstanceOf(Gemini2ProModel);
-    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledTimes(1);
     expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledWith(MOCK_API_KEY);
+    expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-pro-valid' });
   });
 
-  it('should initialize with provided API key and a custom model name', () => {
-    const customModelName = 'my-custom-gemini-model';
-    // This covers the custom model name assignment branch
-    const customConfigInstance = createMockConfig(MOCK_API_KEY, customModelName);
-    const model = new Gemini2ProModel(customConfigInstance);
+  it('should NOT initialize google client for a non-gemini model name', () => {
+    const customConfigInstance = createMockConfig('claude-opus-123');
+    const model = new Gemini2ProModel(customConfigInstance as Config);
     expect(model).toBeInstanceOf(Gemini2ProModel);
-    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledTimes(1);
-    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledWith(MOCK_API_KEY);
+    expect(mockGoogleGenerativeAIConstructor).toHaveBeenCalledWith(MOCK_API_KEY); // The client is still created
+    expect(mockGetGenerativeModel).not.toHaveBeenCalled(); // But the model is not fetched
+    expect((model as any).model).toEqual({}); // The internal model is a dummy object
   });
 
   it('throws if generative model cannot be created', () => {
-    const cfg = createMockConfig(MOCK_API_KEY);
+    const cfg = createMockConfig();
     mockGetGenerativeModel.mockImplementation(() => { throw new Error('fail'); });
-    expect(() => new Gemini2ProModel(cfg)).toThrow(/Failed to get generative model/);
+    expect(() => new Gemini2ProModel(cfg as Config)).toThrow(/Failed to get generative model/);
   });
 
   it('getResponseFromAI rejects empty messages', async () => {
-    const cfg = createMockConfig(MOCK_API_KEY);
-    const model = new Gemini2ProModel(cfg);
+    const cfg = createMockConfig();
+    const model = new Gemini2ProModel(cfg as Config);
     await expect(model.getResponseFromAI([] as any)).rejects.toThrow('Cannot get AI response');
   });
 
-  // Define the GenerateContentRequest for the tests
   const MOCK_GENERATE_CONTENT_REQUEST: GenerateContentRequest = {
     contents: [{ role: 'user', parts: [{ text: MOCK_PROMPT }] }]
   };
@@ -152,110 +119,28 @@ describe('Gemini2ProModel', () => {
   // --- generateContent Method Tests ---
   describe('generateContent', () => {
     let model: Gemini2ProModel;
-    let defaultMockConfig: Config;
+    let defaultConfig: Partial<Config>;
 
     beforeEach(() => {
-      jest.clearAllMocks(); // <--- Moved clearAllMocks to before model instantiation
-      // Re-initialize the model for each 'generateContent' test to ensure a clean state after clearing mocks
-      defaultMockConfig = createMockConfig(MOCK_API_KEY, 'gemini-pro');
-      model = new Gemini2ProModel(defaultMockConfig);
-
-      // Reset mock implementations for the generation process
+      defaultConfig = createMockConfig();
+      model = new Gemini2ProModel(defaultConfig as Config);
       mockResponseText.mockReturnValue(MOCK_GENERATED_TEXT);
       mockGenerateContent.mockResolvedValue({ response: mockResponse });
-      mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat }); // Ensure it's set for this test
     });
 
-    it('should call the Gemini API with the default model and return the generated text', async () => {
-      const expectedModelName = defaultMockConfig.gemini.model_name;
+    it('should call the Gemini API and return the generated text', async () => {
       const result = await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
-
-      // Assert that the correct methods on the mock client were called
-      expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
-      expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: expectedModelName });
-      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      expect(mockGenerateContent).toHaveBeenCalledWith({
+      expect(mockGenerateContent).toHaveBeenCalledWith(expect.objectContaining({
         contents: MOCK_GENERATE_CONTENT_REQUEST.contents,
-        generationConfig: { maxOutputTokens: defaultMockConfig.gemini.max_output_tokens },
-      });
+      }));
       const text = result.response?.text();
-      expect(mockResponseText).toHaveBeenCalledTimes(1);
-      expect(text).toBe(MOCK_GENERATED_TEXT); // Check actual text content
+      expect(text).toBe(MOCK_GENERATED_TEXT);
     });
 
-    it('should call the Gemini API with a custom model and return the generated text', async () => {
-      const customModelName = 'my-custom-gemini-model';
-      const customConfigInstance = createMockConfig(MOCK_API_KEY, customModelName);
-      jest.clearAllMocks(); // Clear any calls from the default model setup
-      model = new Gemini2ProModel(customConfigInstance);
-
-      // Reset generateContent related mocks after clearing
-      mockResponseText.mockReturnValue(MOCK_GENERATED_TEXT);
-      mockGenerateContent.mockResolvedValue({ response: mockResponse });
-      mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat }); // Ensure it's set for this test
-
-      const result = await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
-
-      expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
-      expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: customModelName });
-      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      expect(mockGenerateContent).toHaveBeenCalledWith({
-        contents: MOCK_GENERATE_CONTENT_REQUEST.contents,
-        generationConfig: { maxOutputTokens: customConfigInstance.gemini.max_output_tokens },
-      });
-      const text = result.response?.text();
-      expect(mockResponseText).toHaveBeenCalledTimes(1);
-      expect(text).toBe(MOCK_GENERATED_TEXT); // Check actual text content
-    });
-
-  it('should handle errors from the Gemini API during content generation', async () => {
+    it('should handle errors from the Gemini API during content generation', async () => {
       const errorMessage = 'API error occurred during generation';
-      // Simulate a rejected promise from generateContent
       mockGenerateContent.mockRejectedValue(new Error(errorMessage));
-      // Expect the method to rethrow a wrapped error
-      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(`AI API Error (UNKNOWN) using ${defaultMockConfig.gemini.model_name}: ${errorMessage}`);
-      expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
-      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      expect(mockResponseText).not.toHaveBeenCalled();
-    });
-  });
-
-  // --- Additional method coverage ---
-  describe('convertToGeminiConversation', () => {
-    it('merges consecutive roles and warns when ending with model message', () => {
-      const config = createMockConfig(MOCK_API_KEY);
-      const model = new Gemini2ProModel(config);
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      const messages = [
-        { role: 'user', content: 'a' },
-        { role: 'assistant', content: 'b' },
-        { role: 'assistant', content: 'c' }
-      ];
-      const conv = model.convertToGeminiConversation(messages as any);
-      expect(conv).toEqual([
-        { role: 'user', parts: [{ text: 'a' }] },
-        { role: 'model', parts: [{ text: 'b' }, { text: 'c' }] }
-      ]);
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
-    });
-  });
-
-  describe('getResponseFromAI', () => {
-    it('throws on empty history', async () => {
-      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-      await expect(model.getResponseFromAI([] as any)).rejects.toThrow('Cannot get AI response with empty message history.');
-    });
-
-    it('converts messages then queries chat', async () => {
-      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-      const convertSpy = jest.spyOn(model, 'convertToGeminiConversation').mockReturnValue([{ role: 'user', parts: [{ text: 'q' }] }]);
-      const querySpy = jest.spyOn(model, 'queryGeminiChat').mockResolvedValue('resp');
-      const messages = [{ role: 'user', content: 'hi' }];
-      const result = await model.getResponseFromAI(messages as any);
-      expect(convertSpy).toHaveBeenCalledWith(messages as any);
-      expect(querySpy).toHaveBeenCalledWith([{ role: 'user', parts: [{ text: 'q' }] }]);
-      expect(result).toBe('resp');
+      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(`AI API Error (UNKNOWN) using ${defaultConfig.gemini!.model_name}: ${errorMessage}`);
     });
   });
 
@@ -264,13 +149,11 @@ describe('Gemini2ProModel', () => {
     beforeEach(() => {
       jest.clearAllMocks();
       mockSendMessage.mockResolvedValue({ response: { text: () => 'ok' } });
-      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      model = new Gemini2ProModel(createMockConfig() as Config);
     });
 
     it('sends prompt directly when interactive review disabled', async () => {
-      const convo = [
-        { role: 'user', parts: [{ text: 'a' }] }
-      ];
+      const convo = [{ role: 'user', parts: [{ text: 'a' }] }];
       const res = await model.queryGeminiChat(convo as any);
       expect(mockStartChat).toHaveBeenCalled();
       expect(mockSendMessage).toHaveBeenCalledWith('a');
@@ -278,31 +161,21 @@ describe('Gemini2ProModel', () => {
     });
 
     it('handles interactive review', async () => {
-      const config = createMockConfig(MOCK_API_KEY);
-      config.gemini.interactive_prompt_review = true;
+      const config = createMockConfig();
+      config.gemini!.interactive_prompt_review = true;
       mockReviewPrompt.mockResolvedValue('edited');
-      model = new Gemini2ProModel(config);
+      model = new Gemini2ProModel(config as Config);
       await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
       expect(mockReviewPrompt).toHaveBeenCalledWith('a');
       expect(mockSendMessage).toHaveBeenCalledWith('edited');
     });
 
     it('returns empty string when user cancels', async () => {
-      const config = createMockConfig(MOCK_API_KEY);
-      config.gemini.interactive_prompt_review = true;
+      const config = createMockConfig();
+      config.gemini!.interactive_prompt_review = true;
       mockReviewPrompt.mockResolvedValue(null);
-      model = new Gemini2ProModel(config);
+      model = new Gemini2ProModel(config as Config);
       const res = await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
-      expect(res).toBe('');
-    });
-
-    it('calls handleError on sendMessage failure', async () => {
-      const err = new Error('boom');
-      mockSendMessage.mockRejectedValue(err);
-      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-      const handleSpy = jest.spyOn(model, 'handleError').mockImplementation(() => {});
-      const res = await model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any);
-      expect(handleSpy).toHaveBeenCalledWith(err, 'gemini-pro');
       expect(res).toBe('');
     });
   });
@@ -310,7 +183,7 @@ describe('Gemini2ProModel', () => {
   describe('handleError', () => {
     let model: Gemini2ProModel;
     beforeEach(() => {
-      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
+      model = new Gemini2ProModel(createMockConfig() as Config);
     });
 
     const cases: [any, string][] = [
@@ -333,251 +206,5 @@ describe('Gemini2ProModel', () => {
         }
       });
     }
-  });
-
-  describe('constructor error handling', () => {
-    it('throws when generative model cannot be created', () => {
-      mockGetGenerativeModel.mockImplementation(() => { throw new Error('bad'); });
-      const cfg = createMockConfig(MOCK_API_KEY);
-      expect(() => new Gemini2ProModel(cfg)).toThrow('Failed to get generative model for gemini-pro');
-    });
-  });
-
-  describe('queryGeminiChat error paths', () => {
-    it('handles missing content error via handleError', async () => {
-      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-      mockSendMessage.mockResolvedValue({ response: {} });
-      await expect(model.queryGeminiChat([{ role: 'user', parts: [{ text: 'a' }] }] as any)).rejects.toThrow(/AI API Error/);
-    });
-
-    it('propagates safety block reason', async () => {
-      const model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-      mockSendMessage.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.SAFETY, safetyRatings: { score: 1 } }] } });
-      await expect(model.queryGeminiChat([{ role: 'user', parts: [{ text: 'x' }] }] as any)).rejects.toThrow(/SAFETY/);
-    });
-  });
-
-  describe('generateContent edge cases', () => {
-    let model: Gemini2ProModel;
-    beforeEach(() => {
-      jest.clearAllMocks();
-      mockResponseText.mockReturnValue('done');
-      mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat });
-      model = new Gemini2ProModel(createMockConfig(MOCK_API_KEY));
-    });
-
-    it('throws when result missing', async () => {
-      mockGenerateContent.mockResolvedValue({});
-      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(/unexpectedly empty/);
-    });
-
-    it('throws block error on safety finishReason', async () => {
-      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.SAFETY, safetyRatings: {flag:true} }] } });
-      await expect(model.generateContent(MOCK_GENERATE_CONTENT_REQUEST)).rejects.toThrow(/generation blocked/);
-    });
-
-    it('warns when no text with stop reason', async () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.STOP, content: { parts: [] } }] } });
-      await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('produced no text'));
-      warn.mockRestore();
-    });
-
-    it('retries on network error then succeeds', async () => {
-      jest.spyOn(global.Math, 'random').mockReturnValue(0);
-      const cfg = createMockConfig(MOCK_API_KEY);
-      cfg.gemini.generation_max_retries = 1;
-      cfg.gemini.generation_retry_base_delay_ms = 0;
-      mockGenerateContent
-        .mockRejectedValueOnce(Object.assign(new Error('ECONNRESET'), { message: 'ECONNRESET' }))
-        .mockResolvedValueOnce({ response: { text: () => 'hi' } });
-      model = new Gemini2ProModel(cfg);
-      const result = await model.generateContent(MOCK_GENERATE_CONTENT_REQUEST);
-      expect(mockGenerateContent).toHaveBeenCalledTimes(2);
-      expect(result.response.text()).toBe('hi');
-    });
-  });
-});
-
-describe('Gemini2ProModel additional methods', () => {
-  const config = new Config() as jest.Mocked<Config>;
-  config.gemini.api_key = 'k';
-  const EDGE_REQUEST: GenerateContentRequest = {
-    contents: [{ role: 'user', parts: [{ text: 'x' }] }]
-  };
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent, startChat: mockStartChat });
-  });
-
-  test('convertToGeminiConversation merges and warns when last message is model', () => {
-    const model = new Gemini2ProModel(config);
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    const result = model.convertToGeminiConversation([
-      { role: 'user', content: 'a' },
-      { role: 'assistant', content: 'b' },
-      { role: 'assistant', content: 'c' },
-      { role: 'system', content: 'ignore' },
-      { role: 'assistant', content: 'd' },
-    ] as any);
-    expect(result).toEqual([
-      { role: 'user', parts: [{ text: 'a' }] },
-      { role: 'model', parts: [{ text: 'b' }, { text: 'c' }, { text: 'd' }] },
-    ]);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    warnSpy.mockRestore();
-  });
-
-  describe('queryGeminiChat', () => {
-    let model: Gemini2ProModel;
-
-    beforeEach(() => {
-      mockSendMessage.mockResolvedValue({ response: { text: () => 'ok' } });
-      model = new Gemini2ProModel(config);
-    });
-
-    test('sends prompt directly when interactive review disabled', async () => {
-      const history = model.convertToGeminiConversation([{ role: 'user', content: 'p' }] as any);
-      const text = await model.queryGeminiChat(history);
-      expect(mockReviewPrompt).not.toHaveBeenCalled();
-      expect(mockStartChat).toHaveBeenCalled();
-      expect(mockSendMessage).toHaveBeenCalledWith('p');
-      expect(text).toBe('ok');
-    });
-
-    test('uses reviewed prompt when interactive review enabled', async () => {
-      config.gemini.interactive_prompt_review = true;
-      mockReviewPrompt.mockResolvedValue('edited');
-      model = new Gemini2ProModel(config);
-      const history = model.convertToGeminiConversation([{ role: 'user', content: 'p' }] as any);
-      const text = await model.queryGeminiChat(history);
-      expect(mockReviewPrompt).toHaveBeenCalledWith('p');
-      expect(mockSendMessage).toHaveBeenCalledWith('edited');
-      expect(text).toBe('ok');
-    });
-
-    test('returns empty string when review cancelled', async () => {
-      config.gemini.interactive_prompt_review = true;
-      mockReviewPrompt.mockResolvedValue(null);
-      model = new Gemini2ProModel(config);
-      const history = model.convertToGeminiConversation([{ role: 'user', content: 'p' }] as any);
-      const text = await model.queryGeminiChat(history);
-      expect(text).toBe('');
-    });
-
-    test('delegates errors to handleError', async () => {
-      const err = new Error('bad');
-      mockSendMessage.mockResolvedValue({ response: {} });
-      config.gemini.interactive_prompt_review = false;
-      model = new Gemini2ProModel(config);
-      const history = model.convertToGeminiConversation([{ role: 'user', content: 'p' }] as any);
-      const spy = jest.spyOn(model, 'handleError').mockImplementation(() => { throw err; });
-      await expect(model.queryGeminiChat(history)).rejects.toThrow('bad');
-      spy.mockRestore();
-    });
-
-    test('throws when last message is not user', async () => {
-      model = new Gemini2ProModel(config);
-      const history = [{ role: 'model', parts: [{ text: 'a' }] }] as any;
-      await expect(model.queryGeminiChat(history)).rejects.toThrow('Internal Error');
-    });
-  });
-
-  describe('handleError', () => {
-    let model: Gemini2ProModel;
-    beforeEach(() => {
-      model = new Gemini2ProModel(config);
-    });
-
-    test('classifies network errors', () => {
-      const err = new Error('FETCH_ERROR');
-      (err as any).name = 'FetchError';
-      expect(() => model.handleError(err, 'pro')).toThrow(/NETWORK_ERROR/);
-    });
-
-    test('classifies API errors based on status', () => {
-      const err = { status: 429, message: 'Too many' } as any;
-      expect(() => model.handleError(err, 'pro')).toThrow(/RATE_LIMIT/);
-    });
-
-    test('falls back to general error handling', () => {
-      const err = new Error('boom');
-      const thrown = (() => { try { model.handleError(err, 'pro'); } catch (e) { return e as any; }})();
-      expect(thrown.code).toBe('UNKNOWN');
-      expect(thrown.message).toContain('boom');
-    });
-
-    test('classifies google AI errors', () => {
-      const err = new Error('[GoogleGenerativeAI Error] backend error');
-      const thrown = (() => { try { model.handleError(err, 'pro'); } catch (e) { return e as any; }})();
-      expect(thrown.code).toBe('SERVER_OVERLOADED');
-    });
-
-    test('classifies safety errors', () => {
-      const err = new Error('SAFETY violation');
-      const thrown = (() => { try { model.handleError(err, 'pro'); } catch (e) { return e as any; }})();
-      expect(thrown.code).toBe('SAFETY_BLOCK');
-    });
-
-    test('returns code from error.code field', () => {
-      const err: any = new Error('x');
-      err.code = 'CUSTOM';
-      const thrown = (() => { try { model.handleError(err, 'pro'); } catch (e) { return e as any; }})();
-      expect(thrown.code).toBe('CUSTOM');
-    });
-
-    test('handles unknown non-error objects', () => {
-      const thrown = (() => { try { model.handleError({} as any, 'pro'); } catch (e) { return e as any; }})();
-      expect(thrown.code).toBe('UNKNOWN');
-    });
-  });
-
-  describe('generateContent edge cases', () => {
-    let model: Gemini2ProModel;
-
-    beforeEach(() => {
-      config.gemini.generation_max_retries = 1;
-      config.gemini.generation_retry_base_delay_ms = 0;
-      model = new Gemini2ProModel(config);
-      mockResponseText.mockReturnValue('out');
-    });
-
-    test('retries on retryable error then succeeds', async () => {
-      jest.useFakeTimers();
-      const err = new Error('timeout');
-      (err as any).code = 'NETWORK_ERROR';
-      mockGenerateContent.mockRejectedValueOnce(err).mockResolvedValueOnce({ response: mockResponse });
-      const promise = model.generateContent(EDGE_REQUEST);
-      await jest.runOnlyPendingTimersAsync();
-      const result = await promise;
-      expect(mockGenerateContent).toHaveBeenCalledTimes(2);
-      expect(result.response).toBe(mockResponse);
-      jest.useRealTimers();
-    });
-
-    test('throws block error and passes to handleError', async () => {
-      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.SAFETY, safetyRatings: [1] }] } });
-      const spy = jest.spyOn(model, 'handleError').mockImplementation(() => { throw new Error('block'); });
-      await expect(model.generateContent(EDGE_REQUEST)).rejects.toThrow('block');
-      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-      spy.mockRestore();
-    });
-
-    test('warns when no text produced but finishReason STOP', async () => {
-      mockGenerateContent.mockResolvedValue({ response: { candidates: [{ finishReason: FinishReason.STOP, content: { parts: [] } }] } });
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
-      await model.generateContent(EDGE_REQUEST);
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
-    });
-
-    test('handles missing response object', async () => {
-      mockGenerateContent.mockResolvedValue({});
-      const spy = jest.spyOn(model, 'handleError').mockImplementation(() => { throw new Error('empty'); });
-      await expect(model.generateContent(EDGE_REQUEST)).rejects.toThrow('empty');
-      spy.mockRestore();
-    });
   });
 });

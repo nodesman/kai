@@ -28,10 +28,10 @@ jest.mock('@google/generative-ai', () => ({
 }));
 
 // Helper to create the minimal configuration object expected by the model
-const createConfig = () => ({
+const createConfig = (modelName = 'gemini-1.5-flash-latest') => ({
   gemini: {
     api_key: 'k',
-    subsequent_chat_model_name: 'flash',
+    subsequent_chat_model_name: modelName,
     generation_max_retries: 0,
     generation_retry_base_delay_ms: 1,
     max_output_tokens: 5
@@ -171,9 +171,15 @@ describe('Gemini2FlashModel', () => {
       expect(() => new Gemini2FlashModel(cfg as any)).toThrow('Gemini API key is missing');
     });
 
-    it('throws when generative model fails', () => {
-      mockGetGenerativeModel.mockImplementation(() => { throw new Error('bad'); });
-      expect(() => new Gemini2FlashModel(createConfig() as any)).toThrow('Failed to get generative model');
+    it('throws when generative model fails with a gemini model', () => {
+        mockGetGenerativeModel.mockImplementation(() => { throw new Error('bad'); });
+        expect(() => new Gemini2FlashModel(createConfig('gemini-flash-valid') as any)).toThrow('Failed to get generative model');
+    });
+
+    it('does NOT throw and skips initialization for non-gemini model names', () => {
+        jest.clearAllMocks(); // Clear call from any previous test setup
+        expect(() => new Gemini2FlashModel(createConfig('claude-opus-123') as any)).not.toThrow();
+        expect(mockGetGenerativeModel).not.toHaveBeenCalled();
     });
 
     it('uses default retry settings when not provided', () => {
