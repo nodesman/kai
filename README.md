@@ -74,6 +74,7 @@ Use this commit message? (Y/n) y
     *   **JetBrains IDEs (Experimental):** Requires the command-line launcher to be created (e.g., via `Tools -> Create Command-line Launcher...` in the IDE) and the launcher's directory added to your system's PATH. Kai attempts to detect `webstorm`, `clion`, `idea`, etc., on macOS.
     *   Other editors might work if they have a CLI command that waits for the file to be closed.
 *   **Google Gemini API Key:** Required for the AI interactions.
+*   **Anthropic API Key:** *(optional)* Needed to use Anthropic Claude models.
 
 ### Steps
 
@@ -95,6 +96,19 @@ Use this commit message? (Y/n) y
     $env:GEMINI_API_KEY = 'YOUR_API_KEY_HERE'
     ```
     *Tip: Use tools like `dotenv` or your shell's profile configuration for managing environment variables easily.*
+
+3.  **Set Anthropic API Key (Optional):**
+    Kai reads the API key from the `ANTHROPIC_API_KEY` environment variable if you plan to use Anthropic Claude models.
+    ```bash
+    # On Linux/macOS
+    export ANTHROPIC_API_KEY='YOUR_API_KEY_HERE'
+
+    # On Windows (Command Prompt)
+    set ANTHROPIC_API_KEY=YOUR_API_KEY_HERE
+
+    # On Windows (PowerShell)
+    $env:ANTHROPIC_API_KEY = 'YOUR_API_KEY_HERE'
+    ```
 
 ### Development Setup (From Source)
 
