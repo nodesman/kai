@@ -13,7 +13,8 @@ import {
     UserInteractionResult,
     ChangeModeInteractionResult,
     ScaffoldProjectInteractionResult,
-    HardenInteractionResult
+    HardenInteractionResult,
+    GenerateKaiignoreResult
 } from './lib/UserInterface';
 // REMOVED: KanbanData, KanbanColumn, KanbanCard imports
 import { CodeProcessor } from './lib/CodeProcessor';
@@ -366,6 +367,11 @@ async function main() {
                  }
                  await codeProcessor.processHardeningRequest(hardenResult.tool);
                  console.log(chalk.magenta('🏁 Hardening process completed.'));
+
+            } else if (mode === 'Generate .kaiignore') {
+                 if (!codeProcessor) throw new Error("CodeProcessor not initialized.");
+                 await codeProcessor.generateKaiignore();
+                 console.log(chalk.magenta('🏁 .kaiignore generation completed.'));
 
             } else if (mode === 'Delete Conversation...') {
                 if (!config) throw new Error("Config not initialized."); // Guard
