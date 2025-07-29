@@ -46,6 +46,10 @@ interface HardenInteractionResult {
     selectedModel: string;
 }
 
+interface GenerateKaiignoreResult {
+    mode: 'Generate .kaiignore';
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -59,7 +63,8 @@ type UserInteractionResult =
     | DeleteInteractionResult
     | ChangeModeInteractionResult
     | ScaffoldProjectInteractionResult
-    | HardenInteractionResult;
+    | HardenInteractionResult
+    | GenerateKaiignoreResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -328,6 +333,7 @@ class UserInterface {
                         'Change Context Mode',
                         'Scaffold New Project',
                         'Delete Conversation...',
+                        'Generate .kaiignore',
                         'Exit Kai', // <-- ADDED Exit option
                         // REMOVED: 'View Kanban Board' option
                     ],
@@ -340,6 +346,10 @@ class UserInterface {
                 return null; // Signal to the main loop to exit
              }
              // --- END Handle Exit Kai ---
+
+            if (mode === 'Generate .kaiignore') {
+                return { mode: 'Generate .kaiignore' };
+            }
 
             if (mode === 'Delete Conversation...') {
                 return await this._handleDeletion();
@@ -476,5 +486,6 @@ export {
     UserInteractionResult,
     ChangeModeInteractionResult,
     ScaffoldProjectInteractionResult,
-    HardenInteractionResult
+    HardenInteractionResult,
+    GenerateKaiignoreResult
 };

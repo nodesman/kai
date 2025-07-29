@@ -197,6 +197,41 @@ class CodeProcessor {
         await this.hardenService.process(tool);
     }
 
+    async generateKaiignore(): Promise<void> {
+        console.log(chalk.cyan('\nGenerating .kaiignore using AI suggestions...'));
+        let fileList: string[] = [];
+        try {
+            const { stdout } = await this.commandService.run('find . -type f', { cwd: this.projectRoot });
+            fileList = stdout.split('\n')
+                .map(l => l.trim())
+                .filter(l => l && l !== '.' && !l.startsWith('./.git/') && !l.startsWith('./.kai/'))
+                .map(p => p.replace(/^\.\/?/, '').replace(/\\/g, '/'))
+                .sort();
+        } catch (err) {
+            console.error(chalk.red('Failed to list project files:'), err);
+            return;
+        }
+
+        const listForPrompt = fileList.map(f => `- ${f}`).join('\n');
+        const prompt = `Here is the list of files in my project:\n${listForPrompt}\n\nGenerate a recommended .kaiignore file to exclude unnecessary files from Kai's context. Respond ONLY with the file contents.`;
+        const messages: Message[] = [ { role: 'user', content: prompt } ];
+        let response: string;
+        try {
+            response = await this.aiClient.getResponseTextFromAI(messages, true);
+        } catch (error) {
+            console.error(chalk.red('AI generation failed:'), error);
+            return;
+        }
+
+        const kaiignorePath = path.join(this.projectRoot, '.kaiignore');
+        try {
+            await this.fs.writeFile(kaiignorePath, response.trim() + '\n');
+            console.log(chalk.green(`.kaiignore written to ${kaiignorePath}`));
+        } catch (err) {
+            console.error(chalk.red('Failed to write .kaiignore:'), err);
+        }
+    }
+
     /**
      * Updates the AI client across the processor and dependent services.
      */
