@@ -1,16 +1,47 @@
-.idea
-.git
-node_modules
-*.jsonl
-bin
-cmake-build-debug
-qtsrc
-.git
-bin
-README.md
-docs/
+# IDE configuration
+.idea/
+
+# Git files
+.gitignore
+
+# Kai files
+.kaiignore
+
+# Compiled JavaScript output (source is in /src)
+/bin/
+
+# Dependencies
+/node_modules/
+
+# Lock files
+package-lock.json
 yarn.lock
+
+# Test files, mocks, and coverage reports
+__mocks__/
+**/__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.more.test.js
+**/*.more.test.ts
+**/*.private.test.js
+**/*.private.test.ts
+**/*.additional.test.js
+**/*.additional.test.ts
+/coverage/
+
+# Documentation
+# The docs folder contains project planning and strategic documents.
+# These are usually not needed for code generation tasks.
+/docs/
+
+# Local configuration (may contain secrets)
+config.yaml
+
+# Project management and legal files
 Kanban.md
 LICENSE
-jest.config.js
-.kaiignore
+
+# Project configuration files (uncomment if they are needed for context)
+# jest.config.js
+# tsconfig.json
