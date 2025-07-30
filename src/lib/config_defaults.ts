@@ -37,4 +37,10 @@ gemini:
   generation_max_retries: 3 # Retries for consolidation generation step
   generation_retry_base_delay_ms: 2000 # Base delay for generation retries (ms)
   # interactive_prompt_review: false # Set to true to manually review/edit Gemini Pro prompts before sending
+
+# --- OpenAI Configuration (optional) ---
+openai:
+  # API key read from OPENAI_API_KEY environment variable
+  max_output_tokens: 8192
+  max_prompt_tokens: 128000
 `;

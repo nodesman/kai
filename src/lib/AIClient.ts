@@ -5,6 +5,7 @@ import { FileSystem } from './FileSystem';
 import Gemini2ProModel from "./models/Gemini2ProModel";
 import Gemini2FlashModel from "./models/Gemini2FlashModel"; // Added Flash model
 import AnthropicClaudeModel from "./models/AnthropicClaudeModel";
+import OpenAIChatModel from "./models/OpenAIChatModel";
 // Import Config class itself
 import { Config } from "./Config";
 import Conversation, { Message } from "./models/Conversation";
@@ -37,6 +38,7 @@ class AIClient {
     private proModel: Gemini2ProModel;
     private flashModel: Gemini2FlashModel;
     private anthropicModel?: AnthropicClaudeModel;
+    private openAIModels: Record<string, OpenAIChatModel> = {};
     config: Config;
 
     constructor(config: Config) {
@@ -45,6 +47,10 @@ class AIClient {
         this.flashModel = new Gemini2FlashModel(config);
         if ((config as any).anthropic?.api_key) {
             this.anthropicModel = new AnthropicClaudeModel(config);
+        }
+        if ((config as any).openai?.api_key) {
+            this.openAIModels['gpt-4o'] = new OpenAIChatModel(config, 'gpt-4o');
+            this.openAIModels['o3'] = new OpenAIChatModel(config, 'o3');
         }
         this.fs = new FileSystem();
     }
@@ -144,11 +150,12 @@ class AIClient {
 
         const currentModelName = this.config.gemini.model_name.toLowerCase();
         const modelToCall =
-            currentModelName.startsWith('claude') && this.anthropicModel
+            this.openAIModels[currentModelName] ??
+            (currentModelName.startsWith('claude') && this.anthropicModel
                 ? this.anthropicModel
                 : currentModelName === this.flashModel.modelName.toLowerCase()
                 ? this.flashModel
-                : this.proModel;
+                : this.proModel);
 
         const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Selecting model instance for chat: ${modelLogName}`));
@@ -186,11 +193,12 @@ class AIClient {
 
         const currentModelName = this.config.gemini.model_name.toLowerCase();
         const modelToCall =
-            currentModelName.startsWith('claude') && this.anthropicModel
+            this.openAIModels[currentModelName] ??
+            (currentModelName.startsWith('claude') && this.anthropicModel
                 ? this.anthropicModel
                 : currentModelName === this.flashModel.modelName.toLowerCase()
                 ? this.flashModel
-                : this.proModel;
+                : this.proModel);
         
         const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Querying AI for simple text (using ${modelLogName})...`));
@@ -220,11 +228,12 @@ class AIClient {
         // ... (Implementation remains the same - no hidden prompt added here) ...
         const currentModelName = this.config.gemini.model_name.toLowerCase();
         const modelToCall =
-            currentModelName.startsWith('claude') && this.anthropicModel
+            this.openAIModels[currentModelName] ??
+            (currentModelName.startsWith('claude') && this.anthropicModel
                 ? this.anthropicModel
                 : currentModelName === this.flashModel.modelName.toLowerCase()
                 ? this.flashModel
-                : this.proModel;
+                : this.proModel);
 
         const modelLogName = modelToCall.modelName;
         console.log(chalk.blue(`Generating content (potentially with function calls) using ${modelLogName}...`));

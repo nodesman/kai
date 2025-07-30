@@ -5,6 +5,7 @@ import Conversation, { Message } from '../models/Conversation';
 import Gemini2ProModel from '../models/Gemini2ProModel';
 import Gemini2FlashModel from '../models/Gemini2FlashModel';
 import AnthropicClaudeModel from '../models/AnthropicClaudeModel';
+import OpenAIChatModel from '../models/OpenAIChatModel';
 import { HIDDEN_CONVERSATION_INSTRUCTION } from '../internal_prompts';
 
 // Mock dependencies
@@ -12,6 +13,7 @@ jest.mock('../FileSystem');
 jest.mock('../models/Gemini2ProModel');
 jest.mock('../models/Gemini2FlashModel');
 jest.mock('../models/AnthropicClaudeModel');
+jest.mock('../models/OpenAIChatModel');
 jest.mock('../Config');
 
 // Suppress console output for cleaner test runs
@@ -31,6 +33,11 @@ const createMockConfig = (model_name: string) => ({
         api_key: 'test-key-anthropic',
         model_name: 'claude-test-model'
     },
+    openai: {
+        api_key: 'oa-key',
+        max_output_tokens: 100,
+        max_prompt_tokens: 200
+    },
     chatsDir: '/test/chats',
 } as unknown as Config);
 
@@ -49,10 +56,16 @@ const mockAnthropicModelInstance = {
     generateContent: jest.fn(),
     modelName: 'claude-test-model'
 };
+const mockOpenAIModelInstance = {
+    getResponseFromAI: jest.fn(),
+    generateContent: jest.fn(),
+    modelName: 'gpt-4o'
+};
 
 (Gemini2ProModel as jest.Mock).mockImplementation(() => mockProModelInstance);
 (Gemini2FlashModel as jest.Mock).mockImplementation(() => mockFlashModelInstance);
 (AnthropicClaudeModel as jest.Mock).mockImplementation(() => mockAnthropicModelInstance);
+(OpenAIChatModel as jest.Mock).mockImplementation(() => mockOpenAIModelInstance);
 
 
 describe('AIClient', () => {
@@ -70,6 +83,7 @@ describe('AIClient', () => {
         (aiClient as any).proModel = mockProModelInstance;
         (aiClient as any).flashModel = mockFlashModelInstance;
         (aiClient as any).anthropicModel = mockAnthropicModelInstance;
+        (aiClient as any).openAIModels = { 'gpt-4o': mockOpenAIModelInstance, 'o3': mockOpenAIModelInstance };
         (aiClient as any).fs = mockFs;
     });
 
@@ -138,6 +152,13 @@ describe('AIClient', () => {
             expect(mockFlashModelInstance.getResponseFromAI).not.toHaveBeenCalled();
         });
 
+        it('uses OpenAI model when selected', async () => {
+            aiClient.config = createMockConfig('gpt-4o');
+            await aiClient.getResponseFromAI(mockConversation, conversationFilePath, 'context');
+            expect(mockOpenAIModelInstance.getResponseFromAI).toHaveBeenCalled();
+            expect(mockProModelInstance.getResponseFromAI).not.toHaveBeenCalled();
+        });
+
 
         it('should log the original user message and AI response', async () => {
             await aiClient.getResponseFromAI(mockConversation, conversationFilePath);
@@ -204,6 +225,7 @@ describe('AIClient', () => {
             mockProModelInstance.generateContent.mockResolvedValue(mockResult);
             mockFlashModelInstance.generateContent.mockResolvedValue(mockResult);
             mockAnthropicModelInstance.generateContent.mockResolvedValue(mockResult);
+            mockOpenAIModelInstance.generateContent.mockResolvedValue(mockResult);
         });
 
         it('should use Pro model by default', async () => {
@@ -229,6 +251,14 @@ describe('AIClient', () => {
             expect(mockAnthropicModelInstance.generateContent).toHaveBeenCalledWith(mockRequest);
             expect(mockProModelInstance.generateContent).not.toHaveBeenCalled();
             expect(mockFlashModelInstance.generateContent).not.toHaveBeenCalled();
+            expect(result).toBe(mockResult);
+        });
+
+        it('uses OpenAI model when selected', async () => {
+            aiClient.config = createMockConfig('gpt-4o');
+            const result = await aiClient.generateContent(mockRequest);
+            expect(mockOpenAIModelInstance.generateContent).toHaveBeenCalledWith(mockRequest);
+            expect(mockProModelInstance.generateContent).not.toHaveBeenCalled();
             expect(result).toBe(mockResult);
         });
 

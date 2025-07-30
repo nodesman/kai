@@ -15,6 +15,7 @@ import { Config } from '../Config';
 describe('Config defaults and loading', () => {
   it('uses default values when config.yaml is missing', () => {
     process.env.GEMINI_API_KEY = 'testkey';
+    process.env.OPENAI_API_KEY = 'ok';
     (fsSync.existsSync as jest.Mock).mockReturnValue(false);
     const cfg = new Config();
     expect(cfg.gemini.api_key).toBe('testkey');
@@ -22,6 +23,7 @@ describe('Config defaults and loading', () => {
     expect(cfg.project.root_dir).toBe('generated_project');
     expect(cfg.analysis.cache_file_path).toBe('.kai/project_analysis.json');
     expect(cfg.context.mode).toBeUndefined();
+    expect(cfg.openai?.api_key).toBe('ok');
   });
 
   it('loads values from config.yaml when present', () => {
