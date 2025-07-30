@@ -294,8 +294,8 @@ class UserInterface {
                 value: 'gpt-4o',
             },
             {
-                name: `OpenAI Model (gpt-o3) - GPT-o3 from OpenAI`,
-                value: 'gpt-o3',
+                name: `OpenAI Model (o3) - o3 from OpenAI`,
+                value: 'o3',
             }
         );
         const { modelChoice } = await inquirer.prompt([
@@ -430,8 +430,8 @@ class UserInterface {
                     value: 'gpt-4o'
                 },
                 {
-                    name: `OpenAI Model (gpt-o3) - GPT-o3 from OpenAI`,
-                    value: 'gpt-o3'
+                    name: `OpenAI Model (o3) - o3 from OpenAI`,
+                    value: 'o3'
                 }
             );
 

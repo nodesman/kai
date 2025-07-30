@@ -407,7 +407,7 @@ describe('UserInterface', () => {
         .mockImplementationOnce(async qs => {
           const values = qs[0].choices.map((c: any) => c.value);
           expect(values).toContain('gpt-4o');
-          expect(values).toContain('gpt-o3');
+          expect(values).toContain('o3');
           return { modelChoice: 'gpt-4o' };
         });
       const res = await ui.getUserInteraction();

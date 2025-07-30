@@ -51,7 +51,6 @@ class AIClient {
         if ((config as any).openai?.api_key) {
             this.openAIModels['gpt-4o'] = new OpenAIChatModel(config, 'gpt-4o');
             this.openAIModels['o3'] = new OpenAIChatModel(config, 'o3');
-            this.openAIModels['gpt-o3'] = new OpenAIChatModel(config, 'gpt-o3');
         }
         this.fs = new FileSystem();
     }
