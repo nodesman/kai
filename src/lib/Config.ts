@@ -54,6 +54,12 @@ interface AnthropicConfig {
     max_output_tokens?: number;
 }
 
+interface OpenAIConfig {
+    api_key: string;
+    max_output_tokens?: number;
+    max_prompt_tokens?: number;
+}
+
 // Main Config structure used internally (interfaces, not class for simpler structure)
 interface IConfig { // Renamed to IConfig to avoid conflict with Config class name
     gemini: Required<Omit<GeminiConfig, 'rate_limit'>> & { rate_limit?: GeminiRateLimitConfig }; // Most fields are required, rate_limit is optional object
@@ -62,6 +68,8 @@ interface IConfig { // Renamed to IConfig to avoid conflict with Config class na
     context: ContextConfig; // Add context section (mode is optional until resolved)
     /** Optional configuration for Anthropic Claude model */
     anthropic?: Required<AnthropicConfig>;
+    /** Optional configuration for OpenAI models */
+    openai?: Required<OpenAIConfig>;
     chatsDir: string; // Absolute path to chats directory (CALCULATED, NOT CREATED HERE)
 }
 
@@ -72,6 +80,7 @@ type YamlConfigData = {
     analysis?: Partial<AnalysisConfig>; // phind_command is removed from AnalysisConfig itself
     context?: Partial<ContextConfig>; // Added context
     anthropic?: Partial<AnthropicConfig>;
+    openai?: Partial<OpenAIConfig>;
 };
 
 // --- Config Class ---
@@ -82,6 +91,8 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
     context: ContextConfig; // Add context property (mode is optional until resolved)
     /** Optional configuration for Anthropic Claude model */
     anthropic?: Required<AnthropicConfig>;
+    /** Optional configuration for OpenAI models */
+    openai?: Required<OpenAIConfig>;
     chatsDir: string; // Absolute path
     private configFilePath: string; // Store path for saving
 
@@ -95,6 +106,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         // 'context' is loaded as potentially undefined here
         this.context = loadedConfig.context;   // Assign loaded context config
         this.anthropic = loadedConfig.anthropic; // Assign loaded anthropic config
+        this.openai = loadedConfig.openai; // Assign loaded openai config
         this.chatsDir = loadedConfig.chatsDir; // Use pre-calculated absolute path
     }
 
@@ -192,6 +204,14 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
         };
         // If no API key available, skip anthropic section
         const anthropicSection = finalAnthropicConfig.api_key ? finalAnthropicConfig : undefined;
+
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        const finalOpenAIConfig: Required<OpenAIConfig> = {
+            api_key: openaiApiKey || yamlConfig.openai?.api_key || '',
+            max_output_tokens: yamlConfig.openai?.max_output_tokens || finalGeminiConfig.max_output_tokens,
+            max_prompt_tokens: yamlConfig.openai?.max_prompt_tokens || 128000,
+        };
+        const openaiSection = finalOpenAIConfig.api_key ? finalOpenAIConfig : undefined;
         // *** END ADDED ***
 
         // Calculate absolute chats directory path (DO NOT CREATE IT HERE)
@@ -203,6 +223,7 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             analysis: finalAnalysisConfig,
             context: finalContextConfig,
             anthropic: anthropicSection,
+            openai: openaiSection,
             chatsDir: absoluteChatsDir,
         };
     }
@@ -248,6 +269,11 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
                 api_key: this.anthropic.api_key,
                 model_name: this.anthropic.model_name,
                 max_output_tokens: this.anthropic.max_output_tokens,
+            } : undefined,
+            openai: this.openai ? {
+                api_key: this.openai.api_key,
+                max_output_tokens: this.openai.max_output_tokens,
+                max_prompt_tokens: this.openai.max_prompt_tokens,
             } : undefined,
         };
 
@@ -301,4 +327,4 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
 // Export the class implementation as 'Config'
 export { ConfigLoader as Config };
 // Export the interface type separately if needed for type hinting elsewhere
-export type { IConfig, GeminiConfig, ProjectConfig, AnalysisConfig, ContextConfig };
+export type { IConfig, GeminiConfig, ProjectConfig, AnalysisConfig, ContextConfig, OpenAIConfig };

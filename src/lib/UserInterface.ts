@@ -288,6 +288,16 @@ class UserInterface {
                 value: anthropicModel,
             });
         }
+        modelChoices.push(
+            {
+                name: `OpenAI Model (gpt-4o) - GPT-4o from OpenAI`,
+                value: 'gpt-4o',
+            },
+            {
+                name: `OpenAI Model (gpt-o3) - GPT-o3 from OpenAI`,
+                value: 'gpt-o3',
+            }
+        );
         const { modelChoice } = await inquirer.prompt([
             {
                 type: 'list',
@@ -414,6 +424,16 @@ class UserInterface {
                     value: anthropicModel
                 });
             }
+            modelChoices.push(
+                {
+                    name: `OpenAI Model (gpt-4o) - GPT-4o from OpenAI`,
+                    value: 'gpt-4o'
+                },
+                {
+                    name: `OpenAI Model (gpt-o3) - GPT-o3 from OpenAI`,
+                    value: 'gpt-o3'
+                }
+            );
 
             const { modelChoice } = await inquirer.prompt([
                 {

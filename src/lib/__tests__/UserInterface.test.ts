@@ -397,5 +397,21 @@ describe('UserInterface', () => {
       const res = await ui.getUserInteraction();
       expect(res).toEqual({ mode: 'Start/Continue Conversation', conversationName: 'c', isNewConversation: false, selectedModel: 'claude' });
     });
+
+    it('includes OpenAI model options', async () => {
+      ui = new UserInterface(baseConfig as any);
+      jest.spyOn(ui.fs, 'ensureKaiDirectoryExists').mockResolvedValue(undefined);
+      jest.spyOn(ui, 'selectOrCreateConversation').mockResolvedValue({ name: 'c', isNew: false });
+      (inquirer.prompt as jest.Mock)
+        .mockResolvedValueOnce({ mode: 'Start/Continue Conversation' })
+        .mockImplementationOnce(async qs => {
+          const values = qs[0].choices.map((c: any) => c.value);
+          expect(values).toContain('gpt-4o');
+          expect(values).toContain('gpt-o3');
+          return { modelChoice: 'gpt-4o' };
+        });
+      const res = await ui.getUserInteraction();
+      expect(res).toEqual({ mode: 'Start/Continue Conversation', conversationName: 'c', isNewConversation: false, selectedModel: 'gpt-4o' });
+    });
   });
 });
