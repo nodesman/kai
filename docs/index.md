@@ -62,7 +62,20 @@ Key architectural decisions are documented in the `docs/decisions/` directory:
 Project tasks, epics, and progress are tracked using a Kanban system.
 
 *   **Source of Truth:** [**Kanban Board**](../Kanban.md) (Viewable in Markdown or using `kai show kanban`).
+*   **Epic Roadmap & Discovery:** [EPICS.md](EPICS.md)
 *   **Viewing:** Use the `kai show kanban` command to view a rendered HTML version in your browser (served locally).
+*   **Agent Execution Loop:** [AGENT_EXECUTION.md](AGENT_EXECUTION.md)
+*   **Meta‑TDD Harness:** [AGENT_TDD.md](AGENT_TDD.md)
+
+### Getting Started (Picking up later)
+
+Use this quick checklist whenever you return to the project:
+
+1. **Inspect current work**: `kai show kanban` → look at **In Progress**. That card is your active task.
+2. **Understand context**: Read the **Current Focus** under the relevant Epic in [EPICS.md](EPICS.md).
+3. **Queue next tasks**: Move the next prioritized Backlog card into **To Do** or **In Progress** in Kanban.md.
+4. **Dive deeper**: Follow links from the Kanban card to detailed docs (e.g. AGENT_TDD.md, AGENT_EXECUTION.md).
+5. **Complete & advance**: When you finish, mark the In Progress card done and pick up the next one.
 
 ## Configuration
 

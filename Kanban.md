@@ -12,6 +12,7 @@
 *   **E4: Consolidation Service** (Maintenance & Integration)
 *   **E5: Evaluation & Testing** (Testing the Kai system itself)
 *   **E6: Future Exploration** (Lower priority research)
+*   **E7: Plugin System** (Allow extending Kai with new functionalities)
 
 ---
 
@@ -136,9 +137,16 @@
 ### E4: Consolidation Service
 
 *   **[ ] Task:** Maintain/Refactor Consolidation Service
-    *   **Details:** Ensure the existing service continues to function for its intended use cases (IaC, config files, non-TDD changes). Refactor if necessary to better share components with System 1/2 (like `AIClient`, `FileSystem`). Ensure clear separation of concerns.
+    *   **Details:** Ensure the existing service continues to function for its intended use cases (IaC, config files, non‑TDD changes). Refactor to better share components with System 1/2 (e.g. `AIClient`, `FileSystem`). Ensure clear separation of concerns.
     *   **Depends on:** -
     *   **Priority:** Medium
+
+*   **[ ] Task:** Port diff parser to TS for consolidation (parser.ts)
+*   **[ ] Task:** Port fuzzy seek logic to TS for consolidation (seekSequence.ts)
+*   **[ ] Task:** Refactor ConsolidationApplier to use parse→seek→apply pipeline with fuzzy fallback
+*   **[ ] Task:** Add failure logging to `.kai/logs/consolidation_failures.jsonl`
+*   **[ ] Task:** Write unit/integration tests for fuzzy consolidation apply
+*   **[ ] Task:** Update EPICS.md with consolidation fuzzy methodology
 
 ### E5: Evaluation & Testing
 
@@ -150,6 +158,10 @@
     *   **Details:** Script the process of running Kai (Systems 1 & 2) against the evaluation scenarios and collecting metrics automatically.
     *   **Depends on:** Evaluation Scenarios
     *   **Priority:** Low
+
+*   **[ ] Task:** Unit & integration tests for hybrid‑model provider logic and fuzzy diff‑applier enhancements
+*   **[ ] Task:** e2e evaluation harness for `codex auto` (e.g., sample repo scripts, flakiness reporting)
+*   **[ ] Task:** CI pipeline updates (GitHub Actions & Nix Flakes): install Gemini SDK, automate release via `scripts/create_github_release.sh`
 
 ### E6: Future Exploration
 
@@ -172,6 +184,40 @@
     *   **Depends on:** Mature System 1 & System 2 capabilities, potentially significant advancements in LLM reasoning for ambiguity and strategy.
     *   **Priority:** Very Low (Highly Exploratory, Post v1.0+)
 
+### E7: Plugin System
+
+*   **[ ] Task: Design Plugin Architecture**
+    *   **Details:** Define the core plugin interface. How do plugins register themselves? What extension points will be available (e.g., new commands, new AI models, different UI components)? How are plugins loaded and managed?
+    *   **Depends on:** -
+    *   **Priority:** High
+
+### E8: Hybrid Model & Fuzzy Diff‑Applier Enhancements
+
+*   **[ ] Task:** Discovery & Analysis Foundation (review TS parser, Rust orchestrator, parser.rs, CLI flow, extension points)
+*   **[ ] Task:** Abstract the “model provider” in the orchestrator
+*   **[ ] Task:** Extend prompt templates for Gemini
+*   **[ ] Task:** Multi‑pass best‑of diff generation logic
+*   **[ ] Task:** Expose CLI flags for model selection & update documentation
+*   **[ ] Task:** Improve fuzzy matching heuristics in seek_sequence.rs
+*   **[ ] Task:** Enhance failure logging & telemetry for diff failures
+*   **[ ] Task:** Add unit & regression tests for fuzzy diff application
+*   **[ ] Task:** Support fenced-diff parsing & error reporting in TS preview parser
+*   **[ ] Task:** Enrich interactive approval UX & display model metrics
+*   **[ ] Task:** Emit structured JSON logs & adjustable log-levels
+
+### E9: Autonomous Coding Application (codex‑cli auto)
+
+*   **[ ] Task:** Study existing codex‑cli command execution & history logic
+*   **[ ] Task:** Define stages of the autonomous loop (fetch task, generate command, exec, report)
+*   **[ ] Task:** Implement “suggested command” hook in format-command.ts
+*   **[ ] Task:** Build TaskPlanner module in TypeScript
+*   **[ ] Task:** Integrate diff-applier endpoints for automatic patch application
+*   **[ ] Task:** Add approve/override hooks in use-confirmation.ts
+*   **[ ] Task:** Auto‑run tests after patch application & capture pass/fail
+*   **[ ] Task:** Provide end-to-end example & docs in examples/prompting_guide.md
+*   **[ ] Task:** Prototype meta‑TDD harness tests (LLM-to-LLM review) (see docs/AGENT_TDD.md)
+*   **[ ] Task:** Write Vitest tests mocking generatePatch & reviewPatch
+*   **[ ] Task:** Gate meta‑TDD tests behind CI flag (`META_TDD`)
 
 ---
 
@@ -179,7 +225,11 @@
 
 *(Move tasks here from Backlog when started)*
 
-*   *(Example)* **[ ] Task:** Enhance `FileSystem`
+*   **[ ] Task:** Reflect on overall prioritization: document why Epics/tasks are ordered this way.
+    *   **Details:** Capture pros/cons of each approach; prototype stubs; update docs with modality choice; defer implementation for later iteration.
+
+*   **[ ] Task:** Design multi-line problem‑statement input modality (editor spawn, EOF sentinel, inline TUI, etc.)
+    *   **Details:** Capture the criteria (impact, effort, dependencies) and reasoning that drove the current ordering and priorities.
 
 ---
 
