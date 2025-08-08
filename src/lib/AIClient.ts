@@ -49,6 +49,8 @@ class AIClient {
             this.anthropicModel = new AnthropicClaudeModel(config);
         }
         if ((config as any).openai?.api_key) {
+            this.openAIModels['gpt-4'] = new OpenAIChatModel(config, 'gpt-4');
+            this.openAIModels['gpt-5'] = new OpenAIChatModel(config, 'gpt-5');
             this.openAIModels['gpt-4o'] = new OpenAIChatModel(config, 'gpt-4o');
             this.openAIModels['o3'] = new OpenAIChatModel(config, 'o3');
         }

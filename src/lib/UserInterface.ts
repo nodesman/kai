@@ -290,6 +290,14 @@ class UserInterface {
         }
         modelChoices.push(
             {
+                name: `OpenAI Model (gpt-4) - GPT-4 from OpenAI`,
+                value: 'gpt-4',
+            },
+            {
+                name: `OpenAI Model (gpt-5) - GPT-5 from OpenAI`,
+                value: 'gpt-5',
+            },
+            {
                 name: `OpenAI Model (gpt-4o) - GPT-4o from OpenAI`,
                 value: 'gpt-4o',
             },
@@ -425,6 +433,14 @@ class UserInterface {
                 });
             }
             modelChoices.push(
+                {
+                    name: `OpenAI Model (gpt-4) - GPT-4 from OpenAI`,
+                    value: 'gpt-4',
+                },
+                {
+                    name: `OpenAI Model (gpt-5) - GPT-5 from OpenAI`,
+                    value: 'gpt-5',
+                },
                 {
                     name: `OpenAI Model (gpt-4o) - GPT-4o from OpenAI`,
                     value: 'gpt-4o'
