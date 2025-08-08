@@ -124,7 +124,7 @@ export class ConsolidationAnalyzer {
 
         // Attempt 1: Extract from markdown fences
         // Regex to find ```json ... ``` or ``` ... ```, capturing the content.
-        const fenceMatch = jsonString.match(/```(?:[a-zA-Z0-9])?\s*([\s\S]?)\s*```/);
+        const fenceMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (fenceMatch && fenceMatch[1]) {
             jsonString = fenceMatch[1].trim();
             console.log(chalk.dim(`      Extracted JSON from markdown fences.`));

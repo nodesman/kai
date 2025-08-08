@@ -266,12 +266,12 @@ class ConfigLoader /* implements IConfig */ { // Let TS infer implementation det
             },
             // Save Anthropic settings if defined
             anthropic: this.anthropic ? {
-                api_key: this.anthropic.api_key,
+                // Do NOT persist API keys here; they are read from env
                 model_name: this.anthropic.model_name,
                 max_output_tokens: this.anthropic.max_output_tokens,
             } : undefined,
             openai: this.openai ? {
-                api_key: this.openai.api_key,
+                // Do NOT persist API keys here; they are read from env
                 max_output_tokens: this.openai.max_output_tokens,
                 max_prompt_tokens: this.openai.max_prompt_tokens,
             } : undefined,

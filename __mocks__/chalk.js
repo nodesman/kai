@@ -1,19 +1,16 @@
-/**
- * Manual Jest mock for chalk to avoid ESM import issues
- * Correctly simulates an ESM default export.
- */
-// Basic chalk mock: map all used stylers to identity functions
+// __mocks__/chalk.js
+const chalk = (str) => str;
+chalk.red = (str) => str;
+chalk.yellow = (str) => str;
+chalk.dim = (str) => str;
+chalk.green = (str) => str;
+chalk.blue = (str) => str;
+chalk.cyan = (str) => str;
+chalk.magenta = (str) => str;
+chalk.gray = (str) => str;
+chalk.grey = (str) => str;
+
 module.exports = {
-  __esModule: true, // Mark this module as an ES Module
-  default: { // The default export should be the object containing the mock functions
-    red: (s) => s,
-    yellow: (s) => s,
-    dim: (s) => s,
-    green: (s) => s,
-    blue: (s) => s,
-    cyan: (s) => s,
-    magenta: (s) => s,
-    gray: (s) => s,
-    grey: (s) => s,
-  },
+  __esModule: true,
+  default: chalk,
 };

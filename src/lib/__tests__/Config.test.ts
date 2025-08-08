@@ -19,7 +19,7 @@ describe('Config defaults and loading', () => {
     (fsSync.existsSync as jest.Mock).mockReturnValue(false);
     const cfg = new Config();
     expect(cfg.gemini.api_key).toBe('testkey');
-    expect(cfg.gemini.model_name).toBe('gemini-2.5-flash');
+    expect(cfg.gemini.model_name).toBe('gemini-2.5-pro');
     expect(cfg.project.root_dir).toBe('generated_project');
     expect(cfg.analysis.cache_file_path).toBe('.kai/project_analysis.json');
     expect(cfg.context.mode).toBeUndefined();

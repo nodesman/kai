@@ -13,10 +13,10 @@ import { GitService } from './GitService';
 import { ConversationManager } from './ConversationManager'; // <-- ADDED Import
 import { toSnakeCase } from './utils'; // <-- Added for path generation duplication
 import { TypeScriptLoop } from './consolidation/feedback/TypeScriptLoop';
+import { CONSOLIDATION_SUCCESS_MARKER } from './consolidation/constants';
 import { CommitMessageService } from './CommitMessageService';
 import { TestCoverageRaiser } from './hardening/TestCoverageRaiser';
 
-const CONSOLIDATION_SUCCESS_MARKER = "[System: Consolidation Completed Successfully]";
 
 class CodeProcessor {
     config: Config;
