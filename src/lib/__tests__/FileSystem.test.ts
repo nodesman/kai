@@ -116,6 +116,12 @@ describe('FileSystem', () => {
     expect(await fsUtil.isTextFile(unknown)).toBe(true);
   });
 
+  it('isTextFile returns false for directories', async () => {
+    const dir = path.join(tempDir, 'adir');
+    fs.mkdirSync(dir);
+    expect(await fsUtil.isTextFile(dir)).toBe(false);
+  });
+
   it('getProjectFiles respects ignore rules', async () => {
     const ig = ignore().add('skip.txt');
     const sub = path.join(tempDir, 'sub');
@@ -125,6 +131,17 @@ describe('FileSystem', () => {
     fs.writeFileSync(path.join(tempDir, 'bin.bin'), Buffer.from([0, 0, 0]));
     const list = await fsUtil.getProjectFiles(tempDir, tempDir, ig);
     expect(list.map(f => path.relative(tempDir, f))).toEqual(['sub/a.txt']);
+  });
+
+  it('getProjectFiles skips directory symlinks', async () => {
+    const realDir = path.join(tempDir, 'real');
+    fs.mkdirSync(realDir);
+    fs.writeFileSync(path.join(realDir, 'inside.txt'), 'x');
+    const linkDir = path.join(tempDir, 'link');
+    fs.symlinkSync(realDir, linkDir);
+    const ig = ignore();
+    const files = await fsUtil.getProjectFiles(tempDir, tempDir, ig);
+    expect(files.map(f => path.relative(tempDir, f))).toEqual(['real/inside.txt']);
   });
 
   describe('applyDiffToFile', () => {
@@ -332,6 +349,12 @@ describe('FileSystem', () => {
     it('rethrows non-ENOENT in readFile', async () => {
       jest.spyOn(fsPromises, 'readFile').mockRejectedValue({ code: 'EACCES', message: 'denied' });
       await expect(fsUtil.readFile('/no')).rejects.toMatchObject({ code: 'EACCES' });
+    });
+
+    it('readFile returns null for directories', async () => {
+      const dir = path.join(tempDir, 'dir');
+      fs.mkdirSync(dir);
+      await expect(fsUtil.readFile(dir)).resolves.toBeNull();
     });
 
     it('rethrows non-ENOENT in stat', async () => {

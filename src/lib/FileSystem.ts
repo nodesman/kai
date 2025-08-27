@@ -79,8 +79,13 @@ class FileSystem {
             const content = await fsPromises.readFile(filePath, 'utf-8');
             return content;
         } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT') {
                 return null; // Return null if file doesn't exist
+            }
+            if (code === 'EISDIR') {
+                console.warn(chalk.yellow(`Warning: ${filePath} is a directory, skipping read.`));
+                return null; // Treat directories like missing files
             }
             console.error(chalk.red(`Error reading file ${filePath}:`), error);
             throw error; // Rethrow other errors
@@ -247,6 +252,11 @@ class FileSystem {
             return textExtensions.includes(ext) || ['Dockerfile', 'Makefile', 'README'].includes(base) || (base.startsWith('.') && !ext) || true; // Default to text if no binary indicators found
 
         } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === 'EISDIR') {
+                console.warn(chalk.yellow(`Warning: ${filePath} is a directory. Skipping.`));
+                return false; // Directories are not files to analyze
+            }
             // If we can't read the file (e.g., permissions), default to assuming text for safety,
             // but log the error. The analysis phase might reclassify it later.
             console.warn(chalk.yellow(`Warning: Could not read start of file ${filePath} for text check. Assuming text. Error: ${(error as Error).message}`));
