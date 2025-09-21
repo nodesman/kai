@@ -29,7 +29,7 @@ describe('ProjectContextBuilder extra coverage', () => {
   test('estimateFullContextTokens ignores empty files', async () => {
     const fsMock: any = {
       getProjectFiles: jest.fn().mockResolvedValue(['/r/a.ts','/r/empty.ts']),
-      readFile: jest.fn((p: string) => Promise.resolve(p.includes('a.ts') ? 'code' : '   '))
+      readFileContents: jest.fn().mockResolvedValue({ '/r/a.ts': 'code', '/r/empty.ts': '   ' })
     };
     const gitMock: any = { getIgnoreRules: jest.fn().mockResolvedValue({ ignores: () => false }) };
     const builder = new ProjectContextBuilder(fsMock, gitMock, '/r', { context:{ mode:'full' }, analysis:{}, gemini:{}, project:{} } as any, {} as any);
@@ -76,7 +76,8 @@ describe('ProjectContextBuilder extra coverage', () => {
     const cache: ProjectAnalysisCache = { overallSummary: 'o', entries: [{ filePath: 'a.ts', type: 'text_analyze', size: 10, loc: 1, summary: 'sum', lastAnalyzed: 'n' }] };
     const fsMock: any = {
       readAnalysisCache: jest.fn().mockResolvedValue(cache),
-      readFile: jest.fn((p: string) => Promise.resolve(p.endsWith('a.ts') ? 'x '.repeat(600) : null))
+      readFile: jest.fn().mockResolvedValue(null), // Kai-dynamic.md not present
+      readFileContents: jest.fn().mockResolvedValue({ '/r/a.ts': 'x '.repeat(600) })
     };
     const aiClient: any = { getResponseTextFromAI: jest.fn().mockResolvedValue('../secret\nNONE\nmissing.ts\na.ts') };
     const builder = new ProjectContextBuilder(fsMock, {} as any, '/r', {
@@ -86,7 +87,7 @@ describe('ProjectContextBuilder extra coverage', () => {
       project:{}
     } as any, aiClient);
     const res = await builder.buildContext('q','h');
-    expect(fsMock.readFile).toHaveBeenCalledWith('/r/a.ts');
+    expect(fsMock.readFileContents).toHaveBeenCalled();
     expect(res.context).not.toContain('File: a.ts');
     const base = 'User Query: q\nHistory Summary: h\n--- Relevant File Context ---\n';
     expect(res.tokenCount).toBe(countTokens(base));

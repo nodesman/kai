@@ -138,13 +138,14 @@ describe('ProjectContextBuilder.buildContext other modes', () => {
     const cache: ProjectAnalysisCache = { overallSummary: '', entries: [{ filePath: 'a.ts', type: 'text_analyze', size: 10, loc: 1, summary: 's', lastAnalyzed: 'now' }] };
     fsMock.readAnalysisCache.mockResolvedValue(cache);
     aiClient.getResponseTextFromAI.mockResolvedValue('a.ts');
-    fsMock.readFile = jest.fn().mockResolvedValue('code');
+    fsMock.readFile = jest.fn().mockResolvedValue(null); // No Kai-dynamic.md
+    fsMock.readFileContents.mockResolvedValue({ '/root/a.ts': 'code' });
 
     const builder = new ProjectContextBuilder(fsMock, gitMock, '/root', config, aiClient);
     const res = await builder.buildContext('q', 'h');
 
     expect(aiClient.getResponseTextFromAI).toHaveBeenCalled();
-    expect(fsMock.readFile).toHaveBeenCalledWith('/root/a.ts');
+    expect(fsMock.readFileContents).toHaveBeenCalled();
     expect(res.context).toContain('File: a.ts');
   });
 

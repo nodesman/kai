@@ -101,7 +101,8 @@ export class ProjectContextBuilder {
         console.log(chalk.blue('\nBuilding project context (reading all text files)...')); // Updated log message
         const ignoreRules = await this.gitService.getIgnoreRules(this.projectRoot);
         const filePaths = await this.fs.getProjectFiles(this.projectRoot, this.projectRoot, ignoreRules);
-        const fileContents = await this.fs.readFileContents(filePaths);
+        // Read with limited concurrency to avoid too many open files
+        const fileContents = await this.fs.readFileContents(filePaths, 12);
 
         let contextString = "Code Base Context:\n";
         let includedFiles = 0;
@@ -149,30 +150,19 @@ export class ProjectContextBuilder {
         let totalTokenCount = countTokens("Code Base Context:\n"); // Base token count
         let includedFiles = 0;
 
-        // Process files asynchronously for potentially better performance, though token counting is CPU-bound
-        const tokenPromises = filePaths.map(async (filePath) => {
+        // Read contents with bounded concurrency, then compute token estimates
+        const contents = await this.fs.readFileContents(filePaths, 12);
+        for (const filePath of Object.keys(contents)) {
             const relativePath = path.relative(this.projectRoot, filePath);
-            const content = await this.fs.readFile(filePath); // readFile handles ENOENT -> null
-            if (content === null || !content.trim()) {
-                // console.log(chalk.gray(`  (Estimate) Skipping empty/unreadable file: ${relativePath}`));
-                return 0; // No tokens for empty/unreadable files
-            }
+            const content = contents[filePath];
+            if (!content || !content.trim()) continue;
             const optimizedContent = this.optimizeWhitespace(content);
-            if (!optimizedContent) {
-                // console.log(chalk.gray(`  (Estimate) Skipping file with only whitespace: ${relativePath}`));
-                return 0; // No tokens if only whitespace after optimization
-            }
-
+            if (!optimizedContent) continue;
             const fileHeader = `\n---\nFile: ${relativePath}\n\`\`\`\n`;
             const fileFooter = "\n```\n";
-            // Estimate tokens for header, footer, and content
-            const blockTokenCount = countTokens(fileHeader) + countTokens(optimizedContent) + countTokens(fileFooter);
-            includedFiles++; // Count files contributing tokens
-            return blockTokenCount;
-        });
-
-        const tokenCounts = await Promise.all(tokenPromises);
-        totalTokenCount += tokenCounts.reduce((sum, count) => sum + count, 0);
+            totalTokenCount += countTokens(fileHeader) + countTokens(optimizedContent) + countTokens(fileFooter);
+            includedFiles++;
+        }
 
         console.log(chalk.dim(`Estimated token count for ${includedFiles} files: ${totalTokenCount}`));
         return totalTokenCount;
@@ -261,11 +251,22 @@ export class ProjectContextBuilder {
 
         // 3. AI Relevance Check (Call 1 - Flash)
         const relevancePrompt = AnalysisPrompts.selectRelevantFilesPrompt(userQuery, historySummary, cacheSummaryForPrompt, fileContentBudget);
+        // Optionally prepend dynamic mode guidelines from Kai-dynamic.md if present
+        let relevancePromptFinal = relevancePrompt;
+        try {
+            const dynamicGuidePath = path.resolve(this.projectRoot, 'Kai-dynamic.md');
+            const dynContent = await this.fs.readFile(dynamicGuidePath);
+            if (dynContent && dynContent.trim()) {
+                relevancePromptFinal = `GUIDELINES (Dynamic Mode):\n${dynContent.trim()}\n\n---\n${relevancePrompt}`;
+            }
+        } catch (e) {
+            // ignore missing
+        }
         let selectedPaths: string[] = [];
         try {
             console.log(chalk.dim(`  Asking AI (Flash) to select relevant files...`));
             const response = await this.aiClient.getResponseTextFromAI(
-                [{ role: 'user', content: relevancePrompt }],
+                [{ role: 'user', content: relevancePromptFinal }],
                 true // Use Flash model
             );
             selectedPaths = response.trim().split('\n').map(p => p.trim()).filter(p => p && p !== "NONE"); // Split by newline, trim, filter empty/NONE
@@ -284,41 +285,51 @@ export class ProjectContextBuilder {
 
         // 4. Load Full Files & Assemble Final Context (respecting actual token limit)
         // Start with base prompt elements that MUST be included
+        console.log(chalk.dim(`  Assembling selected file contents into context (up to ~${maxTotalTokens} tokens).`));
         let finalContext = `User Query: ${userQuery}\n${historySummary ? `History Summary: ${historySummary}\n` : ''}--- Relevant File Context ---\n`;
         let currentTokenCount = countTokens(finalContext);
         const includedFiles: string[] = [];
 
-        for (const filePath of selectedPaths) {
-            // Validate the path from AI before resolving
-            const normalizedPath = path.normalize(filePath).replace(/\\/g, '/'); // Normalize separators
+        // Prefetch selected files with limited concurrency
+        const normalizedToAbs = new Map<string, string>();
+        const absPaths: string[] = [];
+        for (const p of selectedPaths) {
+            const normalizedPath = path.normalize(p).replace(/\\/g, '/');
             if (!normalizedPath || normalizedPath.startsWith('..')) {
-                 console.warn(chalk.yellow(`    Skipping invalid/suspicious path from AI: ${filePath}`));
-                 continue;
+                console.warn(chalk.yellow(`    Skipping invalid/suspicious path from AI: ${p}`));
+                continue;
             }
-
             const absolutePath = path.resolve(this.projectRoot, normalizedPath);
-            const content = await this.fs.readFile(absolutePath);
-            if (content === null) {
-                 console.warn(chalk.yellow(`    Skipping selected file (not found/readable): ${normalizedPath}`));
-                 continue;
+            normalizedToAbs.set(normalizedPath, absolutePath);
+            absPaths.push(absolutePath);
+        }
+
+        const contentsMap = await this.fs.readFileContents(absPaths, 12);
+
+        for (const sel of selectedPaths) {
+            const normalizedPath = path.normalize(sel).replace(/\\/g, '/');
+            const absolutePath = normalizedToAbs.get(normalizedPath);
+            if (!absolutePath) continue;
+            const content = contentsMap[absolutePath];
+            if (content === undefined) {
+                console.warn(chalk.yellow(`    Skipping selected file (not found/readable): ${normalizedPath}`));
+                continue;
             }
             const fileBlock = `\n---\nFile: ${normalizedPath}\n\`\`\`\n${content}\n\`\`\`\n`;
             const blockTokens = countTokens(fileBlock);
 
-            // Check if adding this file exceeds the *absolute* limit
             if ((currentTokenCount + blockTokens) > maxTotalTokens) {
                 console.warn(chalk.yellow(`    Skipping selected file (exceeds total token limit): ${normalizedPath}`));
-                // Potentially break here if files are ordered by relevance, or continue to try smaller files? Continue for now.
                 continue;
             }
 
             finalContext += fileBlock;
             currentTokenCount += blockTokens;
             includedFiles.push(normalizedPath);
-            console.log(chalk.dim(`    Included file content: ${normalizedPath} (${blockTokens} tokens). Total: ${currentTokenCount}`));
+            console.log(chalk.dim(`    Included: ${normalizedPath} (+${blockTokens} tokens). Total: ${currentTokenCount}`));
         }
 
-        console.log(chalk.blue(`Dynamic context built with ${includedFiles.length} full files. Final token count: ${currentTokenCount}`));
+        console.log(chalk.blue(`Dynamic context built with ${includedFiles.length} files. Final token count: ${currentTokenCount}`));
         return { context: finalContext, tokenCount: currentTokenCount };
     }
 
