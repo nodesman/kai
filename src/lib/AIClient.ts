@@ -101,10 +101,28 @@ class AIClient {
             console.log(chalk.gray("No context string provided or context is empty."));
         }
 
+        // --- Optionally prepend Kai.md guidelines ---
+        let kaiGuidelinesTokens = 0;
+        let kaiGuidelinesChars = 0;
+        try {
+            const kaiPath = path.resolve(process.cwd(), 'Kai.md');
+            const kaiGuidelines = await this.fs.readFile(kaiPath);
+            if (kaiGuidelines && kaiGuidelines.trim()) {
+                const guideBlock = `Kai Project Conversation Guidelines:\n${kaiGuidelines.trim()}\n\n---\n`;
+                kaiGuidelinesTokens = this.countTokens(guideBlock);
+                kaiGuidelinesChars = guideBlock.length;
+                finalUserPromptText = `${guideBlock}${finalUserPromptText}`;
+                console.log(chalk.dim('Prepended Kai.md guidelines to chat prompt.'));
+            } else {
+                console.log(chalk.gray('Kai.md not found or empty. Skipping guidelines.'));
+            }
+        } catch (e) {
+            console.log(chalk.gray('Kai.md not available.'));
+        }
+
         // *** Prepend the hidden instruction ***
         // This instruction is prepended to the final user message text sent to the model.
         // It does NOT get saved back into the Conversation object or logged.
-
         finalUserPromptText = `${HIDDEN_CONVERSATION_INSTRUCTION}\n\n---\n\n${finalUserPromptText}`;
         console.log(chalk.dim("Prepended hidden conversation instruction (not logged)."));
 
@@ -134,6 +152,7 @@ class AIClient {
         console.table([
             { Part: 'Conversation History', Tokens: historyTokens, Characters: historyChars },
             { Part: 'Hidden Instruction', Tokens: hiddenInstructionTokens, Characters: hiddenInstructionChars },
+            { Part: 'Kai Guidelines', Tokens: kaiGuidelinesTokens, Characters: kaiGuidelinesChars },
             { Part: 'Code Context', Tokens: contextTokens, Characters: contextChars },
             { Part: 'User Prompt', Tokens: userPromptTokens, Characters: userPromptChars },
             { Part: 'TOTAL', Tokens: totalTokens, Characters: totalChars }

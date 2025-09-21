@@ -1,4 +1,5 @@
 import BaseModel from './BaseModel';
+import chalk from 'chalk';
 import { Config } from '../Config';
 import { Message } from './Conversation';
 import { encode as gpt3Encode, decode as gpt3Decode } from 'gpt-3-encoder';
@@ -48,6 +49,7 @@ export default class OpenAIChatModel extends BaseModel {
     const chatMessages = messages.map(m => ({ role: m.role, content: m.content }));
     const totalTokens = this.countTokens(chatMessages.map(m => m.content).join(' '));
     if (totalTokens <= this.maxPromptTokens) {
+      console.log(chalk.dim(`OpenAI: prompt within limit (${totalTokens}/${this.maxPromptTokens} tokens).`));
       return this.callOpenAI(chatMessages);
     }
 
@@ -56,13 +58,17 @@ export default class OpenAIChatModel extends BaseModel {
     const historyTokens = this.countTokens(history.map(m => m.content).join(' '));
     const chunkLimit = Math.max(1, this.maxPromptTokens - historyTokens - 10);
     const chunks = this.chunkByTokens(last.content, chunkLimit);
+    console.log(chalk.dim(`OpenAI: batching user content into ${chunks.length} chunk(s). Limit per chunk ~${chunkLimit} tokens (history: ${historyTokens}).`));
     let response = '';
     let runningHistory = [...history];
     for (let i = 0; i < chunks.length; i++) {
+      const chunkTokens = this.countTokens(chunks[i]);
+      console.log(chalk.dim(`  -> Sending chunk ${i + 1}/${chunks.length} (${chunkTokens} tokens)`));
       runningHistory.push({ role: 'user', content: chunks[i] });
       response = await this.callOpenAI(runningHistory);
       runningHistory.push({ role: 'assistant', content: response });
     }
+    console.log(chalk.dim(`OpenAI: completed ${chunks.length} chunk round(s).`));
     return response;
   }
 
