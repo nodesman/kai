@@ -1,0 +1,15 @@
+{
+  "name": "kai-desktop",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Kai Desktop (Electron shell for previewing and applying changes)",
+  "main": "electron-main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}
+
