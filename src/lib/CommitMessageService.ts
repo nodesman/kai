@@ -2,6 +2,7 @@ import { AIClient } from './AIClient';
 import { GitService } from './GitService';
 import { countTokens } from './utils';
 import { Message } from './models/Conversation';
+import chalk from 'chalk';
 
 export class CommitMessageService {
     constructor(
@@ -33,7 +34,9 @@ export class CommitMessageService {
         const combined = `Changed files:\n${files.join('\n')}\n\n${diff}`;
 
         const system = 'Generate a single, concise git commit message describing the following changes. Provide only one final message and do not offer multiple options.';
-        if (countTokens(combined) <= this.maxTokens) {
+        const totalTokens = countTokens(combined);
+        if (totalTokens <= this.maxTokens) {
+            console.log(chalk.dim(`CommitMessage: diff within limit (${totalTokens}/${this.maxTokens} tokens).`));
             const messages: Message[] = [
                 { role: 'user', content: `${system}\n${combined}` }
             ];
@@ -42,9 +45,12 @@ export class CommitMessageService {
         }
 
         const chunks = this.chunkByTokens(combined, this.maxTokens - 500);
+        console.log(chalk.dim(`CommitMessage: batching diff into ${chunks.length} chunk(s).`));
         let messages: Message[] = [ { role: 'user', content: system + ' I will provide diff chunks. Reply with "COMMIT:" followed by the single best message when ready or "CONTINUE" if you need more.' } ];
         let response = '';
-        for (const chunk of chunks) {
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            console.log(chalk.dim(`  -> Sending diff chunk ${i + 1}/${chunks.length} (~${countTokens(chunk)} tokens)`));
             messages.push({ role: 'user', content: chunk });
             response = await this.aiClient.getResponseTextFromAI(messages, true);
             if (/^commit:/i.test(response.trim())) {
@@ -52,6 +58,7 @@ export class CommitMessageService {
             }
             messages.push({ role: 'assistant', content: response });
         }
+        console.log(chalk.dim(`CommitMessage: completed ${chunks.length} diff chunk(s).`));
         return response.trim();
     }
 }

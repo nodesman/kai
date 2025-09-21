@@ -25,6 +25,12 @@ export class PromptEditor {
         this.config = config;
     }
 
+    private async loadKaiGuidelines(): Promise<string | null> {
+        // Deprecated: We no longer show Kai.md in the editor window.
+        // Keeping method for backward compatibility if called elsewhere.
+        return null;
+    }
+
     formatHistoryForSublime(messages: Message[]): string {
         let historyBlock = '';
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -62,7 +68,11 @@ export class PromptEditor {
     ): Promise<PromptResult> {
         const conversationFileName = `${toSnakeCase(conversationName)}.jsonl`;
         const conversationFilePath = path.join(this.config.chatsDir, conversationFileName);
-        const contentToWrite = this.formatHistoryForSublime(currentMessages || []);
+        // Do not include Kai.md guidelines in the editor-visible content
+        const guidelines = await this.loadKaiGuidelines();
+        const historyBlock = this.formatHistoryForSublime(currentMessages || []);
+        const guidelinesBlock = '';
+        const contentToWrite = `${guidelinesBlock}${historyBlock}`;
         const initialHash = crypto.createHash('sha256').update(contentToWrite).digest('hex');
         try {
             await this.fs.writeFile(editorFilePath, contentToWrite);
@@ -167,4 +177,3 @@ export class PromptEditor {
         return { newPrompt, conversationFilePath, editorFilePath };
     }
 }
-

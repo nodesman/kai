@@ -202,41 +202,17 @@ async function main() {
         );
 
         // --- Initial Context Mode Determination Logic ---
-        // (This block remains the same)
         if (config.context.mode === undefined) {
-            console.log(chalk.cyan("\n🤖 Context mode not yet determined. Analyzing project size..."));
-            const estimatedTokens = await contextBuilder.estimateFullContextTokens();
-            const tokenLimit = (config.gemini.max_prompt_tokens || 32000) * 0.80;
-
-            if (estimatedTokens <= tokenLimit) {
-                console.log(chalk.green(`  Project size (${estimatedTokens} tokens) is within limit (${tokenLimit.toFixed(0)}). Setting mode to 'full'.`));
-                config.context.mode = 'full';
-            } else {
-                console.warn(chalk.yellow(`  Project size (${estimatedTokens} tokens) exceeds recommended limit (${tokenLimit.toFixed(0)}). Setting mode to 'analysis_cache'.`));
-                config.context.mode = 'analysis_cache';
-                const cachePath = path.resolve(projectRoot, config.analysis.cache_file_path);
-                const cacheExists = await fs.readAnalysisCache(cachePath) !== null;
-                if (!cacheExists) {
-                     console.error(chalk.red(`  Analysis cache (${config.analysis.cache_file_path}) is required but not found.`));
-                     console.log(chalk.blue(`  Running project analysis now to generate the cache...`));
-                     if (!analyzerService) throw new Error("Analyzer service not initialized.");
-                     await analyzerService.analyzeProject();
-                     if (await fs.readAnalysisCache(cachePath) === null) {
-                         console.error(chalk.red(`  Analysis finished but failed to create a valid cache file at ${cachePath}. Cannot proceed.`));
-                         console.error(chalk.red(`  Please check analysis logs/errors. Ensure 'phind' or 'find' works and '.gitignore' is filtering correctly.`));
-                         process.exit(1);
-                     }
-                      console.log(chalk.green(`  Analysis complete. Proceeding in 'analysis_cache' mode.`));
-                } else {
-                     console.log(chalk.green(`  Found existing analysis cache at ${cachePath}. Proceeding in 'analysis_cache' mode.`));
-                }
+            console.log(chalk.cyan("\n🤖 Context mode not yet determined."));
+            console.log(chalk.blue("Defaulting to 'analysis_cache' without scanning the filesystem on first run."));
+            console.log(chalk.blue("Tip: Generate a .kaiignore first, then run 'Re-run Project Analysis' or switch to 'analysis_cache' to build the cache."));
+            config.context.mode = 'analysis_cache';
+            try {
+                 await config.saveConfig();
+            } catch (saveError) {
+                 console.error(chalk.red(`  ❌ Error: Failed to save determined context mode '${config.context.mode}' to config.yaml.`), saveError);
+                 console.warn(chalk.yellow(`  Warning: Proceeding with mode '${config.context.mode}' for this session only.`));
             }
-             try {
-                  await config.saveConfig();
-             } catch (saveError) {
-                  console.error(chalk.red(`  ❌ Error: Failed to save determined context mode '${config.context.mode}' to config.yaml.`), saveError);
-                  console.warn(chalk.yellow(`  Warning: Proceeding with mode '${config.context.mode}' for this session only.`));
-             }
         } else {
              const currentMode = config.context.mode;
              console.log(chalk.blue(`\n🔧 Context mode already set to '${currentMode}'.`));
@@ -244,15 +220,8 @@ async function main() {
                   const cachePath = path.resolve(projectRoot, config.analysis.cache_file_path);
                   const cacheExists = await fs.readAnalysisCache(cachePath) !== null;
                   if (!cacheExists) {
-                       console.error(chalk.red(`  Mode is '${currentMode}', but required Analysis cache (${config.analysis.cache_file_path}) is not found.`));
-                       console.log(chalk.blue(`  Running project analysis now to generate the cache...`));
-                       if (!analyzerService) throw new Error("Analyzer service not initialized.");
-                       await analyzerService.analyzeProject();
-                       if (await fs.readAnalysisCache(cachePath) === null) {
-                             console.error(chalk.red(`  Analysis finished but failed to create a valid cache file. Mode '${currentMode}' cannot function. Exiting.`));
-                             process.exit(1);
-                       }
-                       console.log(chalk.green(`  Analysis complete. Proceeding in '${currentMode}' mode.`));
+                       console.warn(chalk.yellow(`  Mode is '${currentMode}', but analysis cache (${config.analysis.cache_file_path}) is not found.`));
+                       console.log(chalk.blue(`  Skipping automatic analysis. Use menu: 'Generate .kaiignore' (recommended) then 'Re-run Project Analysis'.`));
                   }
              }
         }
@@ -373,6 +342,11 @@ async function main() {
                  await codeProcessor.generateKaiignore();
                  console.log(chalk.magenta('🏁 .kaiignore generation completed.'));
 
+            } else if (mode === 'Scaffold Kai Guidelines') {
+                 if (!codeProcessor) throw new Error("CodeProcessor not initialized.");
+                 await codeProcessor.scaffoldKaiGuidelines();
+                 console.log(chalk.magenta('🏁 Kai guideline files scaffolding completed.'));
+
             } else if (mode === 'Delete Conversation...') {
                 if (!config) throw new Error("Config not initialized."); // Guard
                  const deleteResult = interactionResult as Extract<UserInteractionResult, { mode: 'Delete Conversation...' }>;
@@ -459,6 +433,17 @@ async function main() {
                  config.context.mode = newMode; // Update in-memory config
                  await config.saveConfig(); // Persist the change
                  console.log(chalk.green(`Context mode set to '${newMode}' and saved to ${config.getConfigFilePath()}.`)); // Use public getter
+
+                 // If switching to analysis_cache, prepare .kaiignore and run analysis now
+                 if (newMode === 'analysis_cache') {
+                     if (!codeProcessor) throw new Error('CodeProcessor not initialized.');
+                     console.log(chalk.cyan(`\nPreparing .kaiignore from current file list before analysis...`));
+                     await codeProcessor.generateKaiignore();
+                     if (!analyzerService) throw new Error('Analyzer service not initialized.');
+                     console.log(chalk.cyan(`\nRunning project analysis to build the cache...`));
+                     await analyzerService.analyzeProject();
+                     console.log(chalk.green('Analysis cache generated.'));
+                 }
 
             } else if (mode === 'Scaffold New Project') {
                  const scaffoldResult = interactionResult as ScaffoldProjectInteractionResult;

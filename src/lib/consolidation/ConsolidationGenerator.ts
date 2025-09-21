@@ -112,8 +112,20 @@ export class ConsolidationGenerator {
             currentContent
         );
 
+        // Optionally prepend consolidation guidelines from Kai-consolidation.md if present
+        let promptWithGuidelines = basePrompt;
+        try {
+            const guidePath = path.resolve(this.projectRoot, 'Kai-consolidation.md');
+            const guideContent = await this.fileSystem.readFile(guidePath);
+            if (guideContent && guideContent.trim()) {
+                promptWithGuidelines = `GUIDELINES (Consolidation):\n${guideContent.trim()}\n\n---\n${basePrompt}`;
+            }
+        } catch (e) {
+            // ignore
+        }
+
         // Prepend the hidden instruction directly from import
-        const finalPromptToSend = `${HIDDEN_CONSOLIDATION_GENERATION_INSTRUCTION}\n\n---\n\n${basePrompt}`;
+        const finalPromptToSend = `${HIDDEN_CONSOLIDATION_GENERATION_INSTRUCTION}\n\n---\n\n${promptWithGuidelines}`;
         console.log(chalk.dim("      Prepended hidden generation instruction (not logged)."));
 
         const maxAttempts = this.config.gemini.generation_max_retries ?? 3;

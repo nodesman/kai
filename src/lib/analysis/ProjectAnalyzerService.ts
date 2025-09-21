@@ -323,7 +323,17 @@ export class ProjectAnalyzerService {
         const filePathsInBatch = batchFiles.map(f => f.filePath);
 
         try {
-            const prompt = AnalysisPrompts.batchSummarizePrompt(batchContent, filePathsInBatch);
+            let prompt = AnalysisPrompts.batchSummarizePrompt(batchContent, filePathsInBatch);
+            // Optionally prepend cache analysis guidelines from Kai-cache.md if present
+            try {
+                const guidePath = path.resolve(this.projectRoot, 'Kai-cache.md');
+                const guideContent = await this.fsUtil.readFile(guidePath);
+                if (guideContent && guideContent.trim()) {
+                    prompt = `GUIDELINES (Analysis Cache):\n${guideContent.trim()}\n\n---\n${prompt}`;
+                }
+            } catch (e) {
+                // ignore
+            }
             const responseJsonString = await this.aiClient.getResponseTextFromAI(
                 [{ role: 'user', content: prompt }],
                 true // USE FLASH MODEL for batches

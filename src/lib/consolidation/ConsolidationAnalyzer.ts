@@ -1,5 +1,6 @@
 // File: src/lib/consolidation/ConsolidationAnalyzer.ts
 import path from 'path';
+import fs from 'fs/promises';
 import chalk from 'chalk';
 import {AIClient, LogEntryData} from '../AIClient';
 import {Message} from '../models/Conversation'; // Import Message directly
@@ -51,7 +52,15 @@ export class ConsolidationAnalyzer {
             .map((m: Message) => `${m.role}:\n${m.content}\n---\n`)
             .join('');
 
-        const analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
+        let analysisPrompt = ConsolidationPrompts.analysisPrompt(codeContext, historyString);
+        // Optionally prepend consolidation guidelines from Kai-consolidation.md if present
+        try {
+            const guidePath = path.resolve(process.cwd(), 'Kai-consolidation.md');
+            const content = await fs.readFile(guidePath, 'utf8');
+            if (content && content.trim()) {
+                analysisPrompt = `GUIDELINES (Consolidation):\n${content.trim()}\n\n---\n${analysisPrompt}`;
+            }
+        } catch (_) { /* ignore */ }
 
         // --- FIX 1: Declare responseTextRaw outside the try block ---
         let responseTextRaw: string = '';

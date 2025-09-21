@@ -50,6 +50,10 @@ interface GenerateKaiignoreResult {
     mode: 'Generate .kaiignore';
 }
 
+interface ScaffoldKaiGuidelinesResult {
+    mode: 'Scaffold Kai Guidelines';
+}
+
 // Define the structure for the fallback error
 interface FallbackError {
     type: 'fallback';
@@ -64,7 +68,8 @@ type UserInteractionResult =
     | ChangeModeInteractionResult
     | ScaffoldProjectInteractionResult
     | HardenInteractionResult
-    | GenerateKaiignoreResult;
+    | GenerateKaiignoreResult
+    | ScaffoldKaiGuidelinesResult;
 
 class UserInterface {
     fs: FileSystem;
@@ -352,6 +357,7 @@ class UserInterface {
                         'Scaffold New Project',
                         'Delete Conversation...',
                         'Generate .kaiignore',
+                        'Scaffold Kai Guidelines',
                         'Exit Kai', // <-- ADDED Exit option
                         // REMOVED: 'View Kanban Board' option
                     ],
@@ -367,6 +373,10 @@ class UserInterface {
 
             if (mode === 'Generate .kaiignore') {
                 return { mode: 'Generate .kaiignore' };
+            }
+
+            if (mode === 'Scaffold Kai Guidelines') {
+                return { mode: 'Scaffold Kai Guidelines' };
             }
 
             if (mode === 'Delete Conversation...') {

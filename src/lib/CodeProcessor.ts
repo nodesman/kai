@@ -232,6 +232,41 @@ class CodeProcessor {
         }
     }
 
+    async scaffoldKaiGuidelines(): Promise<void> {
+        const files = [
+            { name: 'Kai.md', placeholder: '<!-- Add Kai agent guidelines here -->\n' },
+            { name: 'Kai-consolidation.md', placeholder: '<!-- Add consolidation guidelines here -->\n' },
+            { name: 'Kai-cache.md', placeholder: '<!-- Add analysis cache guidelines here -->\n' },
+            { name: 'Kai-dynamic.md', placeholder: '<!-- Add dynamic mode guidelines here -->\n' },
+        ];
+
+        let created = 0;
+        for (const f of files) {
+            const absPath = path.join(this.projectRoot, f.name);
+            try {
+                const existing = await this.fs.readFile(absPath);
+                if (existing !== null) {
+                    console.log(chalk.dim(`Skipped (already exists): ${absPath}`));
+                    continue;
+                }
+            } catch (_) {
+                // ignore
+            }
+            try {
+                await this.fs.writeFile(absPath, f.placeholder);
+                console.log(chalk.green(`Created ${absPath}`));
+                created++;
+            } catch (err) {
+                console.error(chalk.red(`Failed to write ${absPath}:`), err);
+            }
+        }
+        if (created === 0) {
+            console.log(chalk.yellow('No guideline files created (all exist).'));
+        } else {
+            console.log(chalk.green(`Scaffolded ${created} guideline file(s).`));
+        }
+    }
+
     /**
      * Updates the AI client across the processor and dependent services.
      */
