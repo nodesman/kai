@@ -1,3 +1,8 @@
+---
+title: Kai Documentation
+layout: page
+---
+
 # Kai Project Documentation Index
 
 Welcome to the documentation for the Kai AI Coding Assistant project. This index serves as a central guide to understanding the project's purpose, architecture, design decisions, and core concepts.
@@ -91,3 +96,7 @@ Project configuration is managed via a YAML file located at `.kai/config.yaml` i
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](../LICENSE) for details.
+
+---
+
+Looking for a quick comparison to agentic CLIs? See [Why Kai vs. Agentic CLIs](benefits.md).

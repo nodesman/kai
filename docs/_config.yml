@@ -1,0 +1,14 @@
+title: Kai
+description: "Kai — Iterative, diff-based hardening and TDD agent"
+theme: minima
+markdown: kramdown
+plugins:
+  - jekyll-feed
+
+# Show selected pages in the header navigation
+header_pages:
+  - benefits.md
+
+# Optional: set repository for edit links if using GitHub
+# repository: your-org/kai
+
