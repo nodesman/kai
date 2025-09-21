@@ -1,6 +1,6 @@
 ---
 title: Kai Documentation
-layout: page
+nav_order: 1
 ---
 
 # Kai Project Documentation Index

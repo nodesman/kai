@@ -1,5 +1,6 @@
 ---
 title: Why Kai vs. Agentic CLIs
+nav_order: 2
 ---
 
 # Why Kai vs. Agentic CLIs (e.g., Gemini CLI, Codex)
@@ -36,4 +37,3 @@ Not all tools are the same, but many agentic CLIs (e.g., Gemini CLI, Codex‑sty
 - Provide less structured failure logging for patch‑application errors.
 
 If you want a tight loop that steadily drives coverage to 100% on targeted files—while keeping every change auditable as a small, local diff—Kai’s hardening workflow is designed for exactly that.
-

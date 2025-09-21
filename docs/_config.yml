@@ -1,14 +1,52 @@
 title: Kai
 description: "Kai — Iterative, diff-based hardening and TDD agent"
-theme: minima
+remote_theme: just-the-docs/just-the-docs
 markdown: kramdown
-plugins:
-  - jekyll-feed
 
-# Show selected pages in the header navigation
-header_pages:
-  - benefits.md
+just_the_docs:
+  logo: false
+  search_enabled: true
+  color_scheme: nil
 
-# Optional: set repository for edit links if using GitHub
-# repository: your-org/kai
+aux_links:
+  "GitHub Repository": https://github.com/rajsekharan/kai
+
+nav_external_links:
+  - title: README
+    url: ../README.md
+
+defaults:
+  # Section parents by directory
+  - scope:
+      path: "architecture"
+    values:
+      parent: Architecture
+  - scope:
+      path: "concepts"
+    values:
+      parent: Concepts
+  - scope:
+      path: "decisions"
+    values:
+      parent: Decisions (ADRs)
+  - scope:
+      path: "development"
+    values:
+      parent: Development
+  - scope:
+      path: "explanations"
+    values:
+      parent: Explanations
+  - scope:
+      path: "future"
+    values:
+      parent: Future
+  - scope:
+      path: "goals"
+    values:
+      parent: Goals
+  - scope:
+      path: "strategy"
+    values:
+      parent: Strategy
 
