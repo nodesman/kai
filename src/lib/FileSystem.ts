@@ -217,16 +217,52 @@ class FileSystem {
         return files;
     }
 
-    async readFileContents(filePaths: string[]): Promise<{ [filePath: string]: string }> {
+    async readFileContents(
+        filePaths: string[],
+        concurrency: number = 12
+    ): Promise<{ [filePath: string]: string }> {
         const contents: { [filePath: string]: string } = {};
-        for (const filePath of filePaths) {
-            const content = await this.readFile(filePath);
-            if (content !== null) {
-                contents[filePath] = content;
-            } else {
-                console.warn(chalk.yellow(`Skipping file not found or unreadable during content read: ${filePath}`));
+        if (!Array.isArray(filePaths) || filePaths.length === 0) return contents;
+
+        const limit = Math.max(1, Math.floor(concurrency));
+        let index = 0;
+
+        const readWithRetry = async (fp: string): Promise<string | null> => {
+            let delay = 50;
+            let attempts = 0;
+            // A couple of quick retries for EMFILE/ENFILE spikes
+            while (true) {
+                try {
+                    return await this.readFile(fp);
+                } catch (err: any) {
+                    const code = err?.code;
+                    if ((code === 'EMFILE' || code === 'ENFILE') && attempts < 3) {
+                        await new Promise((r) => setTimeout(r, delay));
+                        delay *= 2;
+                        attempts++;
+                        continue;
+                    }
+                    throw err;
+                }
             }
-        }
+        };
+
+        const worker = async () => {
+            while (true) {
+                const i = index++;
+                if (i >= filePaths.length) break;
+                const filePath = filePaths[i];
+                const content = await readWithRetry(filePath);
+                if (content !== null) {
+                    contents[filePath] = content;
+                } else {
+                    console.warn(chalk.yellow(`Skipping file not found or unreadable during content read: ${filePath}`));
+                }
+            }
+        };
+
+        const workers = Array.from({ length: Math.min(limit, filePaths.length) }, () => worker());
+        await Promise.all(workers);
         return contents;
     }
 
